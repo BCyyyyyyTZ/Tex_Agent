@@ -68,7 +68,7 @@ Tex_Agent/
 │   ├── simple_agent/           # 组员A 
 │   │   ├── __init__.py
 │   │   └── core.py
-│   ├── react_agent/            # 组员B 
+│   ├── react_agent/            # 乔雨霖
 │   │   ├── __init__.py
 │   │   └── core.py
 │   ├── reflection_agent/       # 毛炜翔 
