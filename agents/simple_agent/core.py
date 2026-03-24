@@ -1,7 +1,7 @@
 import os
 from openai import OpenAI
 from agents.base_agent import BaseAgent
-from config.prompt import SIMPLE_AGENT_SYSTEM_PROMPT
+from prompt.simple_agent_prompt import SIMPLE_AGENT_SYSTEM_PROMPT
 
 class SimpleAgent(BaseAgent):
     def __init__(self):
