@@ -74,7 +74,7 @@ Tex_Agent/
 │   ├── reflection_agent/       # 毛炜翔 
 │   │   ├── __init__.py
 │   │   └── core.py
-│   └── plan_solve_agent/       # 组员D
+│   └── plan_solve_agent/       # 唐骏涛
 │       ├── __init__.py
 │       └── core.py
 │
