@@ -1,7 +1,7 @@
 import torch
-from core.llm import LLM
-from core.prompt import INITIAL_PROMPT_TEMPLATE, REFLECT_PROMPT_TEMPLATE, REFINE_PROMPT_TEMPLATE
-from core.memory import Memory
+from llm.llm import LLM
+from prompt.reflection_prompt import INITIAL_PROMPT_TEMPLATE, REFLECT_PROMPT_TEMPLATE, REFINE_PROMPT_TEMPLATE
+from memory.reflection_memory import Memory
 
 LLM_PATH = "/data/model_database/Qwen2.5-7B"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
