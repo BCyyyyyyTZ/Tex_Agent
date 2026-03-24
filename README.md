@@ -88,7 +88,7 @@ Tex_Agent/
 
 
 ## 一种可能的项目架构（混合框架langraph+autoGen，支持多agent，同时有多种范式实现）
-'''
+```
 paper_writer_agent/
 ├── .env
 ├── requirements.txt
@@ -129,4 +129,4 @@ paper_writer_agent/
 │   └── logger.py
 └── tests/
     └── test_context.py
-'''
+```
