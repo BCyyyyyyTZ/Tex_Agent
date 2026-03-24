@@ -1,9 +1,12 @@
-# main.py
 import os
 from dotenv import load_dotenv
 from router import TaskRouter
+from utils.logger import set_debug_mode, debug
 
 def main():
+    # 开启调试模式
+    # set_debug_mode(True)
+
     # 加载 .env 文件中的环境变量
     load_dotenv()
     
@@ -17,7 +20,7 @@ def main():
     
     # 模拟用户输入
     print("=== Tex_Agent 论文协作智能体 (Demo) ===")
-    user_task = "请帮我用一句话总结什么是 LaTeX？"
+    user_task = "请帮我在 arXiv 上检索关于 LoRA adaptive selection 应用于 video analysis 的最新论文，查 2 篇即可，并用中文总结它们的核心观点。"
     print(f"用户输入: {user_task}\n")
     
     # 路由分发并获取结果
@@ -26,7 +29,7 @@ def main():
     # 打印结果
     print("\n=== 执行结果 ===")
     if response.get("status") == "success":
-        print(f"[DEBUG: ]负责 Agent: {response.get('agent_used')}")
+        debug(f"负责 Agent: {response.get('agent_used')}")
         print(f"输出内容:\n{response.get('result')}")
     else:
         print(f"[ERROR: ]执行失败: {response.get('result')}")
