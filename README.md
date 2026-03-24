@@ -85,3 +85,46 @@ Tex_Agent/
 │
 └── main.py                     # 主程序入口
 ```
+
+
+## 一种可能的项目架构（混合框架langraph+autoGen，支持多agent，同时有多种范式实现）
+paper_writer_agent/
+├── .env
+├── requirements.txt
+├── main.py
+├── config/
+│   ├── __init__.py
+│   └── settings.py
+├── state/
+│   ├── __init__.py
+│   └── schema.py             # 状态定义（包含上下文引用）
+├── context/                  # 【新增】上下文管理核心模块
+│   ├── __init__.py
+│   ├── manager.py            # 上下文管理器（统一入口）
+│   ├── storage.py            # 上下文存储（向量库 + 关系图）
+│   ├── retriever.py          # 上下文检索（语义 + 规则）
+│   ├── compressor.py         # 上下文压缩（摘要 + 摘要树）
+│   └── policies.py           # 上下文策略（不同场景的上下文选择规则）
+├── tools/
+│   ├── __init__.py
+│   ├── search.py
+│   └── citation.py
+├── strategies/
+│   ├── __init__.py
+│   ├── base.py
+│   ├── react_strategy.py
+│   ├── plan_solve_strategy.py
+│   └── reflection_strategy.py
+├── multi_agent/
+│   ├── __init__.py
+│   └── review_team.py
+├── graph/
+│   ├── __init__.py
+│   ├── nodes.py              # 调用 Context Manager 注入上下文
+│   ├── router.py
+│   └── workflow.py
+├── utils/
+│   ├── __init__.py
+│   └── logger.py
+└── tests/
+    └── test_context.py
