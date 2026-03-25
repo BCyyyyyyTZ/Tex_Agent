@@ -53,6 +53,9 @@ Tex_Agent/
 ├── workspace/                  # 临时沙箱工作区
 │   └── temp_latex_files/       # Agent 处理复杂 LaTeX 时的临时暂存或备份区
 │
+├── llm/                     
+│   └── llm.py                  # 本地调用大模型
+│
 ├── utils/                      # 其它工具存放的地方
 │   └── logger.py               # 调试性输出的方法
 │
