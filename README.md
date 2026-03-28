@@ -1,69 +1,12 @@
 # Tex_Agent 论文协作智能体
 
-本项目旨在构建一个基于多推理框架的论文写作增强系统，通过集成四种 Agent 架构，解决学术写作中从选题到格式调优的全流程痛点。
+本项目旨在构建一个基于多智能体架构的论文写作增强系统。项目以四种基础 Agent 为起点，演进为集成了智能动态路由、RAG长期记忆与协同机制的系统。系统覆盖从文献检索、数据可视化到 LaTeX 结构化调优的学术写作全流程，打造兼顾严谨科研辅助与人性化陪伴的智能辅助论文写作工具。
 
 ## 更新内容：
 
-> from YT
-
-+ 更新了tool的基类和一个能查arXiv论文的tool作为示例。[具体调用和使用方法](./doc/note_from_YT.md)
-
-+ 更新了一个debug输出工具：`debug`，输入规则与python标准print完全一致，会在调试模式下额外显示文件最末两级路径和debug的行号
-
-    在`main.py`最开始`set_debug_mode(True)`开启调试状态，`debug`只会在调试模式开启的时候给出输出
-
 ## 当前项目架构
 
-> 初步的构想，随改随确定
-
-```
-Tex_Agent/
-│
-├── doc/                        # 保存文档（需求分析、API文档、会议记录）
-│   └── project_struct.md       # 以前的两个架构展示
-│
-├── .env.example                # 环境变量示例文件
-│
-├── .gitignore                  # Git 忽略文件
-│
-├── requirements.txt            # 项目依赖包列表
-│
-├── config/                     # 全局配置中心
-│   └── settings.py             # 读取环境变量、配置全局参数
-│
-├── tools/                      # 工具函数集（各 Agent 共享）
-│   ├── base_tool.py            # tools基类，规范格式和接口
-│   └── arxiv_search.py         # 文献检索 API
-│
-├── memory/                     # 记忆化存储模块
-│   ├── context_manager.py      # 处理短期上下文逻辑
-│   └── reflection_memory.py   
-│
-├── agents/                     # 核心 Agent 架构目录
-│   ├── base_agent.py           # 定义 Agent 基类，规范输入输出接口
-│   ├── simple_agent/           # 于天泽
-│   │   └── core.py
-│   ├── react_agent/            # 乔雨霖
-│   │   └── core.py
-│   ├── reflection_agent/       # 毛炜翔 
-│   │   └── ReflectionAgent.py
-│   └── plan_solve_agent/       # 唐骏涛
-│       └── core.py
-│
-├── workspace/                  # 临时沙箱工作区
-│   └── temp_latex_files/       # Agent 处理复杂 LaTeX 时的临时暂存或备份区
-│
-├── llm/                     
-│   └── llm.py                  # 本地调用大模型
-│
-├── utils/                      # 其它工具存放的地方
-│   └── logger.py               # 调试性输出的方法
-│
-├── router.py                   # 四种框架的路由
-│
-└── main.py                     # 主程序入口
-```
-
+目前参考[Tex路径下的架构设计](./Tex/README.md)，如果确认这个架构可以就把整个`Tex/`路径迁移出来，放在这外边然后大家一起写代码
 
 ## 一种可能的项目架构（混合框架langraph+autoGen，支持多agent，同时有多种范式实现）
 ```

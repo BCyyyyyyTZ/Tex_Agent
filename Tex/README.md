@@ -135,28 +135,32 @@ python -m ui.web.app
 
 ```
 tex_agent/
-├── config/          — 系统配置（模型、提示词、日志等）
-├── core/            — 核心基础设施（消息总线、状态机、注册表）
 ├── agents/          — 所有智能体实现
 │   ├── base/        — 四种基础 Agent 架构
 │   ├── specialized/ — 专业化功能 Agent
 │   ├── orchestrator/— 编排层 Agent
 │   └── meta/        — 元智能体（路由/评估/监控）
+├── api/             — RESTful API 服务
+├── companion/       — 情感陪伴模块
+├── config/          — 系统配置（模型、提示词、日志等）
+├── context/         — 多分支上下文管理
+├── core/            — 核心基础设施（消息总线、状态机、注册表）
 ├── mas/             — 多智能体系统核心逻辑
 ├── memory/          — 记忆系统（短期/长期/情节/分支）
-├── context/         — 多分支上下文管理
+├── monitoring/      — 系统监控与性能追踪
+├── plugins/         — 编辑器插件
+├── prompts/         — 存储各模块所需的提示词
 ├── rag/             — 检索增强生成模块
 ├── router/          — 智能路由模块
-├── tools/           — 工具集（LaTeX/搜索/分析/可视化/图像）
-├── skills/          — 可复用技能库
-├── companion/       — 情感陪伴模块
+├── scripts/         — 初始化与维护脚本
 ├── security/        — 安全与权限模块
-├── api/             — RESTful API 服务
-├── ui/              — 用户界面（CLI + Web）
-├── plugins/         — 编辑器插件
-├── monitoring/      — 系统监控与性能追踪
+├── skills/          — 可复用技能库
 ├── tests/           — 测试套件
-└── scripts/         — 初始化与维护脚本
+├── tools/           — 工具集（LaTeX/搜索/分析/可视化/图像）
+├── ui/              — 用户界面（CLI + Web）
+├── .env.example   
+├── .gitignore
+└── requirements.txt
 ```
 
 ---
