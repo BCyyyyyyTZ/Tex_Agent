@@ -22,6 +22,8 @@
 
 > 之前实现的代码被放在了[Tex_Agent/old_version](./old_version/README.md)中，如果要运行老版本可能要注意路径变了
 
+[任务列表](./doc/tasklist.md)：简单的任务规划，可以在里面接取task进行开发，或者添加/重新规划tasks
+
 ---
 
 ## 系统架构总览
