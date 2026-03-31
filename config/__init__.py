@@ -10,18 +10,29 @@
 # - 提供 reload_settings() 方法，支持测试时动态切换配置
 # - 捕获配置加载异常并给出友好提示
 # ============================================================
+from typing import Any
 
 from config.settings import Settings, get_settings
-from config.agent_configs import AgentConfig, get_agent_config
+from config.agent_configs import get_agent_config
 from config.model_configs import ModelConfig, get_model_config
 from config.logging_config import setup_logging
+from config.logging_config import debug_print, log_execution_time
 
 __all__ = [
     "Settings",
     "get_settings",
-    "AgentConfig",
-    "get_agent_config",
-    "ModelConfig",
-    "get_model_config",
     "setup_logging",
+    "debug_print",
+    "log_execution_time",
+    "reload_settings",
+    "settings",  # 把 settings 加入对外暴露列表
 ]
+
+settings = get_settings()
+
+def reload_settings() -> Settings:
+    """重新加载配置，用于测试时动态切换环境"""
+    global settings
+    get_settings.cache_clear()  # 清除 lru_cache 的缓存
+    settings = get_settings()
+    return settings

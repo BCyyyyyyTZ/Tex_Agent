@@ -39,7 +39,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -161,9 +161,23 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        env_nested_delimiter="__"  # 支持 .env 中使用 LLM__OPENAI_API_KEY 的嵌套命名
     )
 
     # 【在此处添加所有字段定义】
+    # 基础配置
+    app_name: str = "Tex_Agent"
+    app_version: str = "0.1.0"
+    debug: bool = True
+    log_level: str = "INFO"
+
+    data_dir: Path = Field(default_factory=lambda: Path("./data"))
+
+    @field_validator("data_dir")
+    @classmethod
+    def ensure_data_dir_exists(cls, v: Path) -> Path:
+        v.mkdir(parents=True, exist_ok=True)
+        return v
 
 
 @lru_cache(maxsize=1)
@@ -178,4 +192,12 @@ def get_settings() -> Settings:
     - 在 debug 模式下打印所有配置项（注意脱敏处理）
     - 返回配置实例
     """
-    pass
+    try:
+        settings = Settings()
+        if settings.debug:
+            print(f"[Settings] 配置加载成功, 当前运行在 DEBUG 模式, App: {settings.app_name}")
+        return settings
+    except ValidationError as e:
+        print("[Error] 环境变量或配置文件校验失败，请检查 .env 文件格式:")
+        print(e)
+        raise e

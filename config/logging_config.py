@@ -55,6 +55,47 @@ from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
 
+import os
+import inspect
+
+def debug_print(*args, **kwargs):
+    """
+    自定义调试输出函数，语法与内置 print() 完全一致。
+    仅在 settings.debug=True 时输出，并自动附加 [文件:行号] 前缀。
+    """
+    from config.settings import get_settings
+    if not get_settings().debug:
+        return
+    
+    frame = inspect.currentframe().f_back
+    filename = os.path.basename(frame.f_code.co_filename)
+    lineno = frame.f_lineno
+    
+    prefix = f"\033[94m[DEBUG: {filename}:{lineno}]\033[0m" # 添加蓝色高亮
+    print(prefix, *args, **kwargs)
+
+def log_execution_time(threshold: float = 5.0) -> Callable:
+    """
+    装饰器：记录函数执行耗时，并整合到 loguru 体系中。
+    :param threshold: 超过此阈值（秒）将触发警告级别日志
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            result = func(*args, **kwargs)
+            elapsed = time.time() - start_time
+            
+            # 使用标准的 loguru 输出，这样可以被日志文件捕获
+            msg = f"[PERF] 函数 '{func.__name__}' 执行耗时: {elapsed:.4f} 秒"
+            if elapsed > threshold:
+                logger.warning(f"{msg} (超过性能阈值 {threshold}s!)")
+            else:
+                logger.debug(msg)
+                
+            return result
+        return wrapper
+    return decorator
 
 class AgentTraceLogger:
     """
@@ -65,8 +106,8 @@ class AgentTraceLogger:
 
     def __init__(self) -> None:
         # 【需要实现】
-        # - _traces: dict[str, list[dict]]  按 session_id 存储轨迹
-        # - _current_session: Optional[str]
+        _traces: dict[str, list[dict]]   # 按 session_id 存储轨迹
+        _current_session: Optional[str]
         pass
 
     def log_agent_start(
@@ -118,20 +159,6 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> No
     """
     pass
 
-
-def log_execution_time(func: Callable) -> Callable:
-    """
-    装饰器：记录函数执行耗时。
-    【需要实现】
-    - 记录开始时间
-    - 执行函数（支持同步和异步）
-    - 计算耗时并以 [PERF] 标签写入日志
-    - 超过阈值时升级为 WARNING 级别
-    """
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        pass
-    return wrapper
 
 
 # 全局 Agent 轨迹日志器单例

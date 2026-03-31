@@ -22,7 +22,10 @@
 
 > 之前实现的代码被放在了[Tex_Agent/old_version](./old_version/README.md)中，如果要运行老版本可能要注意路径变了
 
-[任务列表](./doc/tasklist.md)：简单的任务规划，可以在里面接取task进行开发，或者添加/重新规划tasks
+[任务列表](./doc/tasklist.md)
+
++ 更新settings和调试性输出方法，可以参考[相关单元测试](./tests/unit/test_config.py)
+  在`./config/settings.py`中class Settings里面给出了基础配置，当`debug: bool = True`时，可以使用`config.debug_print()`进行调试性输出；使用`@config.log_execution_time(threshold=...)`可以观测函数执行时间并设置超时预警
 
 ---
 
