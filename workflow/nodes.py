@@ -44,7 +44,7 @@ def make_design_node(
     """
 
     def design_node(state: WorkflowState) -> dict:
-        logger.info("▶ [Design 节点] 开始执行...")
+        logger.info("[Design 节点] 开始执行...")
 
         user_msg = AgentMessage(
             role="user",
@@ -73,7 +73,7 @@ def make_design_node(
             }
 
         ctx.save(response)
-        logger.info(f"✓ [Design 节点] 完成，输出 {len(response.content)} 字符")
+        logger.info(f"[Design 节点] 完成，输出 {len(response.content)} 字符")
 
         # TODO: 未来在此处接入动态路由策略，根据 Design 结果决定下一个节点
         # TODO: 未来在此处调用 is_satisfactory() 判断是否需要重新设计
@@ -115,10 +115,10 @@ def make_retrieve_node(
     """
 
     def retrieve_node(state: WorkflowState) -> dict:
-        logger.info("▶ [Retrieve 节点] 开始执行...")
+        logger.info("[Retrieve 节点] 开始执行...")
 
         if not pipeline.is_ready():
-            logger.info("✓ [Retrieve 节点] 知识库为空，跳过检索（不影响后续节点）")
+            logger.info("[Retrieve 节点] 知识库为空，跳过检索（不影响后续节点）")
             return {
                 "retrieved_context": "",
                 "current_node": "retrieve",
@@ -129,7 +129,7 @@ def make_retrieve_node(
             retrieved = pipeline.retrieve(state["input"])
             doc_count = pipeline.document_count() if hasattr(pipeline, "document_count") else "?"
             logger.info(
-                f"✓ [Retrieve 节点] 检索完成 | 知识库片段数: {doc_count} "
+                f"[Retrieve 节点] 检索完成 | 知识库片段数: {doc_count} "
                 f"| 检索结果: {len(retrieved)} 字符"
             )
             return {
@@ -167,7 +167,7 @@ def make_think_node(
     """
 
     def think_node(state: WorkflowState) -> dict:
-        logger.info("▶ [Think 节点] 开始执行...")
+        logger.info("[Think 节点] 开始执行...")
 
         # 从状态中提取 Design 节点的 assistant 输出作为上下文
         # state["messages"] 是 WorkflowState 中的必填字段，直接访问而非 .get()
@@ -214,7 +214,7 @@ def make_think_node(
             }
 
         ctx.save(response)
-        logger.info(f"✓ [Think 节点] 完成，输出 {len(response.content)} 字符")
+        logger.info(f"[Think 节点] 完成，输出 {len(response.content)} 字符")
 
         # TODO: 未来在此处接入 ReflectionAgent，对思考结果进行自我批评与改进
         # TODO: 未来在此处调用 ArxivSearchTool，基于思考结果自动检索相关文献
@@ -250,7 +250,7 @@ def make_execute_node(
     """
 
     def execute_node(state: WorkflowState) -> dict:
-        logger.info("▶ [Execute 节点] 开始执行...")
+        logger.info("[Execute 节点] 开始执行...")
 
         # 整合前序节点的所有 assistant 消息作为完整上下文
         all_messages = state["messages"]
@@ -296,7 +296,7 @@ def make_execute_node(
             }
 
         ctx.save(response)
-        logger.info(f"✓ [Execute 节点] 完成，最终输出 {len(response.content)} 字符")
+        logger.info(f"[Execute 节点] 完成，最终输出 {len(response.content)} 字符")
 
         # TODO: 未来在此处接入工具调用（如 ArxivSearchTool、LaTeXParserTool）
         # TODO: 未来在此处接入结果验证（MASPlanner.validate()）

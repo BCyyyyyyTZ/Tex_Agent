@@ -639,3 +639,9 @@ pytest tests/ -v
 - [ ] [扩展] 安全与权限中间件
 - [ ] [扩展] 用户自定义工作流（YAML/JSON 配置驱动）
 - [ ] [扩展] Web UI 界面
+
+## 旧版本内容
+
++ 上一个复杂的框架在 [Brain-Tex/](./Brain-Tex/README.md)
++ 最早的简洁版本在 [Simple-Tex](./Simple-Tex/README.md)
++ 另一个可运行的版本暂时没有拷贝过来

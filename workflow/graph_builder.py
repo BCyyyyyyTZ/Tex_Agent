@@ -141,7 +141,7 @@ def build_graph(
     # ---- 编译图 ----
     app = graph.compile()
 
-    logger.info(f"✓ TeX_Agent 工作流图构建完成 [{topology}]")
+    logger.info(f"TeX_Agent 工作流图构建完成 [{topology}]")
 
     # TODO: 未来在此处支持添加 checkpointer（如 MemorySaver / SqliteSaver）
     #       实现工作流状态的持久化，支持断点续跑
