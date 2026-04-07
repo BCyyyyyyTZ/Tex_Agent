@@ -589,7 +589,7 @@ pytest tests/test_rag/ -v
 
 ```bash
 # 1. 克隆项目
-git clone <repo_url>
+git clone https://github.com/BCyyyyyyTZ/Tex_Agent.git
 cd TeX_Agent
 
 # 2. 安装依赖
