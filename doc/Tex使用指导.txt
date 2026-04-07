@@ -1,0 +1,664 @@
+================================================================================
+NeuroTeX / Tex_Agent 框架总指南（执行逻辑 + 责任划分）
+面向：阅读代码、二次开发、补全“【需要实现】”占位
+================================================================================
+
+重要说明（先读这个）
+
+1) 你当前仓库的性质
+- 这是一个“架构蓝图 + 骨架代码”为主的仓库：大量模块写了非常详细的设计注释，
+  但真实可执行的实现还没补齐（你会在很多函数里看到 pass / 【需要实现】）。
+- 因此，本指南会同时给出：
+  - “现在代码真正会做什么”（例如 import 阶段 / 哪些入口只是占位）
+  - “按注释补全后应该怎么跑”（这是你后续实现与联调的主线）
+
+2) 名词对齐（读注释时常见的脑区隐喻）
+- 前额叶皮层 Orchestrator：Planner + Coordinator + Aggregator（负责规划/协作/汇总）
+- 基底节 Router：任务分类、复杂度估计、模型选择、路由策略、分发器
+- 海马体 Memory：短期/长期/情节记忆
+- 感觉皮层 RAG：知识库 + 检索 + 切块 + 嵌入
+- 运动皮层 Output：API / CLI / Web UI 作为输出通道
+
+3) “Tex_Agent_new”与README中的“NeuroTeX”
+- README 里用 NeuroTeX 命名整套系统；仓库路径是 Tex_Agent_new。
+- 这不影响理解：模块分层与职责在代码里是一致的。
+
+
+================================================================================
+第一部分：从“启动”到“一次任务完成”的总执行链路（核心）
+================================================================================
+
+本节用“正常落地后的理想执行链路”描述系统如何工作；你可以把它当成整体心智模型。
+
+一条任务（用户输入）从入口到输出，典型分 7 个阶段：
+
+阶段 0：入口层（用户从哪里进来）
+- CLI：`ui/cli/main_cli.py`
+- API：`api/main.py`
+- Web UI：`ui/web/app.py`
+
+阶段 1：装配（初始化系统运行所需的全局对象）
+通常需要初始化：
+- 配置：`config.get_settings()`（环境变量 / .env）
+- 日志：`config.logging_config.setup_logging`（代码里引用了，但具体文件未在本指南展开）
+- Agent 注册表：`core/agent_registry.AgentRegistry`
+- 路由组件：`router/task_classifier.py` + `router/complexity_estimator.py` + `router/model_selector.py`
+- 工作流引擎（如使用 LangGraph）：`mas/workflow_engine.py`
+- 记忆系统：`memory/*`
+- RAG 系统：`rag/*`
+- 工具集：`tools/*`
+
+阶段 2：把用户输入包装成统一的 TaskContext
+统一的任务上下文是 `core/base_agent.py` 的 `TaskContext`：
+- task_id：唯一任务ID
+- task_description：任务描述（通常来自用户输入）
+- input_data：附加输入（文件内容、结构化数据等）
+- session_id / branch_id：会话与分支（多分支上下文）
+- metadata：路由、UI、文件引用等元信息
+
+阶段 3：路由（决定“谁来做”以及“用什么模型/工具”）
+系统有两套路由思想：
+
+3.1 纯算法路由（router/ 目录）
+- `router/task_classifier.py`：意图/任务类别（例如 LaTeX修复/文献检索/数据分析/情感支持…）
+- `router/complexity_estimator.py`：复杂度多维评分（overall + 多维度分）
+- `router/model_selector.py`：按任务/复杂度/偏好选择模型（例如 router 用 gpt-4o-mini）
+- `router/routing_strategies/`：
+  - `rule_based_router.py`：保底、确定性、可预期
+  - `ml_router.py`：更灵活、但需要训练与模型文件
+  - `adaptive_router.py`：自适应（记录历史表现、用户偏好、成本/质量权衡）
+
+3.2 LLM 路由（Agent层的 RouterAgent）
+- `agents/meta/router_agent.py`：RouterAgent（继承 SimpleAgent）会调用 LLM 输出结构化 JSON 决策
+- 注释强调：LLM 路由用于“复杂/模糊”情况；纯算法路由用于“稳定保底”
+
+最终路由决策统一表示为 `RouteDecision`：
+- target_agent_type：目标 Agent 类型（latex / literature / planner / simple …）
+- target_model：建议模型
+- requires_tools / requires_rag / requires_memory：执行时能力开关
+
+阶段 4：编排（Planner 是否介入）
+核心分岔点：任务是否复杂到需要 Planner 分解？
+
+- 不复杂：直接把 RouteDecision 交给分发器 -> 目标 Agent 执行 -> 输出
+- 很复杂：交给 `PlannerAgent` 做多子任务计划（MasterPlan）：
+  - 生成 SubTask 列表（每个子任务 assigned_agent_type）
+  - 建立依赖 DAG，拓扑排序得到 execution_order（批次并行）
+  - 再由 Coordinator/WorkflowEngine 驱动执行
+
+相关文件：
+- `agents/orchestrator/planner_agent.py`：规划与 DAG
+- `mas/workflow_engine.py`：用 LangGraph 建图执行（节点：router/planner/executor/aggregator/companion）
+- `mas/task_decomposer.py`、`mas/graph_builder.py` 等：用于拆解与图构建（此仓库有骨架文件）
+
+阶段 5：分发与执行（把“决策”变成“真实调用”）
+关键：`router/agent_dispatcher.py`
+- AgentDispatcher 的职责是把 RouteDecision 变成“具体哪个 Agent 实例去跑”
+- 它会从 `core/agent_registry.AgentRegistry` 里拿实例（或创建新实例）
+- 然后配置模型、注入额外 config，分发任务上下文
+
+执行发生在 Agent 的统一入口：
+- `core/base_agent.py`：BaseAgent.execute(context) 包装 run()，统一管理状态、日志、事件、错误封装
+
+阶段 6：工具 / 记忆 / RAG 的参与（执行中插入能力）
+Agent 在 run() 内部按配置决定是否启用：
+- Memory：短期上下文（ConversationMemory）+ 工作记忆（WorkingMemory）+ 长期向量（VectorStore）…
+- RAG：检索器（ArXiv/Local/Hybrid）+ 处理器（切块/嵌入）+ KB（paper/expert/user）
+- Tools：LaTeXValidator/Parser/Formatter、统计分析、可视化、语义搜索、图像生成…
+
+阶段 7：汇总与输出（对用户/调用方返回什么）
+- 简单任务：单 AgentResult 输出
+- 复杂任务：Aggregator 汇总多个子任务结果（可附带 artifacts）
+- 输出渠道：
+  - API：返回 JSON / SSE 流式 token
+  - CLI：Rich/Markdown 格式化输出
+  - Web：Gradio Chatbot 逐 token yield
+
+
+================================================================================
+第二部分：入口层（API / CLI / Web UI）分别怎么跑
+================================================================================
+
+## 2.1 CLI 入口：`ui/cli/main_cli.py`
+定位：开发者/熟练用户的“直接命令执行”。
+
+它定义了 Click 命令组 `cli`，预期命令包括：
+- neurotex chat：进入交互式对话（应驱动 WorkflowEngine 或直接 Router+Dispatcher）
+- neurotex fix：LaTeX 修复（LaTeXValidator + LaTeXAgent）
+- neurotex search：文献检索（LiteratureAgent）
+- neurotex analyze：数据分析（AnalysisAgent）
+
+注意：该文件目前只有命令骨架，核心逻辑未实现。
+
+你在实现时可以按两种策略选其一：
+- 统一走 MAS 工作流：CLI 也调用 WorkflowEngine.invoke/run
+- “快捷直达”：例如 fix/search/analyze 直接构造 TaskContext -> 路由到指定 agent
+
+
+## 2.2 API 入口：`api/main.py`
+定位：系统对外服务的主入口（FastAPI）。
+
+现在 `create_app()` 只完成：
+- FastAPI 实例
+- CORS 中间件（allow_origins=["*"]）
+- /health 端点
+
+注释里计划挂载：
+- AuthMiddleware、限流、日志中间件
+- agent/document/search/user 等路由
+- lifespan：启动初始化 DB/向量库/AgentRegistry/消息总线等
+
+典型最终形态：
+- /api/v1/agents/chat：SSE 或 WebSocket 流式输出（Web UI 的 chat_fn 调用它）
+- /api/v1/search：调用 LiteratureAgent / RAG
+- /api/v1/document：上传、解析、索引文档进用户知识库
+
+
+## 2.3 Web UI 入口：`ui/web/app.py`
+定位：轻量 Web 界面（Gradio）。
+
+它预期提供三栏 UI：
+- 左：会话/分支管理（Session + Branch tree）
+- 中：聊天区 + 文件上传 + 输入
+- 右：任务状态、产物预览（LaTeX/图表）、快捷按钮（检索/分析/修复）
+
+关键：`chat_fn()` 计划通过 API `/agents/chat` SSE 流式获取 token，并 yield 更新 UI。
+当前同样是骨架。
+
+
+================================================================================
+第三部分：配置层（config）——“系统级配置”与“行为配置”的区别
+================================================================================
+
+这一层决定“系统怎么装配、用什么参数跑”。
+
+## 3.1 系统级配置：`config/settings.py`（pydantic-settings）
+定位：API Key、路径、端口、安全配置、功能开关等“部署相关/敏感/环境相关”配置。
+
+关键点：
+- 继承 `pydantic_settings.BaseSettings` 的 `Settings`
+- `model_config = SettingsConfigDict(env_file=".env", ...)`
+  表示构造 Settings 时会读环境变量与 .env（并做类型校验）
+- `get_settings()` 用 `@lru_cache(maxsize=1)` 做单例，避免重复读 .env
+
+现状：
+- 字段尚未落地（多数类 pass）
+- get_settings() 也未返回 Settings 实例（pass）
+
+你实现的主线是：
+- 按 `.env.example` 与 README 所需项补全字段
+- get_settings() -> return Settings()
+- debug 下打印配置要对 SecretStr 脱敏
+
+
+## 3.2 Agent 行为配置：`config/agent_configs.py`
+定位：每种 Agent 的运行“行为参数”（max_iterations、工具列表、提示词模板名…）。
+
+为何不放 .env？
+- 行为参数更像“产品/算法默认策略”，应随代码版本受审计、可复现、可 diff
+- 适合用代码默认 + YAML 覆盖（注释里提到 load_from_yaml）
+
+现状：
+- 仍是骨架（BaseAgentConfig 等类 pass）
+- Registry 与 get_agent_config 未实现
+
+
+## 3.3 模型画像配置：`config/model_configs.py`
+定位：路由选择模型时需要的元数据（tier、capabilities、cost、latency、窗口…）。
+
+重要理解：
+- Enum（ModelCapability/ModelTier）只描述“维度/档位类型”，不是每个模型每维打分表
+- 每个模型一条 ModelConfig，注册到 MODEL_REGISTRY
+- ModelSelector/Router 会使用这些元数据做“成本/质量/延迟”权衡
+
+现状：骨架（pass），但注释足以指导你落地。
+
+
+## 3.4 Prompt 模板：`config/prompt_templates.py`（Jinja2）
+定位：集中管理“系统提示词/用户提示词”模板，支持变量注入与条件渲染。
+
+对象关系：
+- PromptTemplate：单条模板记录（name/version/system_prompt/required_variables…）
+- PromptTemplateRegistry：模板库（register/get/render），统一用 Jinja2 渲染
+- 预置系统提示词常量：NEUROTEX_BASE_SYSTEM_PROMPT 等，是“模板内容的来源”
+
+现状：
+- Registry 的 __init__/register/get/render/_load_builtin_templates 均未实现
+- 预置 prompt 文本是占位（需要填完整内容）
+
+
+================================================================================
+第四部分：核心基础设施（core）——统一接口、注册表、状态机、事件系统
+================================================================================
+
+## 4.1 BaseAgent 体系：`core/base_agent.py`
+这是你理解“Agent怎么被调用”的首要文件。
+
+提供的统一数据结构：
+- AgentStatus：IDLE/RUNNING/PAUSED/COMPLETED/ERROR/TERMINATED
+- AgentMessage：Agent间消息（经 message_bus）
+- TaskContext：任务上下文（所有入口最终都应变成它）
+- AgentResult：输出（output + artifacts + token_usage + duration + error…）
+
+BaseAgent 抽象方法：
+- run(context) -> AgentResult：子类核心逻辑
+- _think(context, history) -> str：一次 LLM 推理
+
+BaseAgent 非抽象（计划实现）：
+- execute()：统一生命周期管理（状态、日志、事件）
+- call_tool()：统一工具调用入口（权限校验、异常封装、日志）
+- memory/rag 的统一访问方法
+
+结论：无论 Simple/ReAct/Reflection/PlanAndSolve，最终都应通过 execute(context) 被外部驱动。
+
+
+## 4.2 AgentRegistry：`core/agent_registry.py`
+定位：系统内“服务发现”，让 Router/Dispatcher 找到可用 Agent 实例。
+
+它是单例（__new__），计划维护：
+- _agents：agent_id -> registration
+- 索引：name/type/capability
+- _agent_refs：弱引用（避免内存泄漏）
+
+它提供：
+- register/unregister
+- find_agents_by_type / by_capability
+- find_best_agent：一个评分算法（注释给了 Jaccard + 负载 + 历史成功率）
+
+它是 AgentDispatcher 获取实例的底座。
+
+
+## 4.3 状态机：`core/state_machine.py`
+定位：管理任务/agent 的合法状态流转，便于调试、回放、持久化。
+
+核心概念：
+- TaskState：CREATED -> QUEUED -> PLANNING/ROUTING -> EXECUTING -> COMPLETED/FAILED…
+- StateTransition：一次转换的记录（from/to/trigger/agent_id/timestamp/metadata）
+- StateMachine：transition() 执行转换，维护 history，支持回调（on_enter/on_exit）
+
+落地建议：
+- 让 WorkflowEngine/Coordinator 在关键节点触发 transition
+- 同时用事件系统广播状态变化给 UI（右侧“任务状态面板”）
+
+
+## 4.4 事件系统、消息总线、异常
+仓库还提供：
+- `core/event_system.py`、`core/message_bus.py`、`core/exceptions.py`
+它们通常承担：
+- 解耦模块间通知（事件）
+- Agent间通信（消息）
+- 统一异常类型 -> API 返回（在 api/main.py 的异常处理中使用）
+
+（本指南在“责任划分”里会继续提到，但不会逐行解释每个文件的实现细节。）
+
+
+================================================================================
+第五部分：路由层（router + RouterAgent）——“谁来做、用什么模型”
+================================================================================
+
+你可以把路由看成两层：
+
+## 5.1 纯算法路由（router/ 目录）
+1) TaskClassifier：`router/task_classifier.py`
+- 输入：user_input + context
+- 输出：ClassificationResult（primary_category + confidence + entities + complexity等）
+- 先规则匹配；置信度低再调用轻量 LLM（结构化 JSON）
+
+2) ComplexityEstimator：`router/complexity_estimator.py`
+- 输出：ComplexityScore（overall + 多维度分 + recommended_tier）
+- recommended_agent_architecture：建议用 simple/react/reflection/planner…
+
+3) ModelSelector：`router/model_selector.py`
+- ROLE_MODEL_MAP 给了“按角色推荐模型”的基础映射（router/planner/evaluator/…）
+- 最终 select() 应综合任务类别、复杂度、用户偏好、capabilities
+
+4) Routing strategies：`router/routing_strategies/*`
+- RuleBasedRouter：保底（按优先级匹配规则）
+- MLRouter：训练模型推断（需要训练脚本与模型文件）
+- AdaptiveRouter：结合历史表现与偏好做在线优化
+
+5) AgentDispatcher：`router/agent_dispatcher.py`
+- 路由最后一公里：把 decision -> 具体 agent 实例 -> 调用/等待
+
+
+## 5.2 LLM 路由：`agents/meta/router_agent.py`
+- 当规则/ML不够、任务描述模糊时，让 RouterAgent 用 LLM 推理并输出 JSON RouteDecision
+- 与纯算法路由的关系：注释明确“算法是底线保障，LLM更智能”
+
+落地建议（常见混合策略）：
+- 先跑 RuleBasedRouter 作为候选/兜底
+- 如果 classifier/complexity 的不确定性高、或用户上下文复杂，再调用 RouterAgent 复审
+- 对 RouterAgent 的输出做合法性校验（_validate_route_decision）
+
+
+================================================================================
+第六部分：编排层与 MAS（mas + orchestrator agents + LangGraph）
+================================================================================
+
+复杂任务的关键目标是：把一个大任务拆成多个子任务并发执行、再汇总。
+
+## 6.1 PlannerAgent：`agents/orchestrator/planner_agent.py`
+它要产出 MasterPlan：
+- subtasks：每个 subtask 指派 agent_type（不是直接跑）
+- dependencies：构 DAG
+- execution_order：拓扑排序成并行批次
+- requires_user_confirmation：必要时“先给用户看计划再执行”
+
+## 6.2 WorkflowEngine：`mas/workflow_engine.py`
+它计划用 LangGraph 把流程变成“可执行的有状态图”：
+- State：WorkflowState（TypedDict）
+- Node：entry/router/planner/executor/aggregator/companion
+- Edge：普通边 + 条件边（route_after_router/route_after_execution）
+- Checkpoint：MemorySaver（支持暂停/恢复）
+
+你实现后会得到两种运行方式：
+- run()：流式 astream()，每个节点 yield 状态更新给 UI/API
+- invoke()：一次性跑完返回最终 WorkflowState
+
+## 6.3 Coordinator / Aggregator / Validator 等
+仓库里有：
+- `agents/orchestrator/executor_coordinator.py`
+- `agents/orchestrator/result_aggregator.py`
+- `mas/result_validator.py`
+- `mas/agent_communication.py`
+- `mas/context_manager.py`
+它们的职责通常是：
+- Coordinator：驱动并行批次执行、处理超时/重试、记录路由结果给 AdaptiveRouter
+- Aggregator：把多 Agent 结果整合成用户可读输出（并产出 artifacts 列表）
+- Validator：对结果做一致性/格式/引用检查
+
+
+================================================================================
+第七部分：Agent 执行池（agents/base + agents/specialized + agents/meta）
+================================================================================
+
+Agent 分三类：
+
+## 7.1 基础架构 Agent（agents/base）
+- SimpleAgent：单次推理（可选工具调用的“两段式”）
+- ReActAgent：Thought-Action-Observation 循环（工具调用更强）
+- ReflectionAgent：先产出初稿，再批评/修订多轮
+- PlanAndSolveAgent：先计划后执行（介于 Simple 与 Planner 之间）
+
+这些 Agent 的共性：
+- 都继承 BaseAgent
+- 都会依赖 config.prompt_templates 生成 system prompt
+- 都会按 config 决定是否启用 RAG / Memory / Tools
+
+## 7.2 专业化 Agent（agents/specialized）
+- LiteratureAgent：文献检索与趋势分析（会用 rag.retrievers）
+- AnalysisAgent：统计分析（会用 tools.analysis）
+- LaTeXAgent：LaTeX 修复/优化（tools.latex + validator）
+- VisualizationAgent：图表（tools.visualization）
+- WritingAgent：论文写作辅助
+- ImageGenAgent：图像生成（tools.image_generation）
+- CompanionAgent：情感陪伴（companion 模块）
+
+## 7.3 元 Agent（agents/meta）
+- RouterAgent：做“路由决策”
+- EvaluatorAgent：做“结果评估”
+- MonitorAgent：做“系统监控/健康检查”
+
+
+================================================================================
+第八部分：RAG（rag）——“外部知识如何进来”
+================================================================================
+
+RAG 模块按“检索器 + 处理器 + 知识库”组织：
+
+## 8.1 检索器（rag/retrievers）
+- ArXivRetriever：对外部 arXiv API
+- LocalRetriever：对本地文档/索引
+- HybridRetriever：融合多源检索（关键：合并与重排序）
+
+## 8.2 处理器（rag/processors）
+- DocumentProcessor：解析 PDF/Docx/HTML 等为文本与元数据
+- ChunkSplitter：切块（chunk_size/overlap）
+- EmbeddingGenerator：生成向量嵌入（对接 OpenAI/sentence-transformers 等）
+
+## 8.3 知识库（rag/knowledge_bases）
+- PaperKnowledgeBase：论文知识库（向量 + 图谱 + 元数据）
+- ExpertKnowledgeBase：专家经验库
+- UserKnowledgeBase：用户自建资源库
+
+你的主线实现通常是：
+1) 文档/论文 -> DocumentProcessor -> ChunkSplitter -> EmbeddingGenerator
+2) 向量写入 memory.long_term.vector_store.VectorStore
+3) 检索时 HybridRetriever.search -> 返回片段 -> 注入到 Agent 的 prompt 中
+
+
+================================================================================
+第九部分：记忆系统（memory）——“对话与知识如何留存”
+================================================================================
+
+记忆分 3 层：
+
+## 9.1 短期记忆（memory/short_term）
+- ConversationMemory：对话历史滑动窗口 + 超 token 自动摘要
+- WorkingMemory：工作记忆（通常存当前任务关键变量/中间结论）
+
+## 9.2 长期记忆（memory/long_term）
+- VectorStore：向量数据库抽象（Chroma/FAISS/Weaviate）
+- KnowledgeGraph：知识图谱（关系、引用网络）
+- UserProfile：用户偏好与长期属性
+
+## 9.3 情节记忆（memory/episodic）
+- SessionRecorder：记录会话 episode
+- ExperienceReplay：经验回放（为自适应路由/训练数据提供素材）
+
+典型使用方式：
+- Agent.run 中：读 ConversationMemory 获取最近消息
+- 超窗口：summarize_old_messages 生成摘要
+- 关键洞见：add_to_memory 写入长期向量库
+
+
+================================================================================
+第十部分：多分支上下文（context）——“类 Git 分支的科研工作流”
+================================================================================
+
+这是仓库中非常清晰的一块创新设计：把科研写作的“尝试/回退/对比”做成上下文分支。
+
+关键组件：
+- `context/branch/branch_manager.py`：
+  - main 分支默认存在
+  - create_branch：从当前分支 fork（深拷贝记忆快照）
+  - checkout：切换分支
+  - merge：选择性合并（可能借助 LLM）或 append 追加
+  - stash/pop：暂存与恢复
+
+与 UI 的关系：
+- Web UI 左栏的分支树展示、切换、合并，都应调用 BranchManager 的接口
+
+与执行逻辑的关系：
+- TaskContext 里有 branch_id
+- Agent 在取对话历史时应取“当前分支的 ConversationMemory”
+
+
+================================================================================
+第十一部分：工具系统（tools）——“Agent 如何落地操作”
+================================================================================
+
+工具模块把“可执行能力”做成可复用组件，供 Agent 调用：
+
+- LaTeX：parser/formatter/validator
+- Analysis：statistical_analysis、topic_modeling
+- Visualization：chart_generator
+- Image generation：dalle_client、tikz_generator（一个走外部API，一个走 LaTeX/TikZ）
+- Search：semantic_search
+- Utils：cache_manager
+
+落地模式通常是：
+- BaseAgent.call_tool("latex_validate", latex_content=...) 之类
+- 由 AgentConfig.available_tools 控制“允许调用哪些工具”
+- 调用记录要写入 trace logger / 事件系统，便于审计与 debug
+
+
+================================================================================
+第十二部分：情感陪伴（companion）——“非功能性但强体验”
+================================================================================
+
+`companion/` 作为独立模块存在，表明它不是“聊天彩蛋”，而是可编排能力：
+- EmotionDetector：识别情绪信号（可由 TaskClassifier 触发 EMOTIONAL_SUPPORT）
+- EncouragementGenerator：生成鼓励/支持的语言风格
+- WellbeingTracker：长期追踪情绪与负担（可影响 AdaptiveRouter 的偏好/节奏）
+
+在工作流里，它可能作为一个可选节点：
+- WorkflowEngine._companion_node：在任务完成前后追加陪伴式反馈（可开关）
+
+
+================================================================================
+第十三部分：每个文件在执行中承担什么责任（按目录索引）
+================================================================================
+
+本节给“查表式”定位：你看到一个文件，知道它在执行链里是哪一环。
+
+## 13.1 config/
+- `config/settings.py`：系统级配置（env/.env -> Settings 单例）
+- `config/agent_configs.py`：Agent 行为配置（代码默认 + YAML覆盖的设计）
+- `config/model_configs.py`：模型画像注册（给 ModelSelector/Router 用）
+- `config/prompt_templates.py`：Jinja2 prompt 模板库与渲染入口（render_prompt）
+- `config/__init__.py`：统一导出 config API（get_settings/get_agent_config/get_model_config…）
+
+## 13.2 api/
+- `api/main.py`：FastAPI app 工厂与生命周期（启动装配 + 路由挂载 + 中间件）
+
+## 13.3 ui/
+- `ui/cli/main_cli.py`：CLI 入口（chat/fix/search/analyze 等命令）
+- `ui/web/app.py`：Gradio 入口（chat_fn 通过 API 流式对话）
+
+## 13.4 core/
+- `core/base_agent.py`：所有 Agent 的统一接口与数据结构（TaskContext/AgentResult）
+- `core/agent_registry.py`：Agent 实例注册表（服务发现）
+- `core/state_machine.py`：任务/Agent 状态机（可追溯的状态流转）
+- `core/event_system.py`：事件发布订阅（解耦 UI/监控/执行）
+- `core/message_bus.py`：Agent 间消息通信（协作与广播）
+- `core/exceptions.py`：统一异常类型（映射到 API 错误响应）
+
+## 13.5 router/
+- `router/task_classifier.py`：意图分类（规则 + LLM）
+- `router/complexity_estimator.py`：复杂度估计（多维评分）
+- `router/model_selector.py`：模型选择（角色映射 + 综合策略）
+- `router/agent_dispatcher.py`：分发器（决策 -> 具体 Agent 实例 -> 调用）
+- `router/routing_strategies/*`：规则/ML/自适应路由策略
+
+## 13.6 agents/
+- `agents/base/*`：四类基础架构（Simple/ReAct/Reflection/PlanAndSolve）
+- `agents/specialized/*`：专业 Agent（文献/分析/LaTeX/可视化/写作/图像/陪伴）
+- `agents/orchestrator/*`：编排层（Planner/Coordinator/Aggregator）
+- `agents/meta/*`：元智能体（Router/Evaluator/Monitor）
+
+## 13.7 mas/
+- `mas/workflow_engine.py`：LangGraph 工作流引擎（把计划变成可执行图）
+- `mas/task_decomposer.py`：拆解（可能由 Planner 使用）
+- `mas/graph_builder.py`：建图
+- `mas/agent_communication.py`：协作通信协议
+- `mas/context_manager.py`：与 session/branch 上下文集成点
+- `mas/result_validator.py`：结果验证
+
+## 13.8 memory/
+- `memory/short_term/*`：对话/工作记忆
+- `memory/long_term/*`：向量库/图谱/用户画像
+- `memory/episodic/*`：会话记录与经验回放
+
+## 13.9 rag/
+- retrievers：检索器
+- processors：文档处理、切块、嵌入
+- knowledge_bases：paper/expert/user 三类知识库
+
+## 13.10 tools/
+- latex：解析/格式化/验证
+- analysis：统计与主题建模
+- visualization：图表生成
+- image_generation：DALL·E / TikZ
+- search：语义搜索
+- utils：缓存
+
+## 13.11 context/
+- `context/session/*`：会话管理（SessionManager）
+- `context/branch/*`：分支管理（BranchManager）+ diff/merge/checkpoint
+
+## 13.12 companion/
+- 情绪检测、鼓励生成、身心状态追踪
+
+
+================================================================================
+第十四部分：给实现者的“落地顺序建议”（把骨架跑起来）
+================================================================================
+
+如果你希望尽快得到一个端到端可跑的最小系统（MVP），建议按以下顺序补实现：
+
+MVP-1：能跑“简单对话”
+1) `config/settings.py`：补字段 + get_settings() 返回 Settings
+2) `config/prompt_templates.py`：实现 Registry + 至少一个模板（neurotex_base + simple_agent）
+3) `agents/base/simple_agent.py`：实现 run/_think（先用最简单 openai 调用）
+4) `core/base_agent.py`：实现 execute（最小：状态更新 + 计时 + try/except）
+5) `api/main.py`：加一个最简单 /chat 路由直接调用 SimpleAgent 并返回
+
+MVP-2：加上路由与专业工具（例如 LaTeX 修复）
+6) `router/task_classifier.py`：先做规则分类（不必先 LLM 分类）
+7) `router/agent_dispatcher.py` + `core/agent_registry.py`：最小可用的注册/获取实例
+8) `tools/latex/validator.py`：实现最小 is_compilable + syntax check
+9) `agents/specialized/latex_agent.py`：调用 validator + LLM 修复
+
+MVP-3：加上 Planner + LangGraph（复杂任务多 Agent）
+10) `agents/orchestrator/planner_agent.py`：先做简单计划 JSON
+11) `mas/workflow_engine.py`：实现 build_graph + invoke
+
+MVP-4：加记忆/RAG/分支
+12) ConversationMemory.add_message/get_formatted_messages（短期可用）
+13) BranchManager._init_main_branch + create_branch/checkout（分支最小可用）
+14) RAG：先做 LocalRetriever + EmbeddingGenerator + VectorStore(Chroma) 最小链路
+
+
+================================================================================
+第十五部分：常见“为什么这样设计”的解释（帮助你读注释）
+================================================================================
+
+Q1：为什么路由既有 router/ 目录又有 RouterAgent？
+- router/：规则/ML/自适应属于“可预期、低成本”的算法层，是底线保障
+- RouterAgent：用 LLM 解决“语义模糊、上下文复杂”的路由问题
+- 最佳实践：混合；算法先给候选与兜底，LLM 复审或在不确定时介入
+
+Q2：为什么 Agent 行为参数不放 .env？
+- .env 适合放密钥、端口、路径等部署差异项
+- 行为参数（max_iterations/tools/prompt模板名）更像策略，应能 code review 与版本化
+- 你们也预留了 YAML 覆盖，适合实验/AB，而不污染环境变量
+
+Q3：为什么要有状态机/事件系统？
+- 多 Agent 与工具调用会产生大量中间状态；靠 if/else 很快失控
+- 状态机保证合法转换；事件系统让 UI/监控/日志订阅这些变化而不耦合执行代码
+
+Q4：为什么要“多分支上下文”？
+- 科研写作需要并行探索多个思路（A 方法/B 方法），且经常回退
+- BranchManager 把这件事产品化：checkout/merge/diff/stash
+
+
+================================================================================
+附录 A：Jinja2 在 Prompt 中的最小示例（便于你脑补实现）
+================================================================================
+
+模板（system_prompt）示意：
+
+    你是 NeuroTeX。
+    {% if rag_context %}
+    参考资料：
+    {{ rag_context }}
+    {% endif %}
+    用户问题：{{ question }}
+
+渲染时传入 variables：
+- question="请帮我修复这个 LaTeX 编译错误"
+- rag_context=""（没有检索到就为空，if 不渲染那段）
+
+得到最终系统提示词字符串后，再与用户消息一起发送给 LLM。
+
+
+================================================================================
+附录 B：一句话总览（给第一次上手的人）
+================================================================================
+
+入口（CLI/API/Web）把用户输入变成 TaskContext -> Router 决定 agent/model/tools ->
+Dispatcher 从 Registry 拿到 Agent 实例 -> Agent.execute 调用 run（期间可用 RAG/Memory/Tools）->
+必要时 Planner + WorkflowEngine 协调多 Agent 并行 -> Aggregator 汇总 -> 输出到入口层。
+
+================================================================================
