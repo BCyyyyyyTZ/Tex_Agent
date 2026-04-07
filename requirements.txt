@@ -1,122 +1,20 @@
-# ============================================================
-# NeuroTeX — 项目依赖清单
-# ============================================================
-# 按功能模块分组，便于选择性安装
-# 完整安装: pip install -r requirements.txt
-# ============================================================
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-core>=0.3.0
 
-# ---- 核心 LLM 框架 ----
-openai>=1.30.0                   # OpenAI API 客户端（GPT-4/DALL-E）
-anthropic>=0.25.0                # Claude API 客户端
-langchain>=0.2.0                 # LangChain 框架基础
-langchain-openai>=0.1.0          # LangChain OpenAI 集成
-langchain-anthropic>=0.1.0       # LangChain Anthropic 集成
-langchain-community>=0.2.0       # LangChain 社区工具集
-langgraph>=0.1.0                 # LangGraph 多智能体工作流引擎
-pyautogen>=0.2.0                 # AutoGen 多智能体框架
+pydantic>=2.0.0
 
-# ---- 向量数据库 & 嵌入 ----
-chromadb>=0.5.0                  # ChromaDB 向量数据库（本地优先）
-faiss-cpu>=1.8.0                 # Facebook FAISS 向量检索库
-sentence-transformers>=3.0.0     # Sentence Transformers 嵌入模型
-tiktoken>=0.7.0                  # OpenAI tokenizer
+python-dotenv>=1.0.0
 
-# ---- 文献检索 ----
-arxiv>=2.1.0                     # arXiv API 客户端
-scholarly>=1.7.0                 # Google Scholar 非官方 API
-semanticscholar>=0.8.0           # Semantic Scholar API
-requests>=2.31.0                 # HTTP 请求
-httpx>=0.27.0                    # 异步 HTTP 客户端
-aiohttp>=3.9.0                   # 异步 HTTP（用于并发检索）
+arxiv>=2.1.0
 
-# ---- LaTeX 处理 ----
-pylatexenc>=2.10                 # LaTeX 解析与编码
-latexcodec>=2.0.0               # LaTeX 字符编码
-Pygments>=2.17.0                 # 代码语法高亮（LaTeX 着色）
+httpx>=0.27.0
 
-# ---- 数据分析 ----
-numpy>=1.26.0                    # 数值计算基础库
-pandas>=2.2.0                    # 数据处理与分析
-scipy>=1.13.0                    # 科学计算（统计分析）
-scikit-learn>=1.4.0              # 机器学习（聚类、分类、路由模型）
-statsmodels>=0.14.0              # 统计模型
+# RAG 依赖
+# chromadb 内置 DefaultEmbeddingFunction（基于 all-MiniLM-L6-v2 / ONNX Runtime）
+# 首次运行会自动下载约 40MB 的 ONNX 模型文件（需联网），此后完全离线运行
+chromadb>=0.5.0
 
-# ---- 数据可视化 ----
-matplotlib>=3.8.0                # 基础绘图库
-seaborn>=0.13.0                  # 统计可视化
-plotly>=5.20.0                   # 交互式图表
-kaleido>=0.2.1                   # Plotly 静态图像导出
-
-# ---- 图像生成 ----
-Pillow>=10.3.0                   # 图像处理
-diffusers>=0.27.0                # Stable Diffusion 管线
-transformers>=4.40.0             # HuggingFace Transformers
-accelerate>=0.29.0               # 模型加速
-torch>=2.2.0                     # PyTorch（SD 本地推理需要）
-
-# ---- 文档处理 ----
-pypdf>=4.2.0                     # PDF 解析
-python-docx>=1.1.0               # Word 文档处理
-pdfminer.six>=20221105           # PDF 文本提取
-unstructured>=0.13.0             # 非结构化文档处理
-beautifulsoup4>=4.12.0           # HTML 解析
-lxml>=5.2.0                      # XML/HTML 解析
-
-# ---- NLP 工具 ----
-nltk>=3.8.1                      # 自然语言处理工具包
-spacy>=3.7.0                     # 工业级 NLP 库
-textblob>=0.18.0                 # 情感分析
-bertopic>=0.16.0                 # 主题建模（BERTopic）
-
-# ---- API 框架 ----
-fastapi>=0.111.0                 # 高性能 RESTful API 框架
-uvicorn[standard]>=0.29.0        # ASGI 服务器
-pydantic>=2.7.0                  # 数据验证与序列化
-pydantic-settings>=2.2.0         # 配置管理
-
-# ---- Web UI ----
-gradio>=4.28.0                   # 快速 Web UI 构建
-streamlit>=1.34.0                # 数据应用 UI（备选）
-
-# ---- 任务队列 & 缓存 ----
-celery>=5.4.0                    # 分布式任务队列
-redis>=5.0.0                     # Redis 客户端
-cachetools>=5.3.0                # 本地缓存工具
-
-# ---- 数据库 ----
-sqlalchemy>=2.0.0                # ORM 框架
-alembic>=1.13.0                  # 数据库迁移
-aiosqlite>=0.20.0                # 异步 SQLite
-
-# ---- 安全 ----
-python-jose[cryptography]>=3.3.0 # JWT 令牌
-passlib[bcrypt]>=1.7.4           # 密码哈希
-cryptography>=42.0.0             # 加密工具
-
-# ---- 日志 & 监控 ----
-loguru>=0.7.2                    # 结构化日志
-prometheus-client>=0.20.0        # Prometheus 监控指标
-rich>=13.7.0                     # 终端富文本输出
-
-# ---- 配置 & 工具 ----
-python-dotenv>=1.0.0             # .env 文件支持
-click>=8.1.7                     # CLI 框架
-typer>=0.12.0                    # 现代 CLI 构建
-tqdm>=4.66.0                     # 进度条
-tenacity>=8.3.0                  # 重试机制
-jinja2>=3.1.3                    # 模板引擎（Prompt 模板）
-PyYAML>=6.0.1                    # YAML 配置文件支持
-toml>=0.10.2                     # TOML 配置文件支持
-
-# ---- 测试 ----
-pytest>=8.2.0                    # 测试框架
-pytest-asyncio>=0.23.0           # 异步测试支持
-pytest-cov>=5.0.0                # 测试覆盖率
-httpx>=0.27.0                    # HTTP 测试客户端
-pytest-mock>=3.14.0              # Mock 工具
-
-# ---- 代码质量 ----
-black>=24.4.0                    # 代码格式化
-isort>=5.13.0                    # 导入排序
-flake8>=7.0.0                    # 代码风格检查
-mypy>=1.10.0                     # 类型检查
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

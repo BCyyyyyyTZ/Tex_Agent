@@ -1,16 +1,23 @@
-# rag/__init__.py — 检索增强生成（RAG）模块入口
-from rag.retrievers.arxiv_retriever import ArXivRetriever
-from rag.retrievers.local_retriever import LocalRetriever
-from rag.retrievers.hybrid_retriever import HybridRetriever
-from rag.processors.document_processor import DocumentProcessor
-from rag.processors.chunk_splitter import ChunkSplitter
-from rag.processors.embedding_generator import EmbeddingGenerator
-from rag.knowledge_bases.paper_kb import PaperKnowledgeBase
-from rag.knowledge_bases.expert_kb import ExpertKnowledgeBase
-from rag.knowledge_bases.user_kb import UserKnowledgeBase
+"""
+RAG（检索增强生成）模块。
+
+提供文档索引、向量检索、检索管道的完整实现，
+以及对应的抽象接口，支持未来扩展为多类别知识库（论文库、专家库等）。
+
+可运行组件:
+    ChromaRetriever  - 基于 ChromaDB 的本地向量检索器
+    RAGPipeline      - 文档索引 + 检索的端到端管道
+
+[扩展] 接口:
+    BaseRetriever    - 向量检索器抽象基类
+    BaseRAGPipeline  - 检索管道抽象基类
+"""
+from rag.base_retriever import BaseRetriever, BaseRAGPipeline, RetrievedDocument
+from rag.rag_pipeline import RAGPipeline
 
 __all__ = [
-    "ArXivRetriever", "LocalRetriever", "HybridRetriever",
-    "DocumentProcessor", "ChunkSplitter", "EmbeddingGenerator",
-    "PaperKnowledgeBase", "ExpertKnowledgeBase", "UserKnowledgeBase",
+    "BaseRetriever",
+    "BaseRAGPipeline",
+    "RetrievedDocument",
+    "RAGPipeline",
 ]
