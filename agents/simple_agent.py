@@ -2,7 +2,7 @@
 SimpleAgent：最基础的可运行 Agent 实现。
 接收输入消息 → 调用 LLM → 返回响应，支持工具列表注入与有界多轮对话历史维护。
 """
-from typing import List, Optional
+from typing import List, Optional, Union
 import asyncio
 
 from langchain_openai import ChatOpenAI
@@ -78,6 +78,38 @@ class SimpleAgent(BaseAgent):
             )
         return self._llm
 
+    def _normalize_message(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+        """
+        将各种输入格式统一转换为 AgentMessage 对象。
+        
+        Args:
+            message: 可以是字符串、AgentMessage 对象或字典。
+            
+        Returns:
+            标准化的 AgentMessage 对象。
+        """
+        if isinstance(message, AgentMessage):
+            return message
+        elif isinstance(message, str):
+            return AgentMessage(
+                role="user",
+                content=message,
+                agent_name="user"
+            )
+        elif isinstance(message, dict):
+            return AgentMessage(
+                role=message.get("role", "user"),
+                content=message.get("content", str(message)),
+                agent_name=message.get("agent_name", "unknown")
+            )
+        else:
+            # 兜底处理
+            return AgentMessage(
+                role="user",
+                content=str(message),
+                agent_name="unknown"
+            )
+
     def _build_lc_messages(self, message: AgentMessage) -> list:
         """
         将对话历史与当前消息转换为 LangChain 消息格式列表。
@@ -105,12 +137,15 @@ class SimpleAgent(BaseAgent):
             excess = excess + (excess % 2)
             self._history = self._history[excess:]
 
-    def run(self, message: AgentMessage) -> AgentMessage:
+    def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
         """
         同步执行推理。
 
         Args:
-            message: 用户/上游节点发送的 AgentMessage。
+            message: 用户/上游节点发送的消息，可以是：
+                    - 字符串：自动转换为 AgentMessage
+                    - AgentMessage 对象：直接使用
+                    - 字典：根据字段转换为 AgentMessage
 
         Returns:
             LLM 生成的响应 AgentMessage（role="assistant"）。
@@ -118,20 +153,28 @@ class SimpleAgent(BaseAgent):
         Raises:
             AgentError: LLM 调用失败或返回异常时抛出。
         """
-        logger.debug(f"[{self._name}] 接收消息: {message.content[:80]}...")
+        # 1. 标准化输入消息
+        normalized_msg = self._normalize_message(message)
+        
+        # 2. 日志记录（安全截取）
+        content_preview = normalized_msg.content[:80] + "..." if len(normalized_msg.content) > 80 else normalized_msg.content
+        logger.debug(f"[{self._name}] 接收消息: {content_preview}")
+        
         try:
+            # 3. 调用 LLM
             llm = self._get_llm()
-            lc_messages = self._build_lc_messages(message)
+            lc_messages = self._build_lc_messages(normalized_msg)
             response = llm.invoke(lc_messages)
 
+            # 4. 构建响应消息
             result = AgentMessage(
                 role="assistant",
                 content=response.content,
                 agent_name=self._name,
             )
 
-            # 更新对话历史（用于下一轮 run() 时构建上下文）并按上限裁剪
-            self._history.append(message)
+            # 5. 更新对话历史（用于下一轮 run() 时构建上下文）并按上限裁剪
+            self._history.append(normalized_msg)
             self._history.append(result)
             self._trim_history()
 
@@ -149,7 +192,7 @@ class SimpleAgent(BaseAgent):
             logger.error(f"[{self._name}] LLM 调用失败: {e}")
             raise AgentError(f"Agent '{self._name}' 执行失败: {e}") from e
 
-    async def ainvoke(self, message: AgentMessage) -> AgentMessage:
+    async def ainvoke(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
         """异步执行推理（在线程池中运行同步 LLM 调用，不阻塞事件循环）。"""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.run, message)

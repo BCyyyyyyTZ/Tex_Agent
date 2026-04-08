@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#main.py
 """
 TeX_Agent 程序主入口。
 启动 Design → Think → Execute 基础工作流链路，验证 MVP 端到端可运行性。
@@ -45,7 +45,7 @@ def run_workflow(user_input: str) -> dict:
     Raises:
         Exception: 工作流构建失败或配置错误时。
     """
-    ctx = ContextManager(max_messages=5)
+    ctx = ContextManager(max_messages=200, default_limit=20)
     app = build_graph(context_manager=ctx)
 
     initial_state: WorkflowState = {

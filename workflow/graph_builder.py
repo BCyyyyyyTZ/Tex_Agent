@@ -13,7 +13,6 @@ from langgraph.graph import StateGraph, START, END
 
 from core.state import WorkflowState
 from agents.simple_agent import SimpleAgent
-from context.base import BaseContext
 from context.context_manager import ContextManager
 from workflow.nodes import make_design_node, make_think_node, make_execute_node, make_retrieve_node
 from workflow.edges import add_linear_edges
@@ -28,7 +27,7 @@ logger = get_logger(__name__)
 
 
 def build_graph(
-    context_manager: Optional[BaseContext] = None,
+    context_manager: Optional[ContextManager] = None,
     rag_pipeline: Optional["BaseRAGPipeline"] = None,
 ) -> Any:
     """
@@ -82,7 +81,7 @@ def build_graph(
     # ---- 创建共享上下文管理器 ----
     # 注意：必须用 `is not None` 而非 `or`，因为空的 ContextManager 的 len()==0
     # 会被 Python 视为 falsy，导致 `or` 错误地忽略调用者传入的实例。
-    ctx = context_manager if context_manager is not None else ContextManager(max_messages=200)
+    ctx = context_manager if context_manager is not None else ContextManager(default_limit=20)
 
     # ---- 创建各节点的 Agent 实例 ----
     design_agent = SimpleAgent(

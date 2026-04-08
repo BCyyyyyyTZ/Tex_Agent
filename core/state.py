@@ -2,9 +2,8 @@
 全局工作流状态定义。
 WorkflowState 是 LangGraph 图中所有节点共享与传递的状态对象。
 """
-import operator
-from typing import TypedDict, List, Optional, Annotated
-
+from typing import TypedDict, List, Optional,Union,Any,Dict
+from core.message import AgentMessage
 
 class WorkflowState(TypedDict):
     """
@@ -36,8 +35,7 @@ class WorkflowState(TypedDict):
         当 build_graph(rag_pipeline=...) 未传入 RAG 管道时，
         该字段始终为 ""，不影响现有工作流逻辑。
     """
-
-    messages: Annotated[List[dict], operator.add]
+    messages: List[Union[Dict[str, Any], AgentMessage, str]]
     current_node: str
     input: str
     output: str
