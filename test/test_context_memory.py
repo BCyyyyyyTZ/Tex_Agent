@@ -3,15 +3,14 @@
 TeX_Agent 完整功能演示
 包含：Memory分支、RAG检索、多Agent协作
 """
-import sys
-import os
 from dotenv import load_dotenv
 
 # 加载环境变量
 load_dotenv()
-
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from memory.factory import MemoryFactory
-from memory.base_memory import MemoryType
 from context.context_manager import ContextManager
 from workflow.graph_builder import build_graph
 from core.state import WorkflowState
