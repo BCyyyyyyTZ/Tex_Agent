@@ -7,7 +7,7 @@
   ✅ 彻底移除对 .content 的直接裸露访问
 """
 from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union
-
+from datetime import datetime
 from core.state import WorkflowState
 from core.message import AgentMessage
 from agents.base_agent import BaseAgent
@@ -55,6 +55,28 @@ def _safe_to_dict(msg: Union[AgentMessage, Dict[str, Any], str, Any]) -> Dict[st
     # 兜底：如果是字符串或其他类型
     return {"role": "assistant", "content": str(msg), "agent_name": "unknown"}
 
+
+
+
+# ================= 🟨 Retrieve 节点 =================
+def make_retrieve_node(
+    pipeline: "BaseRAGPipeline",
+    ctx: BaseContext,
+) -> Callable[[WorkflowState], dict]:
+    def retrieve_node(state: WorkflowState) -> dict:
+        logger.info("[Retrieve 节点] 开始执行...")
+        if not pipeline.is_ready():
+            return {"retrieved_context": "", "current_node": "retrieve", "error": None}
+
+        try:
+            retrieved = pipeline.retrieve(query=state["input"])
+            return {"retrieved_context": retrieved, "current_node": "retrieve", "error": None}
+        except Exception as e:
+            logger.error(f"Retrieve 节点执行失败: {e}")
+            return {"retrieved_context": "", "current_node": "retrieve", "error": str(e)}
+    return retrieve_node
+
+# ================= 📝 Design 节点（修复版） =================
 def make_design_node(
     agent: BaseAgent,
     ctx: BaseContext,
@@ -99,8 +121,25 @@ def make_design_node(
                 "error": str(e)
             }
 
-        # 5. 保存响应并返回
+        # 5. 保存响应到上下文
         ctx.save(resp)
+        
+        # 🔧 修复：保存到长期记忆
+        if memory:
+            try:
+                memory.save(
+                    key=f"design_{abs(hash(input_str)) % 10000}",
+                    value={
+                        "task": input_str[:100],
+                        "design": resp.content,
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    metadata={"node": "design", "agent": "design"}
+                )
+                logger.info(f"[Design 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
+            except Exception as e:
+                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
+
         logger.info(f"[Design 节点] 完成，输出 {len(resp.content)} 字符")
 
         return {
@@ -111,26 +150,7 @@ def make_design_node(
     return design_node
 
 
-# ================= 🟨 Retrieve 节点 =================
-def make_retrieve_node(
-    pipeline: "BaseRAGPipeline",
-    ctx: BaseContext,
-) -> Callable[[WorkflowState], dict]:
-    def retrieve_node(state: WorkflowState) -> dict:
-        logger.info("[Retrieve 节点] 开始执行...")
-        if not pipeline.is_ready():
-            return {"retrieved_context": "", "current_node": "retrieve", "error": None}
-
-        try:
-            retrieved = pipeline.retrieve(query=state["input"])
-            return {"retrieved_context": retrieved, "current_node": "retrieve", "error": None}
-        except Exception as e:
-            logger.error(f"Retrieve 节点执行失败: {e}")
-            return {"retrieved_context": "", "current_node": "retrieve", "error": str(e)}
-    return retrieve_node
-
-
-# ================= 🟩 Think 节点 =================
+# ================= 🟩 Think 节点（修复版） =================
 def make_think_node(
     agent: BaseAgent,
     ctx: BaseContext,
@@ -155,14 +175,32 @@ def make_think_node(
             return {"messages": state["messages"] + [_safe_to_dict(user_msg)], "current_node": "think", "error": str(e)}
             
         ctx.save(resp)
+        
+        # 🔧 修复：保存到长期记忆
+        if memory:
+            try:
+                memory.save(
+                    key=f"think_{abs(hash(state['input'])) % 10000}",
+                    value={
+                        "task": state['input'][:100],
+                        "analysis": resp.content[:500],
+                        "timestamp": datetime.now().isoformat()
+                    },
+                    metadata={"node": "think", "agent": "think"}
+                )
+                logger.info(f"[Think 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
+            except Exception as e:
+                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
+        
         return {
             "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "think", "error": None,
+            "current_node": "think", 
+            "error": None,
         }
     return think_node
 
 
-# ================= 🟥 Execute 节点 =================
+# ================= 🟥 Execute 节点（保持原样，已有记忆保存） =================
 def make_execute_node(
     agent: BaseAgent,
     ctx: BaseContext,
@@ -187,14 +225,21 @@ def make_execute_node(
             
         ctx.save(resp)
 
-        # (可选) 结果持久化到 Memory
+        # 结果持久化到 Memory
         if memory:
             try:
-                memory.save(key=f"res_{abs(hash(state['input']))%10000}", 
-                           value={"task": state["input"], "out": resp.content}, 
-                           metadata={"agent":"execute"})
-            except Exception as mem_e:
-                logger.warning(f"Memory 保存失败: {mem_e}")
+                memory.save(
+                    key=f"result_{abs(hash(state['input'])) % 10000}", 
+                    value={
+                        "task": state['input'], 
+                        "output": resp.content,
+                        "timestamp": datetime.now().isoformat()
+                    }, 
+                    metadata={"agent": "execute", "node": "execute"}
+                )
+                logger.info(f"[Execute 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
+            except Exception as e:
+                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
 
         return {
             "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],

@@ -1,3 +1,5 @@
+# workflow/graph_builder.py - 修复版本
+
 """
 LangGraph 图构建器（可运行）。
 负责创建、配置并编译 TeX_Agent 的工作流图。
@@ -7,7 +9,7 @@ LangGraph 图构建器（可运行）。
   不启用 RAG：START → Design → Think → Execute → END
   启用 RAG：   START → Design → Retrieve → Think → Execute → END
 """
-from typing import TYPE_CHECKING, Optional, Any
+from typing import TYPE_CHECKING, Optional, Any, Dict
 
 from langgraph.graph import StateGraph, START, END
 
@@ -22,6 +24,7 @@ from utils.logger import get_logger
 
 if TYPE_CHECKING:
     from rag.base_retriever import BaseRAGPipeline
+    from memory.base_memory import BaseMemory
 
 logger = get_logger(__name__)
 
@@ -29,6 +32,10 @@ logger = get_logger(__name__)
 def build_graph(
     context_manager: Optional[ContextManager] = None,
     rag_pipeline: Optional["BaseRAGPipeline"] = None,
+    design_memory: Optional["BaseMemory"] = None,
+    think_memory: Optional["BaseMemory"] = None,
+    execute_memory: Optional["BaseMemory"] = None,
+    shared_memory: Optional["BaseMemory"] = None,
 ) -> Any:
     """
     构建并编译 TeX_Agent LangGraph 工作流图。
@@ -47,6 +54,10 @@ def build_graph(
         rag_pipeline:    RAG 检索管道实例（BaseRAGPipeline 接口）。
                          None 表示不启用 RAG，工作流保持原有的三节点结构。
                          传入后在 Design 与 Think 节点之间插入 Retrieve 节点。
+        design_memory:   Design 节点的长期记忆实例。
+        think_memory:    Think 节点的长期记忆实例。
+        execute_memory:  Execute 节点的长期记忆实例。
+        shared_memory:   共享长期记忆实例（所有节点都可访问，优先级低于专属记忆）。
 
     Returns:
         已编译的 LangGraph CompiledGraph，支持：
@@ -62,6 +73,11 @@ def build_graph(
         pipeline = RAGPipeline()
         pipeline.index_file("papers/survey.md")
         app = build_graph(rag_pipeline=pipeline)
+
+        # 使用记忆
+        from memory.factory import MemoryFactory
+        shared_mem = MemoryFactory.create_shared_memory()
+        app = build_graph(shared_memory=shared_mem)
 
         result = app.invoke({
             "messages": [],
@@ -103,10 +119,23 @@ def build_graph(
     # TODO: 未来在此处接入 BaseRouter，根据任务类型动态选择 Agent 架构
     # TODO: 未来在此处支持从 workflow_config.py 读取自定义节点配置
 
-    # ---- 创建节点函数（通过工厂函数注入 Agent 和 ContextManager）----
-    design_fn = make_design_node(design_agent, ctx)
-    think_fn = make_think_node(think_agent, ctx)
-    execute_fn = make_execute_node(execute_agent, ctx)
+    # ---- 创建节点函数（通过工厂函数注入 Agent、ContextManager 和 Memory）----
+    # 优先级：专属记忆 > 共享记忆 > None
+    design_fn = make_design_node(
+        design_agent, 
+        ctx, 
+        memory=design_memory or shared_memory  # 优先用专属记忆，否则用共享记忆
+    )
+    think_fn = make_think_node(
+        think_agent, 
+        ctx, 
+        memory=think_memory or shared_memory
+    )
+    execute_fn = make_execute_node(
+        execute_agent, 
+        ctx, 
+        memory=execute_memory or shared_memory
+    )
 
     # ---- 构建 LangGraph StateGraph ----
     graph = StateGraph(WorkflowState)
@@ -141,6 +170,13 @@ def build_graph(
     app = graph.compile()
 
     logger.info(f"TeX_Agent 工作流图构建完成 [{topology}]")
+    
+    # 记录记忆配置
+    if design_memory or think_memory or execute_memory or shared_memory:
+        logger.info(f"记忆系统已集成: design={design_memory is not None}, "
+                   f"think={think_memory is not None}, "
+                   f"execute={execute_memory is not None}, "
+                   f"shared={shared_memory is not None}")
 
     # TODO: 未来在此处支持添加 checkpointer（如 MemorySaver / SqliteSaver）
     #       实现工作流状态的持久化，支持断点续跑

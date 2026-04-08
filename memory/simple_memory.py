@@ -43,6 +43,7 @@ class SimpleMemory(BaseMemory):
         
         # 更新索引
         self._index[key] = memory_item
+
     
     def load(self, key: str = None, limit: int = None) -> List[Any]:
         """加载记忆"""
