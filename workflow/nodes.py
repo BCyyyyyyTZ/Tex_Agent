@@ -3,12 +3,12 @@
 包含 design_node、think_node、execute_node 三个核心节点的工厂函数，
 以及 RAG 集成后新增的 retrieve_node 工厂函数。
 
-每个工厂函数接收依赖项（BaseAgent、BaseMemory、BaseRAGPipeline），
+每个工厂函数接收依赖项（BaseAgent、BaseContext、BaseRAGPipeline），
 返回 LangGraph 兼容的节点函数（符合"闭包注入依赖"的设计模式）。
 
 面向接口编程：
   - Agent 依赖 BaseAgent（而非 SimpleAgent）
-  - Memory 依赖 BaseMemory（而非 ContextManager）
+  - Memory 依赖 BaseContext（而非 ContextManager）
   - RAG 管道依赖 BaseRAGPipeline（而非 RAGPipeline）
 """
 from typing import TYPE_CHECKING, Callable
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable
 from core.state import WorkflowState
 from core.message import AgentMessage
 from agents.base_agent import BaseAgent
-from memory.base_memory import BaseMemory
+from context.base import BaseContext
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 
 def make_design_node(
     agent: BaseAgent,
-    ctx: BaseMemory,
+    ctx: BaseContext,
 ) -> Callable[[WorkflowState], dict]:
     """
     创建 Design（设计）节点函数。
@@ -37,7 +37,7 @@ def make_design_node(
 
     Args:
         agent: 执行此节点的 BaseAgent 实例（依赖接口，不依赖具体实现）。
-        ctx: 共享记忆实例（BaseMemory 接口），用于跨节点保存消息历史。
+        ctx: 共享记忆实例（BaseContext 接口），用于跨节点保存消息历史。
 
     Returns:
         符合 LangGraph 规范的节点函数（接收 WorkflowState，返回部分状态更新字典）。
@@ -89,7 +89,7 @@ def make_design_node(
 
 def make_retrieve_node(
     pipeline: "BaseRAGPipeline",
-    ctx: BaseMemory,
+    ctx: BaseContext,
 ) -> Callable[[WorkflowState], dict]:
     """
     创建 Retrieve（知识库检索）节点函数。
@@ -150,7 +150,7 @@ def make_retrieve_node(
 
 def make_think_node(
     agent: BaseAgent,
-    ctx: BaseMemory,
+    ctx: BaseContext,
 ) -> Callable[[WorkflowState], dict]:
     """
     创建 Think（深度思考）节点函数。
@@ -160,7 +160,7 @@ def make_think_node(
 
     Args:
         agent: 执行此节点的 BaseAgent 实例。
-        ctx: 共享记忆实例（BaseMemory 接口）。
+        ctx: 共享记忆实例（BaseContext 接口）。
 
     Returns:
         符合 LangGraph 规范的节点函数。
@@ -230,7 +230,7 @@ def make_think_node(
 
 def make_execute_node(
     agent: BaseAgent,
-    ctx: BaseMemory,
+    ctx: BaseContext,
 ) -> Callable[[WorkflowState], dict]:
     """
     创建 Execute（执行）节点函数。
@@ -243,7 +243,7 @@ def make_execute_node(
 
     Args:
         agent: 执行此节点的 BaseAgent 实例。
-        ctx: 共享记忆实例（BaseMemory 接口）。
+        ctx: 共享记忆实例（BaseContext 接口）。
 
     Returns:
         符合 LangGraph 规范的节点函数。

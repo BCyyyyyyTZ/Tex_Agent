@@ -10,7 +10,7 @@ core/ (AgentMessage, WorkflowState)   ← 所有人共同依赖，禁止随意�
        │
   ┌────┴─────────────────────────────┐
   │                                  │
-开发者B (BaseAgent 接口)         开发者D (BaseMemory / BaseRAGPipeline 接口)
+开发者B (BaseAgent 接口)         开发者D (BaseContext / BaseRAGPipeline 接口)
   │                                  │
   └────────────┬─────────────────────┘
                │
@@ -20,7 +20,7 @@ core/ (AgentMessage, WorkflowState)   ← 所有人共同依赖，禁止随意�
 ```
 
 > **接口变更约定**：`AgentMessage` 和 `WorkflowState` 字段只增不删不改名；
-> 修改 `BaseAgent.run()` / `BaseMemory.save()` 等核心接口签名前必须提前通知全组。
+> 修改 `BaseAgent.run()` / `BaseContext.save()` 等核心接口签名前必须提前通知全组。
 
 ---
 

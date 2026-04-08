@@ -24,7 +24,7 @@ class RouteDecision:
         agent: 对应的 Agent 实例引用。
         confidence: 路由置信度（0.0~1.0，越高表示越确定）。
         reason: 选择该 Agent 的决策原因说明（用于调试和日志）。
-    """
+    """ 
 
     agent_name: str
     agent: "BaseAgent"

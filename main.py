@@ -18,7 +18,7 @@ import sys
 from utils.logger import get_logger
 from workflow.graph_builder import build_graph
 from core.state import WorkflowState
-from memory.context_manager import ContextManager
+from context.context_manager import ContextManager
 
 logger = get_logger(__name__)
 
@@ -45,7 +45,7 @@ def run_workflow(user_input: str) -> dict:
     Raises:
         Exception: 工作流构建失败或配置错误时。
     """
-    ctx = ContextManager(max_messages=200)
+    ctx = ContextManager(max_messages=5)
     app = build_graph(context_manager=ctx)
 
     initial_state: WorkflowState = {

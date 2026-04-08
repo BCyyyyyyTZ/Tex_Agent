@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from workflow.graph_builder import build_graph
 from core.message import AgentMessage
-from memory.context_manager import ContextManager
+from context.context_manager import ContextManager
 
 
 def _make_mock_agent(name: str, response_content: str) -> MagicMock:

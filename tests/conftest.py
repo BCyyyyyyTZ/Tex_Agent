@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 from core.message import AgentMessage, ToolResult
 from core.state import WorkflowState
-from memory.context_manager import ContextManager
+from context.context_manager import ContextManager
 
 
 @pytest.fixture

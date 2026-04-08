@@ -19,7 +19,7 @@ from rag.base_retriever import BaseRetriever, RetrievedDocument, BaseRAGPipeline
 from rag.document_loader import chunk_text, load_and_chunk
 from rag.rag_pipeline import RAGPipeline
 from workflow.nodes import make_retrieve_node
-from memory.context_manager import ContextManager
+from context.context_manager import ContextManager
 
 
 # ------------------------------------------------------------------ #

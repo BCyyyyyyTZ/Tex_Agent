@@ -4,7 +4,7 @@ ContextManager 单元测试。
 """
 import pytest
 
-from memory.context_manager import ContextManager
+from context.context_manager import ContextManager
 from core.message import AgentMessage
 from core.exceptions import MemoryError as TexMemoryError
 

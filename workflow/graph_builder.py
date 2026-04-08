@@ -13,8 +13,8 @@ from langgraph.graph import StateGraph, START, END
 
 from core.state import WorkflowState
 from agents.simple_agent import SimpleAgent
-from memory.base_memory import BaseMemory
-from memory.context_manager import ContextManager
+from context.base import BaseContext
+from context.context_manager import ContextManager
 from workflow.nodes import make_design_node, make_think_node, make_execute_node, make_retrieve_node
 from workflow.edges import add_linear_edges
 from config.agent_config import DESIGN_AGENT_CONFIG, THINK_AGENT_CONFIG, EXECUTE_AGENT_CONFIG
@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 
 
 def build_graph(
-    context_manager: Optional[BaseMemory] = None,
+    context_manager: Optional[BaseContext] = None,
     rag_pipeline: Optional["BaseRAGPipeline"] = None,
 ) -> Any:
     """
@@ -43,7 +43,7 @@ def build_graph(
         Think 和 Execute 节点会自动将其注入 Prompt。
 
     Args:
-        context_manager: 共享上下文管理器实例（BaseMemory 接口）。
+        context_manager: 共享上下文管理器实例（BaseContext 接口）。
                          None 时自动创建新实例（max_messages=200）。
         rag_pipeline:    RAG 检索管道实例（BaseRAGPipeline 接口）。
                          None 表示不启用 RAG，工作流保持原有的三节点结构。

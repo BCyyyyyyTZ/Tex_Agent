@@ -93,7 +93,7 @@ TeX_Agent/
 │   └── image_gen_tool.py        # [扩展] ImageGenTool：DALL-E / SD API 接口占位
 │
 ├── memory/                       # 记忆与知识增强模块
-│   ├── base_memory.py           # BaseMemory（ABC）：save/load/clear 标准接口
+│   ├── base_memory.py           # BaseContext（ABC）：save/load/clear 标准接口
 │   ├── context_manager.py       # ✅ ContextManager：单次运行周期内的消息记录管理（可运行）
 │   ├── branch_context.py        # [扩展] BranchNode + ContextTree：类 Git 多分支上下文数据结构
 │   └── vector_store.py          # [扩展] VectorStoreBase：向量库（RAG）读写接口占位

@@ -33,7 +33,7 @@ class Settings:
     )
     llm_temperature: float = 0.7
     llm_max_tokens: int = 2048
-    llm_timeout: int = 60
+    llm_timeout: int = 240
     llm_max_retries: int = 3
 
     # ---- 日志配置 ----
