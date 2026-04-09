@@ -58,11 +58,7 @@ class DisplayFormatter:
         
         output = result.get("output", "")
         if output:
-            if len(output) > 1000:
-                print(f"\n📄 输出 (前1000字符):\n{output[:1000]}...")
-                print(f"\n💡 完整输出共 {len(output)} 字符")
-            else:
-                print(f"\n📄 输出:\n{output}")
+            print(f"\n📄 输出:\n{output}")
         else:
             print("\n（未生成输出）")
         

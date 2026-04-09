@@ -890,7 +890,8 @@ def print_help():
 ╔══════════════════════════════════════════════════════════════════
 ║                        可用命令                                   
 ╠══════════════════════════════════════════════════════════════════
-║  task <Prompt>          - 执行论文写作任务                                
+║  task <Prompt>          - 执行论文写作任务   
+║  plan <Prompt>          - 执行动态规划任务
 ║  branch list            - 列出所有分支                                  
 ║  branch create <name>   - 创建新分支                               
 ║  branch switch <name>   - 切换分支                                 
@@ -1001,6 +1002,49 @@ def main():
                 else:
                     cli.merge_branch(branch_name)
             
+            # 动态规划命令（验证 AutoAgentsMASPlanner + build_dynamic_graph）
+            elif first_word in ['plan', 'mas']:
+                task = ' '.join(parts[1:]) if len(parts) > 1 else ""
+                if not task:
+                    print("❌ 请提供任务描述")
+                    print("   示例: plan 帮我写论文的 Introduction 章节")
+                else:
+                    from router.planner import AutoAgentsMASPlanner
+                    from workflow.workflow_parser import YAMLWorkflowParser
+
+                    print("\n🧠 [1/4] 初始化规划器...")
+                    planner = AutoAgentsMASPlanner(max_plan_rounds=2)
+                    parser  = YAMLWorkflowParser()
+
+                    print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
+                    plan  = planner.decompose(task)
+
+                    print("   [3/4] 为各节点分配 Agent 类型...")
+                    plan  = planner.assign(plan, [])
+
+                    nodes, edges = parser.from_task_plan(plan)
+                    print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
+                    for n in nodes:
+                        print(f"      - [{n.agent_name}] {n.node_id}")
+
+                    print("   [4/4] 构建并运行动态图...")
+                    app = parser.build_graph(nodes, edges)
+                    initial_state = {
+                        "messages": [], "current_node": "", "input": task,
+                        "output": "", "error": None, "metadata": {},
+                        "retrieved_context": "",
+                    }
+                    print("\n" + display.separator())
+                    result = app.invoke(initial_state)
+                    print(display.separator())
+                    display.print_result(result)
+
+                    # 提示检查点
+                    if result.get("error") is None:
+                        node_ids = [n.node_id for n in nodes]
+                        hit = [nid for nid in node_ids if nid in result.get("metadata", {})]
+                        print(f"\n   节点结构化输出已写入 metadata：{hit}")
+
             # 显式任务命令
             elif first_word in ['task', 'run', 'do']:
                 task = ' '.join(parts[1:]) if len(parts) > 1 else ""
