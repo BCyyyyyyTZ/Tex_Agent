@@ -229,18 +229,27 @@ TeX_Agent/
 ├── requirements.txt             # 项目依赖（langgraph, langchain, chromadb, arxiv 等）
 ├── .env.example                 # 环境变量示例（OPENAI_API_KEY 等，复制为 .env 使用）
 ├── README.md                    # 本文件
+├── Framework.md                 # 框架拓展路线图
+│
+├── doc/                         # 相关说明文件
+├── change_logs/                 # 变更记录（各成员子目录）
 │
 ├── config/                      # 统一配置层（开发者只需关注此目录即可完成大部分配置）
 │   ├── settings.py              # 全局配置：LLM 模型、API Key、RAG 分块参数、超时、重试
 │   ├── agent_config.py          # 各 Agent 的 system prompt、temperature 等行为参数
 │   ├── workflow_config.py       # 工作流节点顺序、边的定义（支持未来扩展为配置文件驱动）
+│   ├── planner_config.py        # 动态规划：温度、轮数、JSON 输出约束、parse_llm_json 等
 │   └── logging_config.py        # 日志级别、格式、输出目标配置
 │
 ├── core/                        # 核心基础层：全项目共用的数据结构与协议
 │   ├── state.py                 # WorkflowState（TypedDict）：消息历史、retrieved_context 等
 │   ├── message.py               # AgentMessage（Pydantic）：Agent 间标准通信载体
-│   └── exceptions.py            # 自定义异常：AgentError、ToolError、WorkflowError 等
+│   ├── exceptions.py            # 自定义异常：AgentError、ToolError、WorkflowError 等
+│   └── agent_cli.py             # TeXAgentCLI：记忆、上下文、build_graph、分支与 run_task
 │
+├── context/                     # 上下文管理
+│   ├── base.py
+│   └── context_manager.py
 ├── agents/                      # 智能体模块
 │   ├── base_agent.py            # BaseAgent（ABC）：定义 run/ainvoke/reset 标准接口
 │   ├── simple_agent.py          # ✅ SimpleAgent：接收输入→调用 LLM→返回结果（可运行）
@@ -272,7 +281,7 @@ TeX_Agent/
 │   ├── base_memory.py           # BaseContext（ABC）：save/load/clear 标准接口
 │   ├── context_manager.py       # ✅ ContextManager：单次运行周期内的消息记录管理（可运行）
 │   ├── branch_context.py        # [扩展] BranchNode + ContextTree：类 Git 多分支上下文数据结构
-│   └── vector_store.py          # [扩展] VectorStoreBase：向量库（RAG）读写接口占位
+│   └── factory.py
 │
 ├── router/                       # 路由与控制模块
 │   ├── base_router.py           # [扩展] BaseRouter（ABC）：根据任务复杂度动态分配 Agent 接口
