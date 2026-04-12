@@ -43,7 +43,7 @@ class Settings:
     log_format: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 
     # ---- ArXiv 工具配置 ----
-    arxiv_max_results: int = 3
+    arxiv_max_results: int = 5
 
     # ---- RAG 配置 ----
     # rag_chunk_size:     文档分块大小（字符数），较大值保留更多上下文，但向量质量下降

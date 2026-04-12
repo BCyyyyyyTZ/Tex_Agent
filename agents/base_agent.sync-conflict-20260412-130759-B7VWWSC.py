@@ -3,57 +3,10 @@ BaseAgent 抽象基类。
 所有 Agent 实现均继承此类，保证接口统一，支持面向接口编程与 Mock 测试。
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from typing import List
 import asyncio
-import openai
 
 from core.message import AgentMessage
-from tools.base_tool import BaseTool
-
-class AgentMemoryItem:
-    """
-    Agent 内存项，用于存储单条消息。
-    """
-
-    def __init__(self, data: any, data_type: str):
-        self.data = data
-        self.type = data_type  
-
-
-class AgentMemory:
-    """
-    Agent 内存管理类，用于存储和检索 Agent 运行时的状态。
-    """
-
-    def __init__(self):
-        self.memory: List[AgentMemoryItem] = []
-
-    def add(self, item: AgentMemoryItem):
-        self.memory.append(item)
-
-    def clear(self):
-        self.memory.clear()
-
-    def get(self, item_type: str) -> List[AgentMemoryItem]:
-        return [item for item in self.memory if item.type == item_type]
-
-class LlmClient:
-	def __init__(self, model: str, api_key: str, base_url: str = "https://api.groq.com/openai/v1", temperature: float = 0.2):
-		self.model = model
-		self.api_key = api_key
-		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
-		self.temperature = temperature
-		
-	def response(self, prompt:str) -> str:
-		response = self.client.chat.completions.create(
-				model=self.model,
-				messages=[
-					{"role": "user", "content": prompt}
-				],
-				temperature=self.temperature,
-				max_tokens=4096
-			)
-		return response.choices[0].message.content.strip()
 
 
 class BaseAgent(ABC):
@@ -74,20 +27,11 @@ class BaseAgent(ABC):
     TODO: 未来在此处增加 emotion_hook(message: AgentMessage) 情感分析钩子接口
     TODO: 未来在此处增加 before_run / after_run 生命周期钩子，用于中间件拦截
     """
-    def __init__(
-        self, 
-        name: str, 
-        system_prompt: str, 
-        tools: Optional[List[BaseTool]]
-    ):
-        self.name = name
-        self.system_prompt = system_prompt
-        self.tools: List[BaseTool] = tools
-        self.memory = AgentMemory()
-        self.llms = {}
-  
-    def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
-        self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Agent 唯一标识名（英文，PascalCase，如 "DesignAgent"）。"""
 
     @abstractmethod
     def run(self, message: AgentMessage) -> AgentMessage:
@@ -103,7 +47,6 @@ class BaseAgent(ABC):
         Raises:
             AgentError: 推理执行失败时抛出。
         """
-        pass
 
     async def ainvoke(self, message: AgentMessage) -> AgentMessage:
         """
@@ -118,7 +61,8 @@ class BaseAgent(ABC):
         Returns:
             Agent 生成的响应 AgentMessage。
         """
-        pass
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.run, message)
 
     @abstractmethod
     def reset(self) -> None:
@@ -126,7 +70,6 @@ class BaseAgent(ABC):
         重置 Agent 内部状态（如清空对话历史、工具调用记录等）。
         在开始处理新任务前调用，防止历史上下文污染新任务。
         """
-        self.memory.clear()
 
     def get_history(self) -> List[AgentMessage]:
         """
