@@ -32,190 +32,58 @@ pytest tests/ -v
 
 ## 在现有架构基础上进行修改的说明
 
-**注意：硬编码的固定工作流设计 与 动态planner 的链路在当前框架下时完全分开处理的**
+**注意：当前版本已统一为动态工作流链路。默认、自定义、plan 都走同一套动态构图与执行器。**
 
-### 硬编码的固定工作流设计
+### 统一工作流设计（推荐按此理解与修改）
 
-**这是task命令走的固定工作流图结构，当前流程是：Design -> Think -> Execute**
+**现在 `task` 与 `plan` 的底层执行方式一致，差异只在前置步骤（是否先规划）。**
 
 #### 入口调用链
 
-main.py -> core/agent_cli.py 的 run_task() -> workflow/graph_builder.py 的 build_graph()
+`task`：`main.py` -> `core/agent_cli.py` `run_task()` -> `_execute_with_app()`  
+`plan`：`main.py` -> `core/agent_cli.py` `run_plan_task()` -> `_execute_with_app()`
 
 #### 核心代码
 
-##### 1. workflow/graph_builder.py 固定图结构与专家agent实例化
+##### 1. workflow/graph_builder.py 动态配置装配
 
-这里是硬编码图结构和“节点绑定哪个 agent”的第一现场，可以修改：**节点的集合（新增或替换）、边的关系（目前暂时只支持线性边）**
+- `build_app_from_workflow(workflow_name, ...)`：统一构建入口
+- `load_workflow_graph_config(workflow_name)`：从 `workflow_registry` 读取配置
+- `build_dynamic_graph(nodes, edges, ...)`：根据配置构图并执行
 
-目前这里定义了design_agent、think_agent、execute_agent（*代码~103行*），**如何实例化一个agent的示例如下：**
+当前不再维护硬编码 `design/think/execute` 构图逻辑，默认工作流也走配置文件驱动：
+- `config/workflow_registry.json` 中的 `default`
+- 对应配置文件 `config/workflow_default_dynamic.json`
 
-```Python
-design_agent = SimpleAgent(
-    name=DESIGN_AGENT_CONFIG["name"],
-    system_prompt=DESIGN_AGENT_CONFIG["system_prompt"],
-    temperature=DESIGN_AGENT_CONFIG.get("temperature"),
-)
-```
+##### 2. workflow/workflow_registry.py 工作流注册
 
-+ 目前主要支持`SimpleAgent`，其他agent基础类型有待后续开发
-+ 需要包含`name`、`system_prompt`、`temperature`三个字段
-+ 可以参考下面的说明（**请参考本章节的第3小节**），在`config/agent_config.py`中添加相关配置，也可以直接在这里硬编码写死prompt、名称等信息
+- `workflows.<name>` 支持 `file` 类型配置
+- `task --wf <name> ...` 即按名称加载对应配置
 
-**创建节点函数**（*代码~124行*），*关于节点函数的具体内容见下面的介绍(**请参考本章节的第2小节**)*：
+##### 3. workflow/nodes.py 节点执行逻辑
 
-```Python
-design_fn = make_design_node(
-        design_agent, 
-        ctx, 
-        memory=design_memory or shared_memory  # 优先用专属记忆，否则用共享记忆
-    )
-```
+当前动态节点统一使用 `make_generic_agent_node()`：
+- 从节点配置读取 `system_prompt/subtask/depends_on`
+- 统一注入 JSON 输出约束
+- 解析结构化输出并写入 `state["metadata"]`
+- 支持将结果写入共享记忆
 
-然后**在图结构中添加节点node**（*代码~144行*）：
+##### 4. config/agent_config.py 的角色
 
-```Python
-graph.add_node("design", design_fn)
-```
-
-目前暂时不支持RAG，所以将边添加在`if rag_enabled`的else分支中：
-
-```Python
-if rag_enabled:
-    ...
-else:
-    # 目前修改图结构加在这个分支中
-    graph.add_edge(START, ENTRY_NODE)
-    add_linear_edges(graph)
-```
-
-+ 以上示例展示的是：**添加线性边**，对于目前已有的框架，就是Design → Think → Execute
-+ 目前提供的方法`add_linear_edges()`具体信息见下方的说明，目前是一个硬编码写死的逻辑，如果需要自定义添加边，**请参考本章节的第4小节**
-
-##### 2. workflow/nodes.py 每个节点的任务提示词与行为
-
-这里主要是节点函数，图节点这里定义输入读取、Prompt 组装、Agent 调用、上下文/记忆写入和状态回传的相关设置
-
-可以在这里**定义新的节点函数**（*代码~80行*）：
-
-```Python
-def make_design_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def design_node(state: WorkflowState) -> dict:
-        # 1. 安全获取任务输入
-        raw_input = state.get('input', '')
-        if hasattr(raw_input, 'content'):
-            input_str = str(raw_input.content)
-        elif isinstance(raw_input, str):
-            input_str = raw_input
-        else:
-            input_str = str(raw_input)
-
-        # 2. 构造用户消息
-        user_msg = AgentMessage(
-            role="user",
-            content=f"请分析任务并制定设计方案：\n\n{input_str}",
-            agent_name="user"
-        )
-        ctx.save(user_msg)
-
-        # 3. GSSC 上下文构建
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 10, "mem_limit": 3, "max_tokens": 6000, "format": "plain"
-        })
-
-        # 4. 生成 Prompt 并调用 Agent
-        prompt = f"<system>你是论文架构师。请基于上下文制定结构化设计方案。</system>\n\n{context}\n\n<task>{input_str}</task>"
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "design")
-        except Exception as e:
-            ...
-
-        # 5. 保存响应到上下文
-        ctx.save(resp)
-        
-        # 保存到长期记忆
-        if memory:
-            ...
-
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "design",
-            "error": None,
-        }
-    return design_node
-```
-
-+ 可以使用`logger.info()`打印输出调试日志信息
-+ 节点函数主要的流程是：**输入规范化 → 上下文构建 → `<system>/<task>` Prompt 注入 → `agent.run()` 执行 → `_ensure_agent_message()` 统一返回类型 → `_safe_to_dict()` 回写 `state["messages"]` → 返回 `current_node/error/output`**，修改或加入新的节点函数时也建议保存这个结构
-
-##### 3. config/agent_config.py 固定的专家agent配置
-
-这里可以**声明图节点所需的名称和系统提示词**（*代码~6行*）：
-
-```Python
-DESIGN_AGENT_CONFIG = {
-    "name": "DesignAgent",
-    "system_prompt": (
-        ...
-    ),
-    "temperature": 0.5,
-}
-```
-
-##### 4. config/workflow_config.py + workflow/edges.py 边的相关配置
-
-**注意：改动图结构时，两个地方要一起改，保持一致**
-
-**在config/workflow_config.py定义边结构的配置**，目前的示例如下：
-
-```Python
-# 节点执行顺序列表
-WORKFLOW_NODES: List[str] = ["design", "think", "execute"]
-# 线性边定义：(起始节点, 目标节点)
-WORKFLOW_EDGES: List[Tuple[str, str]] = [
-    ("design", "think"),
-    ("think", "execute"),
-]
-# 工作流入口节点
-ENTRY_NODE: str = "design"
-# 工作流终止节点
-FINISH_NODE: str = "execute"
-```
-
-+ 可以按照新建节点的名称和结构修改对应的线性边结构
-+ **注意应该包含工作流的入口和终止节点**：ENTRY_NODE、FINISH_NODE
-
-在workflow/edges.py中给出添加边的具体方法（*代码~16行*）：
-
-```Python
-def add_linear_edges(graph: StateGraph) -> None:
-    """
-    读取 config/workflow_config.py 中定义的 WORKFLOW_EDGES，
-    依次为每对节点添加有向边，并将终止节点连接到 END。
-    """
-    for from_node, to_node in WORKFLOW_EDGES:
-        graph.add_edge(from_node, to_node)
-
-    graph.add_edge(FINISH_NODE, END) # 添加终止边
-```
+`agent_config.py` 仍可作为提示词模板来源，但当前默认执行路径优先读取  
+`config/workflow_default_dynamic.json` 中的节点配置。建议以 workflow 配置为准进行维护。
 
 #### 修改时应遵守的规约
 
 + 不要破坏状态契约：core/state.py 的 WorkflowState 字段名保持兼容（messages/current_node/input/output/error/metadata）。
-+ 固定链路与动态链路隔离：只改 build_graph() 相关路径，不改 build_dynamic_graph() / YAMLWorkflowParser / planner。
++ 所有 workflow 修改都以配置为主（registry + workflow json/yaml），避免再引入硬编码图路径。
 + 节点返回格式统一：每个节点返回 dict，至少保证 current_node、error 语义一致；messages 继续走可合并列表。
 + Agent 接口不改签名：遵守 BaseAgent 的 run/reset/ainvoke 约束，避免影响其他实现。
 + 目前RAG开发不太成熟，请忽略RAG相关的接口和内容
 
 ### 动态planner
 
-**这是plan命令走的planner设计路线**
+**plan 命令当前会先执行规划，然后复用与 task 相同的底层执行器。**
 
 这部分是让planner agent自动生成流程的路线，目前不太能支持亲自设计图结构和agent的要求，相关说明后续补充
 
@@ -225,7 +93,7 @@ def add_linear_edges(graph: StateGraph) -> None:
 
 ```
 TeX_Agent/
-├── main.py                      # 程序主入口，启动 Design→Think→Execute 基础工作流
+├── main.py                      # 程序主入口，支持 task / task --wf / plan
 ├── requirements.txt             # 项目依赖（langgraph, langchain, chromadb, arxiv 等）
 ├── .env.example                 # 环境变量示例（OPENAI_API_KEY 等，复制为 .env 使用）
 ├── README.md                    # 本文件
@@ -237,7 +105,9 @@ TeX_Agent/
 ├── config/                      # 统一配置层（开发者只需关注此目录即可完成大部分配置）
 │   ├── settings.py              # 全局配置：LLM 模型、API Key、RAG 分块参数、超时、重试
 │   ├── agent_config.py          # 各 Agent 的 system prompt、temperature 等行为参数
-│   ├── workflow_config.py       # 工作流节点顺序、边的定义（支持未来扩展为配置文件驱动）
+│   ├── workflow_registry.json   # 工作流注册表（name -> file path）
+│   ├── workflow_default_dynamic.json     # 默认工作流动态配置
+│   ├── workflow_five_nodes_example.json  # 5 节点示例工作流配置
 │   ├── planner_config.py        # 动态规划：温度、轮数、JSON 输出约束、parse_llm_json 等
 │   └── logging_config.py        # 日志级别、格式、输出目标配置
 │
@@ -245,7 +115,7 @@ TeX_Agent/
 │   ├── state.py                 # WorkflowState（TypedDict）：消息历史、retrieved_context 等
 │   ├── message.py               # AgentMessage（Pydantic）：Agent 间标准通信载体
 │   ├── exceptions.py            # 自定义异常：AgentError、ToolError、WorkflowError 等
-│   └── agent_cli.py             # TeXAgentCLI：记忆、上下文、build_graph、分支与 run_task
+│   └── agent_cli.py             # TeXAgentCLI：分支上下文、统一执行器、run_task/run_plan_task
 │
 ├── context/                     # 上下文管理
 │   ├── base.py
@@ -258,9 +128,9 @@ TeX_Agent/
 │   └── plan_and_solve_agent.py  # [扩展] PlanAndSolveAgent：任务分解执行接口占位
 │
 ├── workflow/                     # 工作流编排模块（LangGraph）
-│   ├── graph_builder.py         # ✅ 构建并编译 LangGraph StateGraph；支持可选 RAG 注入
-│   ├── nodes.py                 # ✅ design/think/execute/retrieve 节点工厂函数
-│   ├── edges.py                 # ✅ 基础线性边定义；[扩展] 条件边路由接口占位
+│   ├── graph_builder.py         # ✅ 统一动态构图入口（registry -> nodes/edges -> build_dynamic_graph）
+│   ├── nodes.py                 # ✅ 通用动态节点工厂 make_generic_agent_node
+│   ├── workflow_registry.py     # ✅ 工作流注册加载器
 │   └── workflow_parser.py       # [扩展] 解析用户 YAML/JSON 配置，动态组装 Graph 节点
 │
 ├── rag/                          # ✅ RAG 检索增强生成模块（可运行）
@@ -316,8 +186,8 @@ TeX_Agent/
 
 1. **基于接口编程（面向抽象）**：所有 Agent、Tool、Memory、RAG 管道均依赖抽象基类（ABC）定义的接口进行交互，具体实现彼此解耦，方便 4 位开发者并行开发、Mock 测试。
 2. **分层架构**：`core` → `agents/tools/memory/rag` → `workflow` → `router`，层间单向依赖，避免循环引用。
-3. **最小可运行 MVP**：未标注 `[扩展]` 的模块实现完整可运行代码，可直接 `python main.py` 跑通 `Design → Think → Execute` 基础链路。
-4. **RAG 可选接入**：RAG 模块以插件方式集成，通过 `build_graph(rag_pipeline=pipeline)` 一行代码开启，图结构自动扩展为 `Design → Retrieve → Think → Execute`，不传参则保持原有三节点结构，不破坏现有测试。
+3. **最小可运行 MVP**：未标注 `[扩展]` 的模块实现完整可运行代码，可直接 `python main.py` 通过动态配置跑通 default workflow。
+4. **统一动态工作流**：default / 自定义 workflow / plan 统一走配置图与 `build_dynamic_graph`，减少双轨维护成本。
 5. **[扩展] 接口占位**：标注 `[扩展]` 的模块使用 ABC + `raise NotImplementedError` 占位，并附详细 Docstring，方便后续填充业务逻辑。
 6. **统一配置**：所有可调参数集中在 `config/` 目录，使用者只需修改该目录下的文件即可完成配置。
 7. **并发友好**：核心异步逻辑封装在 `utils/concurrency.py`，LangGraph 节点支持 `async` 执行。
@@ -332,17 +202,18 @@ TeX_Agent/
 用户输入
    │
    ▼
-main.py  →  build_graph(context_manager=ctx)
+main.py  →  TeXAgentCLI.run_task / run_plan_task
                │
                ▼
           WorkflowState
           └─ retrieved_context = ""  （始终为空）
                │
-    ┌──────────┼──────────┐
-    ▼          ▼          ▼
-design_node  think_node  execute_node
-    │          │          │
-    └──────────┴──────────┘
+      build_app_from_workflow(default)
+               │
+               ▼
+       build_dynamic_graph(nodes, edges)
+               │
+        make_generic_agent_node()
                │
     SimpleAgent.run()  →  LLM  →  AgentMessage
                │

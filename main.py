@@ -874,6 +874,38 @@ from core.agent_cli import TeXAgentCLI
 from utils.display import display
 
 
+def parse_task_args(raw_args: str):
+    """
+    解析 task 参数，支持：
+    - task <prompt>
+    - task --wf <workflow_name> <prompt>
+    - task --wf=<workflow_name> <prompt>
+    """
+    args = raw_args.strip()
+    if not args:
+        return None, ""
+
+    tokens = args.split()
+    if not tokens:
+        return None, ""
+
+    # 格式：--wf=name xxx
+    if tokens[0].startswith("--wf="):
+        workflow_name = tokens[0].split("=", 1)[1].strip()
+        task = " ".join(tokens[1:]).strip()
+        return workflow_name or None, task
+
+    # 格式：--wf name xxx
+    if tokens[0] == "--wf":
+        if len(tokens) < 2:
+            raise ValueError("参数格式错误：--wf 后需要指定工作流名称")
+        workflow_name = tokens[1].strip()
+        task = " ".join(tokens[2:]).strip()
+        return workflow_name or None, task
+
+    return None, args
+
+
 def print_banner():
     """打印欢迎横幅"""
     print(display.banner(
@@ -890,7 +922,8 @@ def print_help():
 ╔══════════════════════════════════════════════════════════════════
 ║                        可用命令                                   
 ╠══════════════════════════════════════════════════════════════════
-║  task <Prompt>          - 执行论文写作任务   
+║  task <Prompt>          - 执行默认工作流任务
+║  task --wf <name> <Prompt> - 执行指定工作流任务
 ║  plan <Prompt>          - 执行动态规划任务
 ║  branch list            - 列出所有分支                                  
 ║  branch create <name>   - 创建新分支                               
@@ -1009,51 +1042,30 @@ def main():
                     print("❌ 请提供任务描述")
                     print("   示例: plan 帮我写论文的 Introduction 章节")
                 else:
-                    from router.planner import AutoAgentsMASPlanner
-                    from workflow.workflow_parser import YAMLWorkflowParser
-
-                    print("\n🧠 [1/4] 初始化规划器...")
-                    planner = AutoAgentsMASPlanner(max_plan_rounds=2)
-                    parser  = YAMLWorkflowParser()
-
-                    print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
-                    plan  = planner.decompose(task)
-
-                    print("   [3/4] 为各节点分配 Agent 类型...")
-                    plan  = planner.assign(plan, [])
-
-                    nodes, edges = parser.from_task_plan(plan)
-                    print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
-                    for n in nodes:
-                        print(f"      - [{n.agent_name}] {n.node_id}")
-
-                    print("   [4/4] 构建并运行动态图...")
-                    app = parser.build_graph(nodes, edges)
-                    initial_state = {
-                        "messages": [], "current_node": "", "input": task,
-                        "output": "", "error": None, "metadata": {},
-                        "retrieved_context": "",
-                    }
                     print("\n" + display.separator())
-                    result = app.invoke(initial_state)
+                    result = cli.run_plan_task(task)
                     print(display.separator())
                     display.print_result(result)
 
-                    # 提示检查点
-                    if result.get("error") is None:
-                        node_ids = [n.node_id for n in nodes]
-                        hit = [nid for nid in node_ids if nid in result.get("metadata", {})]
-                        print(f"\n   节点结构化输出已写入 metadata：{hit}")
-
             # 显式任务命令
             elif first_word in ['task', 'run', 'do']:
-                task = ' '.join(parts[1:]) if len(parts) > 1 else ""
+                raw_task_args = ' '.join(parts[1:]) if len(parts) > 1 else ""
+                try:
+                    workflow_name, task = parse_task_args(raw_task_args)
+                except ValueError as e:
+                    print(f"❌ {e}")
+                    print("   用法1: task <任务描述>")
+                    print("   用法2: task --wf <工作流名> <任务描述>")
+                    print("   示例 : task --wf report_flow 帮我写摘要")
+                    continue
+
                 if not task:
                     print("❌ 请提供任务描述")
-                    print("   示例: task 请帮我写一篇关于 Transformer 的论文引言")
+                    print("   示例1: task 请帮我写一篇关于 Transformer 的论文引言")
+                    print("   示例2: task --wf report_flow 帮我写摘要")
                 else:
                     print("\n" + display.separator())
-                    result = cli.run_task(task)
+                    result = cli.run_task(task, workflow_name=workflow_name)
                     print(display.separator())
                     display.print_result(result)
             

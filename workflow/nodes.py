@@ -15,7 +15,6 @@ from context.base import BaseContext
 from utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from rag.base_retriever import BaseRAGPipeline
     from memory.base_memory import BaseMemory
 
 logger = get_logger(__name__)
@@ -54,200 +53,6 @@ def _safe_to_dict(msg: Union[AgentMessage, Dict[str, Any], str, Any]) -> Dict[st
         }
     # 兜底：如果是字符串或其他类型
     return {"role": "assistant", "content": str(msg), "agent_name": "unknown"}
-
-
-
-
-# ================= 🟨 Retrieve 节点 =================
-def make_retrieve_node(
-    pipeline: "BaseRAGPipeline",
-    ctx: BaseContext,
-) -> Callable[[WorkflowState], dict]:
-    def retrieve_node(state: WorkflowState) -> dict:
-        logger.info("[Retrieve 节点] 开始执行...")
-        if not pipeline.is_ready():
-            return {"retrieved_context": "", "current_node": "retrieve", "error": None}
-
-        try:
-            retrieved = pipeline.retrieve(query=state["input"])
-            return {"retrieved_context": retrieved, "current_node": "retrieve", "error": None}
-        except Exception as e:
-            logger.error(f"Retrieve 节点执行失败: {e}")
-            return {"retrieved_context": "", "current_node": "retrieve", "error": str(e)}
-    return retrieve_node
-
-# ================= 📝 Design 节点（修复版） =================
-def make_design_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def design_node(state: WorkflowState) -> dict:
-        logger.info("[Design 节点] 开始执行...")
-
-        # 1. 安全获取任务输入
-        raw_input = state.get('input', '')
-        if hasattr(raw_input, 'content'):
-            input_str = str(raw_input.content)
-        elif isinstance(raw_input, str):
-            input_str = raw_input
-        else:
-            input_str = str(raw_input)
-
-        # 2. 构造用户消息
-        user_msg = AgentMessage(
-            role="user",
-            content=f"请分析任务并制定设计方案：\n\n{input_str}",
-            agent_name="user"
-        )
-        ctx.save(user_msg)
-
-        # 3. GSSC 上下文构建
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 10, "mem_limit": 3, "max_tokens": 6000, "format": "plain"
-        })
-
-        # 4. 生成 Prompt 并调用 Agent
-        prompt = f"<system>你是论文架构师。请基于上下文制定结构化设计方案。</system>\n\n{context}\n\n<task>{input_str}</task>"
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "design")
-        except Exception as e:
-            logger.error(f"Design 节点执行失败: {e}")
-            return {
-                "messages": state["messages"] + [_safe_to_dict(user_msg)],
-                "current_node": "design", 
-                "error": str(e)
-            }
-
-        # 5. 保存响应到上下文
-        ctx.save(resp)
-        
-        # 🔧 修复：保存到长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"design_{abs(hash(input_str)) % 10000}",
-                    value={
-                        "task": input_str[:100],
-                        "design": resp.content,
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    metadata={"node": "design", "agent": "design"}
-                )
-                logger.info(f"[Design 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-
-        logger.info(f"[Design 节点] 完成，输出 {len(resp.content)} 字符")
-
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "design",
-            "error": None,
-        }
-    return design_node
-
-
-# ================= 🟩 Think 节点（修复版） =================
-def make_think_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def think_node(state: WorkflowState) -> dict:
-        logger.info("[Think 节点] 开始执行...")
-
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 12, "mem_limit": 5, "max_tokens": 8000, "format": "plain"
-        })
-
-        prompt = f"<system>你是技术评审专家。请对设计方案进行批判性思考与细化。</system>\n\n{context}\n\n<task>{state['input']}\n\n请输出：\n1）关键技术细节\n2）潜在问题与风险\n3）优化建议</task>"
-
-        user_msg = AgentMessage(role="user", content=prompt[:150]+"...", agent_name="system")
-        ctx.save(user_msg)
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "think")
-        except Exception as e:
-            return {"messages": state["messages"] + [_safe_to_dict(user_msg)], "current_node": "think", "error": str(e)}
-            
-        ctx.save(resp)
-        
-        # 🔧 修复：保存到长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"think_{abs(hash(state['input'])) % 10000}",
-                    value={
-                        "task": state['input'][:100],
-                        "analysis": resp.content[:500],
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    metadata={"node": "think", "agent": "think"}
-                )
-                logger.info(f"[Think 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-        
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "think", 
-            "error": None,
-        }
-    return think_node
-
-
-# ================= 🟥 Execute 节点（保持原样，已有记忆保存） =================
-def make_execute_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def execute_node(state: WorkflowState) -> dict:
-        logger.info("[Execute 节点] 开始执行...")
-
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 20, "mem_limit": 5, "max_tokens": 10000, "format": "plain"
-        })
-
-        prompt = f"<system>你是最终执行者，请直接输出可用结果。</system>\n\n{context}\n\n<task>{state['input']}</task>"
-        user_msg = AgentMessage(role="user", content=prompt[:150]+"...", agent_name="system")
-        ctx.save(user_msg)
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "execute")
-        except Exception as e:
-            return {"messages": state["messages"] + [_safe_to_dict(user_msg)], "current_node": "execute", "output": f"失败: {e}", "error": str(e)}
-            
-        ctx.save(resp)
-
-        # 结果持久化到 Memory
-        if memory:
-            try:
-                memory.save(
-                    key=f"result_{abs(hash(state['input'])) % 10000}", 
-                    value={
-                        "task": state['input'], 
-                        "output": resp.content,
-                        "timestamp": datetime.now().isoformat()
-                    }, 
-                    metadata={"agent": "execute", "node": "execute"}
-                )
-                logger.info(f"[Execute 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "execute",
-            "output": resp.content,
-            "error": None,
-        }
-    return execute_node
 
 
 # ================= 🔧 通用动态节点工厂（供 build_dynamic_graph 使用） =================
@@ -311,18 +116,31 @@ def make_generic_agent_node(
             else "（无上游节点输出）"
         )
 
-        # 2. 构建 prompt（system + 上游结果 + 原始任务 + 具体子任务）
+        # 2. 构建上下文（历史消息 + 长期记忆 + RAG）
+        built_context = ctx.build(
+            state,
+            memory=memory,
+            config={
+                "conv_limit": int(node_config.get("conv_limit", 12)),
+                "mem_limit": int(node_config.get("mem_limit", 5)),
+                "max_tokens": int(node_config.get("max_tokens", 8000)),
+                "format": node_config.get("format", "plain"),
+            },
+        )
+
+        # 3. 构建 prompt（system + 历史上下文 + 上游结果 + 原始任务 + 具体子任务）
         prompt = (
+            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}"
             f"{full_system_prompt}\n\n"
+            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
             f"[原始任务]\n{state.get('input', '')}\n\n"
             f"[上游节点输出]\n{upstream_ctx}\n\n"
-            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}"
         )
 
         user_msg = AgentMessage(role="user", content=prompt[:150] + "...", agent_name="system")
         ctx.save(user_msg)
 
-        # 3. 调用 Agent
+        # 4. 调用 Agent
         try:
             raw_resp = agent.run(prompt)
             resp = _ensure_agent_message(raw_resp, "assistant", node_id)
@@ -336,7 +154,7 @@ def make_generic_agent_node(
 
         ctx.save(resp)
 
-        # 4. 解析结构化输出（三级容错）
+        # 5. 解析结构化输出（三级容错）
         structured: dict = parse_llm_json(
             resp.content,
             context=node_id,
@@ -348,7 +166,7 @@ def make_generic_agent_node(
             },
         )
 
-        # 5. 写入长期记忆
+        # 6. 写入长期记忆
         if memory:
             try:
                 memory.save(
@@ -363,7 +181,7 @@ def make_generic_agent_node(
             except Exception as e:
                 logger.error(f"[{node_id} 节点] 保存长期记忆失败: {e}")
 
-        # 6. 更新 state：metadata 存结构化结果供下游读取，output 跟踪最新节点产出
+        # 7. 更新 state：metadata 存结构化结果供下游读取，output 跟踪最新节点产出
         current_metadata: dict = dict(state.get("metadata", {}))
         current_metadata[node_id] = structured
 

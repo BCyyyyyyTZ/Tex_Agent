@@ -30,31 +30,26 @@ core/ (AgentMessage, WorkflowState)   ← 所有人共同依赖，禁止随意�
 
 #### ✅ 已完成（可直接运行）
 
-- `graph_builder.py`：构建 Design → Think → Execute 基础图，支持可选 RAG 注入
-- `nodes.py`：design / think / execute / retrieve 四个节点工厂函数
-- `edges.py`：线性边 `add_linear_edges()`，条件边接口占位
+- `graph_builder.py`：统一动态构图入口（registry -> nodes/edges -> build_dynamic_graph）
+- `nodes.py`：通用动态节点工厂 `make_generic_agent_node`
+- `workflow_registry.py`：按名称加载 workflow 配置
 - `workflow_parser.py`：`NodeConfig` / `EdgeConfig` 数据结构 + `WorkflowParser` ABC，含 `from_task_plan()` 接口占位
 
-#### Step A-1：实现条件边路由函数
+#### Step A-1：实现条件边路由函数（动态图）
 
-**目标文件**：`workflow/edges.py`
-**任务**：实现 `make_conditional_router()`，支持根据 `state["error"]` 或自定义字段决定下一个节点。
+**目标文件**：`workflow/graph_builder.py`（在 `build_dynamic_graph` 中接入）
+**任务**：实现条件边执行逻辑，支持根据 `EdgeConfig.condition` 动态决定下一个节点。
 
 ```python
-# edges.py 中 make_conditional_router 的期望行为：
-def make_conditional_router(routing_map: dict):
-    def router(state: WorkflowState) -> str:
-        if state.get("error"):
-            return routing_map.get("error", END)
-        return routing_map.get("default", END)
-    return router
+# 期望行为（示例）：当 condition 命中时走条件边，否则走默认边
+# 可在 build_dynamic_graph 中通过 add_conditional_edges 落地
 ```
 
 **测试**：
 
 ```bash
-pytest tests/test_workflow/test_edges.py -v
-# 验证：error=None 时走 default 分支，error 非空时走 error 分支
+pytest tests/test_workflow/test_graph_builder.py -v
+# 验证：condition 命中时跳转到目标节点，未命中时走默认路径
 ```
 
 ---
@@ -62,7 +57,7 @@ pytest tests/test_workflow/test_edges.py -v
 #### Step A-2：实现 YAML/JSON 工作流配置解析器
 
 **目标文件**：`workflow/workflow_parser.py`（实现 `WorkflowParser` 子类 `YAMLWorkflowParser`）
-**任务**：读取 YAML 配置文件，生成 `NodeConfig` / `EdgeConfig` 列表，调用 `build_graph()` 组装图。
+**任务**：读取 YAML 配置文件，生成 `NodeConfig` / `EdgeConfig` 列表，调用 `build_dynamic_graph()` 组装图。
 
 **示例 YAML**（`config/workflows/basic.yaml`）：
 
@@ -84,7 +79,7 @@ entry: design
 
 ```bash
 pytest tests/test_workflow/test_workflow_parser.py -v
-# 验证：YAML 解析后节点/边数量正确，build_graph 返回可 invoke 的图
+# 验证：YAML 解析后节点/边数量正确，build_dynamic_graph 返回可 invoke 的图
 ```
 
 ---
@@ -92,7 +87,7 @@ pytest tests/test_workflow/test_workflow_parser.py -v
 #### Step A-3：实现 `from_task_plan()` 翻译逻辑
 
 **目标文件**：`workflow/workflow_parser.py`（在 `YAMLWorkflowParser` 中重写 `from_task_plan()`）
-**任务**：将 `MASPlanner` 输出的 `TaskPlan` 翻译为 `NodeConfig` + `EdgeConfig`，接入 `build_graph()`。
+**任务**：将 `MASPlanner` 输出的 `TaskPlan` 翻译为 `NodeConfig` + `EdgeConfig`，接入 `build_dynamic_graph()`。
 **前置条件**：等待开发者 D 完成 Step D-3（MASPlanner 可输出真实 TaskPlan）；在此之前用 Mock TaskPlan 开发测试。
 
 ```python
@@ -114,10 +109,10 @@ pytest tests/test_workflow/test_workflow_parser.py::test_from_task_plan -v
 
 ---
 
-#### Step A-4：用动态图替换硬编码 `graph_builder.py`
+#### Step A-4：优化统一动态工作流构建
 
 **目标文件**：`workflow/graph_builder.py`
-**任务**：将 `build_graph()` 改为调用 `WorkflowParser.from_task_plan()` 或 `YAMLWorkflowParser.load_config()`，移除硬编码的 `SimpleAgent` 实例化。
+**任务**：完善 `build_app_from_workflow()` + `build_dynamic_graph()` 的容错与可观测性，确保 default / 自定义 / plan 三类入口行为一致。
 **前置条件**：Step A-2、A-3、D-3 全部完成。
 
 **测试**：
