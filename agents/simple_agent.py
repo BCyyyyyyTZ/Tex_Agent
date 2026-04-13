@@ -31,7 +31,7 @@ SYSTEM_PROMPT = """你是一个专业的助手，你的任务是根据用户的�
 1. tool_name：工具唯一标识名
 2. tool_description：工具的描述，用于说明工具的功能和适用场景。
 3. tool_input_schema：工具的输入参数规约，用于定义工具的输入参数格式。对于每个参数，包含 arg_name:参数名 和 arg_description:参数描述，必填参数有必填标识，必须填入；可选参数有可选标识，需要时填入。
-   你的回答应该满足如下要求：
+你的回答应该满足如下要求：
 1. 如果你认为当前信息已经足够给出答案，则直接给出结果，按照如下格式回答问题，注意把回答的内容用英文中括号包围：
    RESULT [回答的内容]
 2. 如果你认为当前信息不足以给出答案，则使用工具列表中的工具来获取缺失信息，按照如下格式调用工具，注意把工具名称和工具输入参数用英文中括号包围：
@@ -92,48 +92,8 @@ class SimpleAgent(BaseAgent):
         self.history = []
         self.max_history = max_history
 
-    def _get_llm(self):
-        """获取LLM客户端"""
-        return self.llms.get("llm")
-
-    def _normalize_message(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
-        """
-        将各种输入格式统一转换为 AgentMessage 对象。
-        
-        Args:
-            message: 可以是字符串、AgentMessage 对象或字典。
-            
-        Returns:
-            标准化的 AgentMessage 对象。
-        """
-        if isinstance(message, AgentMessage):
-            return message
-        elif isinstance(message, str):
-            return AgentMessage(
-                role="user",
-                content=message,
-                agent_name="user"
-            )
-        elif isinstance(message, dict):
-            return AgentMessage(
-                role=message.get("role", "user"),
-                content=message.get("content", str(message)),
-                agent_name=message.get("agent_name", "unknown")
-            )
-        else:
-            # 兜底处理
-            return AgentMessage(
-                role="user",
-                content=str(message),
-                agent_name="unknown"
-            )
-
     def _build_history_messages(self) -> list:
-        """
-        将对话历史与当前消息转换为 LangChain 消息格式列表。
-
-        构建顺序：[SystemMessage] + [历史消息...] + [当前 HumanMessage]
-        """
+        """构建对话历史消息列表"""
         history_messages = [f"SYSTEM\n{self.system_prompt}"]
         for hist in self.history:
             if hist.role in ("user"):
@@ -183,7 +143,6 @@ class SimpleAgent(BaseAgent):
         logger.debug(f"[{self.name}] 接收消息: {content_preview}")
         
         try:
-            llm = self._get_llm()
             while True:
                 history_messages = self._build_history_messages()
                 # 构建完整的提示文本
@@ -193,7 +152,7 @@ class SimpleAgent(BaseAgent):
                     print("="*100)
                     print(f"PROMPT:\n{prompt}")
                 # 3. 调用 LLM  
-                llm_content = llm.response(prompt)
+                llm_content = self.llms["llm"].response(prompt)
                 if MODE == "debug":
                     print(f"LLM_CONTENT:\n{llm_content}")
                 # 4. 解析 LLM 响应
@@ -288,7 +247,7 @@ class SimpleAgent(BaseAgent):
             # 已经是业务异常，直接向上传播，避免双重包装
             raise
         except Exception as e:
-            logger.error(f"[{self._name}] LLM 调用失败: {e}")
+            logger.error(f"[{self.name}] LLM 调用失败: {e}")
             raise e
 
     async def ainvoke(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:

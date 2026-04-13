@@ -44,11 +44,37 @@ class LlmClient:
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 		self.temperature = temperature
 		
-	def response(self, prompt:str) -> str:
+	def response(self, prompt: str, attachments: Optional[List[dict]] = None) -> str:
+		"""
+		生成LLM响应，支持上传附件
+		
+		Args:
+		    prompt: 文本提示
+		    attachments: 附件列表，每个附件为包含type和相关信息的字典
+		                例如: [{"type": "image_url", "image_url": {"url": "..."}}]
+		                或: [{"type": "file", "file": {"file_id": "..."}}]
+		
+		Returns:
+		    LLM生成的文本响应
+		"""
+		# 构建消息内容
+		message_content = []
+		
+		# 添加文本内容
+		message_content.append({"type": "text", "text": prompt})
+		
+		# 添加附件
+		if attachments:
+			message_content.extend(attachments)
+		
+		# 如果只有文本，直接使用字符串格式
+		if len(message_content) == 1 and message_content[0].get("type") == "text":
+			message_content = message_content[0]["text"]
+		
 		response = self.client.chat.completions.create(
 				model=self.model,
 				messages=[
-					{"role": "user", "content": prompt}
+					{"role": "user", "content": message_content}
 				],
 				temperature=self.temperature,
 				max_tokens=4096
@@ -88,6 +114,38 @@ class BaseAgent(ABC):
   
     def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
         self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
+
+    def _normalize_message(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+        """
+        将各种输入格式统一转换为 AgentMessage 对象。
+        
+        Args:
+            message: 可以是字符串、AgentMessage 对象或字典。
+            
+        Returns:
+            标准化的 AgentMessage 对象。
+        """
+        if isinstance(message, AgentMessage):
+            return message
+        elif isinstance(message, str):
+            return AgentMessage(
+                role="user",
+                content=message,
+                agent_name="user"
+            )
+        elif isinstance(message, dict):
+            return AgentMessage(
+                role=message.get("role", "user"),
+                content=message.get("content", str(message)),
+                agent_name=message.get("agent_name", "unknown")
+            )
+        else:
+            # 兜底处理
+            return AgentMessage(
+                role="user",
+                content=str(message),
+                agent_name="unknown"
+            )
 
     @abstractmethod
     def run(self, message: AgentMessage) -> AgentMessage:
