@@ -1,0 +1,15 @@
+% Minimal LaTeX fixture for load_and_chunk tests
+\documentclass{article}
+\usepackage{amsmath}
+
+\begin{document}
+
+\section{Introduction}
+本文档用于测试 \texttt{document\_loader} 对 \texttt{.tex} 文件的读取与分块。
+% 行内注释不应单独成段\subsection{Notation}
+设向量维度为 $d$，注意力头数为 $h$。
+
+\begin{equation}
+    \mathrm{Attention}(Q,K,V) = \mathrm{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V\end{equation}
+
+\end{document}

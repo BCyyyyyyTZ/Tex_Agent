@@ -24,9 +24,6 @@ cp .env.example .env
 
 # 4. 运行 MVP 基础链路
 python main.py
-
-# 5. 运行测试
-pytest tests/ -v
 ```
 ---
 
