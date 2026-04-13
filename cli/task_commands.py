@@ -13,14 +13,15 @@ class TaskCommand(Command):
     def __init__(self):
         super().__init__(
             name="task",
-            description="执行论文写作任务",
+            description="执行任务（支持默认/指定工作流）",
             usage="task <任务描述>"
         )
     
     def execute(self, args: str, cli) -> bool:
         if not args.strip():
             print("❌ 请提供任务描述")
-            print("   示例: task 请帮我写一篇关于 Transformer 的论文引言")
+            print("   示例1: task 请帮我写一篇关于 Transformer 的论文引言")
+            print("   示例2: task --wf report_flow 帮我写摘要")
             return True
         
         print("\n" + display.separator())

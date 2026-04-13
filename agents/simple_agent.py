@@ -4,6 +4,8 @@ SimpleAgent：最基础的可运行 Agent 实现。
 """
 from typing import List, Optional, Union
 import asyncio
+from datetime import datetime
+from pathlib import Path
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -16,6 +18,7 @@ from config.settings import settings
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+_LLM_TRACE_PATH = Path(__file__).resolve().parent.parent / "logs" / "llm_interactions_trace.txt"
 
 
 class SimpleAgent(BaseAgent):
@@ -137,6 +140,36 @@ class SimpleAgent(BaseAgent):
             excess = excess + (excess % 2)
             self._history = self._history[excess:]
 
+    def _append_llm_trace(self, lc_messages: list, response_text: str) -> None:
+        """
+        统一记录所有模式下的 LLM 交互（默认/自定义/plan）。
+        """
+        try:
+            _LLM_TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().isoformat(timespec="seconds")
+
+            serialized_messages = []
+            for idx, msg in enumerate(lc_messages, start=1):
+                role = getattr(msg, "type", msg.__class__.__name__)
+                content = getattr(msg, "content", str(msg))
+                serialized_messages.append(f"[{idx}] role={role}\n{content}\n")
+
+            block = (
+                "\n" + "=" * 88 + "\n"
+                f"[{ts}] agent={self._name} model={self.model} temperature={self.temperature}\n"
+                "\n[llm_messages]\n"
+                + "\n".join(serialized_messages)
+                + "\n[llm_response]\n"
+                + str(response_text)
+                + "\n"
+                + "=" * 88 + "\n"
+            )
+
+            with _LLM_TRACE_PATH.open("a", encoding="utf-8") as f:
+                f.write(block)
+        except Exception as e:
+            logger.error(f"[{self._name}] 写入 LLM 交互日志失败: {e}")
+
     def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
         """
         同步执行推理。
@@ -165,6 +198,7 @@ class SimpleAgent(BaseAgent):
             llm = self._get_llm()
             lc_messages = self._build_lc_messages(normalized_msg)
             response = llm.invoke(lc_messages)
+            self._append_llm_trace(lc_messages, response.content)
 
             # 4. 构建响应消息
             result = AgentMessage(

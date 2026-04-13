@@ -2,17 +2,17 @@
 """
 TeX Agent CLI 核心类
 """
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 from utils.logger import get_logger
 from utils.loading_spinner import run_with_loading
 from utils.display import display
-from workflow.graph_builder import build_graph
+from workflow.graph_builder import build_app_from_workflow
 from context.context_manager import ContextManager
 from memory.factory import MemoryFactory
 from cli.commands import CommandRegistry
-from cli.branch_commands import BRANCH_COMMANDS, BRANCH_ALIASES
+from cli.branch_commands import BRANCH_COMMANDS
 from cli.task_commands import get_task_commands
 
 logger = get_logger(__name__)
@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 
 class TeXAgentCLI:
     """TeX Agent CLI 核心类"""
+    DEFAULT_WORKFLOW = "default"
     
     def __init__(self, use_branch: bool = True):
         self.use_branch = use_branch
@@ -29,7 +30,6 @@ class TeXAgentCLI:
         self.contexts: Dict[str, ContextManager] = {}
         self.memory_system = self._init_memory_system()
         self.context = None
-        self.app = None
         
         # 命令注册表
         self.command_registry = CommandRegistry()
@@ -74,20 +74,75 @@ class TeXAgentCLI:
         return self.contexts[branch_name]
     
     def _rebuild_workflow(self):
-        """重建工作流"""
+        """重建运行上下文（按分支切换）。"""
         self.context = self._get_context(self.current_branch)
-        self.app = build_graph(
+        logger.info(f"已为分支 '{self.current_branch}' 重建工作流")
+
+    def _build_app_for_workflow(self, workflow_name: Optional[str]) -> Any:
+        """
+        统一通过 build_graph 构建工作流（默认/自定义共一路径）。
+        """
+        target_name = workflow_name or self.DEFAULT_WORKFLOW
+        return build_app_from_workflow(
+            workflow_name=target_name,
             context_manager=self.context,
-            design_memory=self.memory_system.get("design"),
-            think_memory=self.memory_system.get("think"),
-            execute_memory=self.memory_system.get("execute"),
             shared_memory=self.memory_system.get("shared"),
         )
-        logger.info(f"已为分支 '{self.current_branch}' 重建工作流")
+
+    def _execute_with_app(self, user_input: str, app: Any, workflow_label: str) -> dict:
+        """
+        统一执行器：给定 app 后执行任务，负责状态装配、invoke 与上下文回写。
+        """
+        # 从当前分支 Context 加载历史消息
+        history_messages = []
+        if self.context:
+            for msg in self.context.load():
+                if hasattr(msg, "to_dict"):
+                    history_messages.append(msg.to_dict())
+                else:
+                    history_messages.append({
+                        "role": getattr(msg, "role", "assistant"),
+                        "content": getattr(msg, "content", ""),
+                        "agent_name": getattr(msg, "agent_name", "system")
+                    })
+
+        initial_state = {
+            "messages": history_messages,
+            "current_node": "",
+            "input": user_input,
+            "output": "",
+            "error": None,
+            "metadata": {
+                "branch": self.current_branch,
+                "workflow": workflow_label,
+                "timestamp": datetime.now().isoformat()
+            },
+            "retrieved_context": "",
+        }
+
+        def _invoke():
+            return app.invoke(initial_state)
+
+        result = run_with_loading(_invoke, message="🤖 LLM 生成中", style="braille")
+
+        # 执行后回写消息到 Context（仅追加本轮新增消息，避免重复写入历史）
+        if result and "messages" in result:
+            from core.message import AgentMessage
+            existed_count = len(history_messages)
+            new_messages = result["messages"][existed_count:]
+            for msg_dict in new_messages:
+                msg = AgentMessage(
+                    role=msg_dict.get("role", "assistant"),
+                    content=msg_dict.get("content", ""),
+                    agent_name=msg_dict.get("agent_name", "system")
+                )
+                self.context.save(msg)
+
+        return result
     
     # core/agent_cli.py - 修复 run_task 方法
 
-    def run_task(self, user_input: str, branch: str = None) -> dict:
+    def run_task(self, user_input: str, branch: str = None, workflow_name: str = None) -> dict:
         """执行任务（带加载动画）"""
         target_branch = branch or self.current_branch
         
@@ -95,49 +150,62 @@ class TeXAgentCLI:
             self.switch_branch(target_branch)
         
         context_size = len(self.context) if self.context else 0
-        print(f"\n🔄 执行任务 [分支: {self.current_branch}] (对话: {context_size}条)")
-        
-        # 🔧 关键修复：从当前分支的 Context 加载历史消息
-        history_messages = []
-        if self.context:
-            # 将 Context 中的历史消息转换为字典格式
-            for msg in self.context.load():
-                if hasattr(msg, 'to_dict'):
-                    history_messages.append(msg.to_dict())
-                else:
-                    history_messages.append({
-                        "role": getattr(msg, 'role', 'assistant'),
-                        "content": getattr(msg, 'content', ''),
-                        "agent_name": getattr(msg, 'agent_name', 'system')
-                    })
-        
-        initial_state = {
-            "messages": history_messages,  # 🔧 使用历史消息，而不是空列表
-            "current_node": "",
-            "input": user_input,
-            "output": "",
-            "error": None,
-            "metadata": {"branch": self.current_branch, "timestamp": datetime.now().isoformat()},
-            "retrieved_context": "",
-        }
-        
-        def _invoke():
-            return self.app.invoke(initial_state)
-        
-        result = run_with_loading(_invoke, message="🤖 LLM 生成中", style="braille")
-        
-        # 🔧 执行完成后，将新消息保存到 Context
-        if result and 'messages' in result:
-            for msg_dict in result['messages']:
-                # 转换为 AgentMessage 并保存
-                from core.message import AgentMessage
-                msg = AgentMessage(
-                    role=msg_dict.get('role', 'assistant'),
-                    content=msg_dict.get('content', ''),
-                    agent_name=msg_dict.get('agent_name', 'system')
-                )
-                self.context.save(msg)
-        
+        workflow_label = workflow_name or self.DEFAULT_WORKFLOW
+        print(f"\n🔄 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
+
+        try:
+            app = self._build_app_for_workflow(workflow_name)
+        except Exception as e:
+            err = f"加载工作流失败: {e}"
+            logger.error(err)
+            return {
+                "messages": [],
+                "current_node": "",
+                "input": user_input,
+                "output": "",
+                "error": err,
+                "metadata": {"branch": self.current_branch, "workflow": workflow_label},
+                "retrieved_context": "",
+            }
+
+        return self._execute_with_app(user_input, app, workflow_label)
+
+    def run_plan_task(self, user_input: str, branch: str = None) -> dict:
+        """
+        统一的 plan 任务入口：
+        规划 -> 解析图 -> 构图 -> 复用统一执行器 _execute_with_app。
+        """
+        target_branch = branch or self.current_branch
+        if target_branch != self.current_branch:
+            self.switch_branch(target_branch)
+
+        from router.planner import AutoAgentsMASPlanner
+        from workflow.workflow_parser import YAMLWorkflowParser
+
+        print("\n🧠 [1/4] 初始化规划器...")
+        planner = AutoAgentsMASPlanner(max_plan_rounds=2)
+        parser = YAMLWorkflowParser()
+
+        print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
+        plan = planner.decompose(user_input)
+
+        print("   [3/4] 为各节点分配 Agent 类型...")
+        plan = planner.assign(plan, [])
+
+        nodes, edges = parser.from_task_plan(plan)
+        print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
+        for n in nodes:
+            print(f"      - [{n.agent_name}] {n.node_id}")
+
+        print("   [4/4] 构建并运行动态图...")
+        app = parser.build_graph(nodes, edges)
+        result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
+
+        if result.get("error") is None:
+            node_ids = [n.node_id for n in nodes]
+            hit = [nid for nid in node_ids if nid in result.get("metadata", {})]
+            print(f"\n   节点结构化输出已写入 metadata：{hit}")
+
         return result
     
     def switch_branch(self, branch_name: str):

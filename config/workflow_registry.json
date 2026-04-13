@@ -1,0 +1,12 @@
+{
+  "workflows": {
+    "default": {
+      "type": "file",
+      "path": "config/workflow_default_dynamic.json"
+    },
+    "five_nodes_demo": {
+      "type": "file",
+      "path": "config/workflow_five_nodes_example.json"
+    }
+  }
+}
