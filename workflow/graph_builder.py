@@ -18,6 +18,21 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _resolve_entry_node(node_ids: list, edges: list) -> str:
+    """根据边关系推断入口节点（无入边节点优先）。"""
+    target_nodes = {e.to_node for e in edges}
+    entry_candidates = [nid for nid in node_ids if nid not in target_nodes]
+    return entry_candidates[0] if entry_candidates else node_ids[0]
+
+
+def _resolve_terminal_nodes(node_ids: list, edges: list) -> set:
+    """根据边关系推断汇节点（无出边节点）。"""
+    terminal = set(node_ids)
+    for edge_cfg in edges:
+        terminal.discard(edge_cfg.from_node)
+    return terminal
+
+
 def load_workflow_graph_config(workflow_name: str = "default") -> Tuple[list, list]:
     """
     从 workflow registry 加载指定工作流的节点与边配置。
@@ -144,14 +159,10 @@ def build_dynamic_graph(
     graph = StateGraph(WorkflowState)
 
     # ---- 汇节点（无出边），供 minimal 模式下判断终端 ctx ----
-    terminal_nodes: set = set(node_ids)
-    for edge_cfg in edges:
-        terminal_nodes.discard(edge_cfg.from_node)
+    terminal_nodes = _resolve_terminal_nodes(node_ids, edges)
 
     # ---- 入口节点（START 第一个执行的节点），用于画像更新与格式约束 ----
-    target_nodes = {e.to_node for e in edges}
-    entry_candidates = [n.node_id for n in nodes if n.node_id not in target_nodes]
-    entry_node = entry_candidates[0] if entry_candidates else nodes[0].node_id
+    entry_node = _resolve_entry_node(node_ids, edges)
     logger.debug(f"[DynamicGraph] 入口节点: {entry_node}")
 
     # ---- 注册节点 ----
@@ -174,6 +185,11 @@ def build_dynamic_graph(
 
     # ---- 注册边 ----
     for edge_cfg in edges:
+        if edge_cfg.from_node not in node_ids or edge_cfg.to_node not in node_ids:
+            logger.warning(
+                f"[DynamicGraph] 跳过非法边 {edge_cfg.from_node}->{edge_cfg.to_node}（节点不存在）"
+            )
+            continue
         if edge_cfg.condition is None:
             graph.add_edge(edge_cfg.from_node, edge_cfg.to_node)
         else:

@@ -188,9 +188,10 @@ class TeXAgentCLI:
 
         from router.planner import AutoAgentsMASPlanner
         from workflow.workflow_parser import YAMLWorkflowParser
+        from config.planner_config import MAX_PLAN_ROUNDS_DEFAULT
 
         print("\n🧠 [1/4] 初始化规划器...")
-        planner = AutoAgentsMASPlanner(max_plan_rounds=2)
+        planner = AutoAgentsMASPlanner(max_plan_rounds=MAX_PLAN_ROUNDS_DEFAULT)
         parser = YAMLWorkflowParser()
 
         print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
@@ -205,7 +206,12 @@ class TeXAgentCLI:
             print(f"      - [{n.agent_name}] {n.node_id}")
 
         print("   [4/4] 构建并运行动态图...")
-        app = parser.build_graph(nodes, edges, persona_memory=self.persona_memory)
+        app = parser.build_graph(
+            nodes,
+            edges,
+            context_manager=self.context,
+            persona_memory=self.persona_memory,
+        )
         result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
 
         if result.get("error") is None:

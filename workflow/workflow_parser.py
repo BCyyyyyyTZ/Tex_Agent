@@ -5,12 +5,16 @@
 TODO: 开发者 A 负责实现此类（第三阶段任务）
 """
 from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from utils.logger import get_logger
 
 if TYPE_CHECKING:
     # 仅用于类型提示，运行时不导入，避免与 router 层产生循环依赖
     from router.planner import TaskPlan
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -139,6 +143,7 @@ class WorkflowParser(ABC):
         self,
         nodes: List[NodeConfig],
         edges: List[EdgeConfig],
+        context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
     ) -> Any:
@@ -265,7 +270,7 @@ def _translate_plan_to_graph_config(
     # 关键：每一步都验证连通性，LLM 生成的边不足时自动降级，确保所有节点都被执行
     all_node_ids: List[str] = plan.subtasks
 
-    def _is_fully_connected(edge_list: List[Dict], node_ids: List[str]) -> bool:
+    def _is_fully_connected(edge_list: List[Dict[str, Any]], node_ids: List[str]) -> bool:
         """BFS 验证所有节点从入口出发均可到达。"""
         if not node_ids:
             return True
@@ -277,9 +282,9 @@ def _translate_plan_to_graph_config(
         # 入口节点 = 没有任何入边的节点（按 subtasks 顺序取第一个）
         entry = next((n for n in node_ids if n not in to_nodes), node_ids[0])
         visited: set = set()
-        queue = [entry]
+        queue = deque([entry])
         while queue:
-            cur = queue.pop(0)
+            cur = queue.popleft()
             visited.add(cur)
             for nxt in adj.get(cur, []):
                 if nxt not in visited:
@@ -290,8 +295,7 @@ def _translate_plan_to_graph_config(
 
     # 尝试1：__edges__（LLM 生成的边，但可能不覆盖全部节点）
     if raw_edges and not _is_fully_connected(raw_edges, all_node_ids):
-        from utils.logger import get_logger as _get_logger
-        _get_logger(__name__).warning(
+        logger.warning(
             f"[WorkflowParser] __edges__ 中 {len(raw_edges)} 条边无法覆盖全部 "
             f"{len(all_node_ids)} 个节点，降级为 depends_on 重建"
         )
@@ -307,8 +311,7 @@ def _translate_plan_to_graph_config(
                     raw_edges.append({"from": dep, "to": node_id, "condition": None})
                     seen.add(key)
         if raw_edges and not _is_fully_connected(raw_edges, all_node_ids):
-            from utils.logger import get_logger as _get_logger
-            _get_logger(__name__).warning(
+            logger.warning(
                 "[WorkflowParser] depends_on 重建的边仍不连通，降级为线性链"
             )
             raw_edges = []
@@ -408,16 +411,16 @@ class YAMLWorkflowParser(WorkflowParser):
             }
         """
         raw_nodes = config.get("nodes", [])
-        nodes: List[NodeConfig] = []
-        for raw in raw_nodes:
-            nodes.append(NodeConfig(
-                node_id=    raw.get("node_id", "unknown"),
-                node_type=  raw.get("node_type", "agent"),
-                agent_name= raw.get("agent_name", "SimpleAgent"),
-                tool_name=  raw.get("tool_name", ""),
-                config=     raw.get("config", {}),
-            ))
-        return nodes
+        return [
+            NodeConfig(
+                node_id=raw.get("node_id", "unknown"),
+                node_type=raw.get("node_type", "agent"),
+                agent_name=raw.get("agent_name", "SimpleAgent"),
+                tool_name=raw.get("tool_name", ""),
+                config=raw.get("config", {}),
+            )
+            for raw in raw_nodes
+        ]
 
     def parse_edges(self, config: Dict[str, Any]) -> List[EdgeConfig]:
         """
@@ -431,19 +434,20 @@ class YAMLWorkflowParser(WorkflowParser):
             }
         """
         raw_edges = config.get("edges", [])
-        edges: List[EdgeConfig] = []
-        for raw in raw_edges:
-            edges.append(EdgeConfig(
-                from_node= raw.get("from_node", raw.get("from", "")),
-                to_node=   raw.get("to_node",   raw.get("to",   "")),
-                condition= raw.get("condition"),
-            ))
-        return edges
+        return [
+            EdgeConfig(
+                from_node=raw.get("from_node", raw.get("from", "")),
+                to_node=raw.get("to_node", raw.get("to", "")),
+                condition=raw.get("condition"),
+            )
+            for raw in raw_edges
+        ]
 
     def build_graph(
         self,
         nodes: List[NodeConfig],
         edges: List[EdgeConfig],
+        context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
     ) -> Any:
@@ -457,6 +461,7 @@ class YAMLWorkflowParser(WorkflowParser):
         return build_dynamic_graph(
             nodes=nodes,
             edges=edges,
+            context_manager=context_manager,
             default_history_mode=default_history_mode,
             persona_memory=persona_memory,
         )
