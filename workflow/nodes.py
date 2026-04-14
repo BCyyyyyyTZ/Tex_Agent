@@ -7,15 +7,21 @@
   ✅ 彻底移除对 .content 的直接裸露访问
 """
 from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union
-from datetime import datetime
 from core.state import WorkflowState
 from core.message import AgentMessage
 from agents.base_agent import BaseAgent
 from context.base import BaseContext
 from utils.logger import get_logger
+from config.planner_config import (
+    DEFAULT_HISTORY_MODE,
+    NODE_OUTPUT_FORMAT_INSTRUCTION,
+    PERSONA_ENTRY_NODE_FORMAT_ADDON,
+    parse_llm_json,
+)
+from workflow.run_dump import write_node_trace
 
 if TYPE_CHECKING:
-    from memory.base_memory import BaseMemory
+    from memory.persona_memory import UserPersonaMemory
 
 logger = get_logger(__name__)
 
@@ -62,7 +68,11 @@ def make_generic_agent_node(
     ctx: BaseContext,
     node_id: str,
     node_config: dict,
-    memory: Optional["BaseMemory"] = None,
+    persona_memory: Optional["UserPersonaMemory"] = None,
+    *,
+    default_history_mode: str = DEFAULT_HISTORY_MODE,
+    is_terminal: bool = False,
+    is_entry_node: bool = False,
 ) -> Callable[[WorkflowState], dict]:
     """
     通用 Agent 节点工厂，供 build_dynamic_graph() 按 NodeConfig 动态创建节点。
@@ -72,7 +82,8 @@ def make_generic_agent_node(
       - 统一在 system_prompt 末尾注入 NODE_OUTPUT_FORMAT_INSTRUCTION，
         强制 LLM 输出结构化 JSON（result / summary / confidence / metadata）
       - 解析 JSON 输出后存入 state["metadata"][node_id]，供下游节点精确读取
-      - 自动从 state["metadata"] 提取 depends_on 节点的 summary 注入上游上下文
+      - 自动从 state["metadata"] 提取 depends_on 节点的完整产出（result + 摘要）注入上游上下文
+      - history_mode：节点 config.history_mode 优先，否则使用工厂参数 default_history_mode（full / minimal）
 
     Args:
         agent:       已实例化的 BaseAgent（SimpleAgent / ReActAgent 等）。
@@ -84,47 +95,78 @@ def make_generic_agent_node(
                        output_schema : 输出字段描述（仅用于注释说明，不影响解析）
                        depends_on    : 上游节点 node_id 列表
                        temperature   : （由 build_dynamic_graph 在实例化 agent 时使用）
-        memory:      长期记忆实例（可选）。
+                       history_mode  : 可选 "full" | "minimal"，覆盖构图时的 default_history_mode
+        persona_memory: 全局用户画像（单文件）；在 system 段头部注入，仅入口节点可写回。
+        default_history_mode: 当 node_config 未指定 history_mode 时使用（由 build_dynamic_graph 注入）。
+        is_terminal: 是否为汇节点（无出边）；minimal 模式下仅终端节点 ctx.save。
+        is_entry_node: 是否为工作流入口节点；负责在 JSON 中输出 persona_memory_update。
 
     Returns:
         符合 LangGraph 规范的节点函数 WorkflowState -> dict。
     """
-    # 从 config 层导入，避免 workflow → router 的跨层依赖
-    from config.planner_config import NODE_OUTPUT_FORMAT_INSTRUCTION, parse_llm_json
-
     system_prompt: str = node_config.get("system_prompt", f"你是 {node_id} 专家。")
     subtask: str       = node_config.get("subtask", "")
     depends_on: list   = node_config.get("depends_on", [])
 
-    # 将输出格式约束追加到 system_prompt（框架统一注入，agent 自身 prompt 无需包含）
-    full_system_prompt = system_prompt + NODE_OUTPUT_FORMAT_INSTRUCTION
+    raw_mode = node_config.get("history_mode")
+    if raw_mode is None or (isinstance(raw_mode, str) and not raw_mode.strip()):
+        raw_mode = default_history_mode
+    if not isinstance(raw_mode, str):
+        raw_mode = str(default_history_mode)
+    mode_norm = raw_mode.strip().lower()
+    if mode_norm not in ("full", "minimal"):
+        logger.warning(
+            f"[{node_id}] 非法 history_mode={raw_mode!r}，回退为 {default_history_mode!r}"
+        )
+        mode_norm = str(default_history_mode).strip().lower()
+        if mode_norm not in ("full", "minimal"):
+            mode_norm = "minimal"
+
+    def _upstream_blocks(meta: dict) -> str:
+        lines: list = []
+        for dep_id in depends_on:
+            dep_result = meta.get(dep_id)
+            if not isinstance(dep_result, dict):
+                continue
+            summary = str(dep_result.get("summary", "")).strip()
+            result = str(dep_result.get("result", "")).strip()
+            if not summary and not result:
+                continue
+            block_lines = [f"[{dep_id}]"]
+            if summary:
+                block_lines.append(f"摘要: {summary}")
+            if result:
+                block_lines.append(f"完整产出:\n{result}")
+            lines.append("\n".join(block_lines))
+        return "\n\n".join(lines) if lines else "（无上游节点输出）"
 
     def generic_node(state: WorkflowState) -> dict:
-        logger.info(f"[{node_id} 节点] 开始执行...")
-
-        # 1. 收集上游节点 summary（从 state["metadata"] 精确读取）
-        upstream_summaries: list = []
-        for dep_id in depends_on:
-            dep_result = state.get("metadata", {}).get(dep_id, {})
-            if dep_result:
-                summary = dep_result.get("summary", str(dep_result)[:200])
-                upstream_summaries.append(f"[{dep_id}] {summary}")
-
-        upstream_ctx = (
-            "\n".join(upstream_summaries)
-            if upstream_summaries
-            else "（无上游节点输出）"
+        logger.info(
+            f"[{node_id} 节点] 开始执行... "
+            f"(history_mode={mode_norm}, terminal={is_terminal}, entry={is_entry_node})"
         )
 
-        # 2. 构建上下文（历史消息 + 长期记忆 + RAG）
+        meta = state.get("metadata", {}) or {}
+
+        persona_head = persona_memory.format_for_prompt() if persona_memory else ""
+        entry_addon = PERSONA_ENTRY_NODE_FORMAT_ADDON if is_entry_node else ""
+        full_system_prompt = (
+            persona_head + system_prompt + NODE_OUTPUT_FORMAT_INSTRUCTION + entry_addon
+        )
+
+        # 1. 上游：强依赖时使用完整 result，并保留摘要便于扫读
+        upstream_ctx = _upstream_blocks(meta)
+
+        # 2. 构建上下文（历史消息 + RAG；minimal 时用 metadata 链合成；画像不走 memory.search）
         built_context = ctx.build(
             state,
-            memory=memory,
+            memory=None,
             config={
                 "conv_limit": int(node_config.get("conv_limit", 12)),
                 "mem_limit": int(node_config.get("mem_limit", 5)),
                 "max_tokens": int(node_config.get("max_tokens", 8000)),
                 "format": node_config.get("format", "plain"),
+                "synthetic_metadata_history": mode_norm == "minimal",
             },
         )
 
@@ -137,8 +179,11 @@ def make_generic_agent_node(
             f"[上游节点输出]\n{upstream_ctx}\n\n"
         )
 
-        user_msg = AgentMessage(role="user", content=prompt[:150] + "...", agent_name="system")
-        ctx.save(user_msg)
+        user_msg = AgentMessage(role="user", content=prompt, agent_name="system")
+        if mode_norm == "full":
+            ctx.save(user_msg)
+
+        run_dir = meta.get("__run_output_dir__")
 
         # 4. 调用 Agent
         try:
@@ -146,43 +191,45 @@ def make_generic_agent_node(
             resp = _ensure_agent_message(raw_resp, "assistant", node_id)
         except Exception as e:
             logger.error(f"[{node_id} 节点] 执行失败: {e}")
-            return {
-                "messages":    state["messages"] + [_safe_to_dict(user_msg)],
+            write_node_trace(run_dir, node_id, prompt, error=str(e))
+            err: Dict[str, Any] = {
                 "current_node": node_id,
-                "error":       str(e),
+                "error": str(e),
             }
+            if mode_norm == "full":
+                err["messages"] = state["messages"] + [_safe_to_dict(user_msg)]
+            return err
 
-        ctx.save(resp)
+        if mode_norm == "full":
+            ctx.save(resp)
+        elif mode_norm == "minimal" and is_terminal:
+            ctx.save(resp)
 
         # 5. 解析结构化输出（三级容错）
-        structured: dict = parse_llm_json(
-            resp.content,
-            context=node_id,
-            fallback={
-                "result":     resp.content,
-                "summary":    resp.content[:80],
-                "confidence": 0.5,
-                "metadata":   {},
-            },
-        )
+        fb = {
+            "result": resp.content,
+            "summary": resp.content[:80],
+            "confidence": 0.5,
+            "metadata": {},
+        }
+        if is_entry_node:
+            fb["persona_memory_update"] = {"action": "none", "delta": {}}
+        structured: dict = parse_llm_json(resp.content, context=node_id, fallback=fb)
 
-        # 6. 写入长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"{node_id}_{abs(hash(state.get('input', ''))) % 10000}",
-                    value={
-                        "task":    state.get("input", "")[:100],
-                        "result":  structured.get("result", "")[:500],
-                        "summary": structured.get("summary", ""),
-                    },
-                    metadata={"node": node_id},
-                )
-            except Exception as e:
-                logger.error(f"[{node_id} 节点] 保存长期记忆失败: {e}")
+        structured = dict(structured)
+        pm_update = structured.pop("persona_memory_update", None)
+        if persona_memory:
+            if is_entry_node:
+                persona_memory.apply_persona_memory_update(pm_update)
+            elif pm_update is not None:
+                logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
 
-        # 7. 更新 state：metadata 存结构化结果供下游读取，output 跟踪最新节点产出
+        # 6. 更新 state：metadata + 执行顺序（供 ctx.build 合成历史）
         current_metadata: dict = dict(state.get("metadata", {}))
+        exec_order = list(current_metadata.get("__execution_order__", []))
+        if node_id not in exec_order:
+            exec_order.append(node_id)
+        current_metadata["__execution_order__"] = exec_order
         current_metadata[node_id] = structured
 
         logger.info(
@@ -191,12 +238,24 @@ def make_generic_agent_node(
             f"输出 {len(structured.get('result', ''))} 字符"
         )
 
-        return {
-            "messages":    state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
+        out: Dict[str, Any] = {
             "current_node": node_id,
-            "output":      structured.get("result", resp.content),
-            "metadata":    current_metadata,
-            "error":       None,
+            "output": structured.get("result", resp.content),
+            "metadata": current_metadata,
+            "error": None,
         }
+        if mode_norm == "full":
+            out["messages"] = state["messages"] + [
+                _safe_to_dict(user_msg),
+                _safe_to_dict(resp),
+            ]
+        write_node_trace(
+            run_dir,
+            node_id,
+            prompt,
+            raw_response=resp.content,
+            structured=structured,
+        )
+        return out
 
     return generic_node

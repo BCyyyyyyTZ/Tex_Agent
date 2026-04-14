@@ -9,8 +9,10 @@ from utils.logger import get_logger
 from utils.loading_spinner import run_with_loading
 from utils.display import display
 from workflow.graph_builder import build_app_from_workflow
+from workflow.run_dump import create_run_output_dir
 from context.context_manager import ContextManager
 from memory.factory import MemoryFactory
+from memory.persona_memory import UserPersonaMemory
 from cli.commands import CommandRegistry
 from cli.branch_commands import BRANCH_COMMANDS
 from cli.task_commands import get_task_commands
@@ -29,6 +31,8 @@ class TeXAgentCLI:
         # 每个分支独立的上下文
         self.contexts: Dict[str, ContextManager] = {}
         self.memory_system = self._init_memory_system()
+        # 全局用户画像：与对话分支、工作流节点解耦；持久化见 memory_store/user_persona.json
+        self.persona_memory = UserPersonaMemory()
         self.context = None
         
         # 命令注册表
@@ -86,7 +90,7 @@ class TeXAgentCLI:
         return build_app_from_workflow(
             workflow_name=target_name,
             context_manager=self.context,
-            shared_memory=self.memory_system.get("shared"),
+            persona_memory=self.persona_memory,
         )
 
     def _execute_with_app(self, user_input: str, app: Any, workflow_label: str) -> dict:
@@ -106,6 +110,7 @@ class TeXAgentCLI:
                         "agent_name": getattr(msg, "agent_name", "system")
                     })
 
+        run_output_dir = create_run_output_dir()
         initial_state = {
             "messages": history_messages,
             "current_node": "",
@@ -115,10 +120,12 @@ class TeXAgentCLI:
             "metadata": {
                 "branch": self.current_branch,
                 "workflow": workflow_label,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "__run_output_dir__": str(run_output_dir),
             },
             "retrieved_context": "",
         }
+        logger.info(f"本轮节点 I/O 将写入: {run_output_dir}")
 
         def _invoke():
             return app.invoke(initial_state)
@@ -198,7 +205,7 @@ class TeXAgentCLI:
             print(f"      - [{n.agent_name}] {n.node_id}")
 
         print("   [4/4] 构建并运行动态图...")
-        app = parser.build_graph(nodes, edges)
+        app = parser.build_graph(nodes, edges, persona_memory=self.persona_memory)
         result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
 
         if result.get("error") is None:
@@ -277,15 +284,17 @@ class TeXAgentCLI:
         print(f"\n📚 记忆统计:")
         for name, memory in self.memory_system.items():
             print(f"   {name}: {memory.get_size()} 条")
+        print(f"   用户画像文件: {self.persona_memory.path}")
         print()
     
     def clear_all(self):
         """清空所有"""
         for memory in self.memory_system.values():
             memory.clear()
+        self.persona_memory.reset_to_default()
         for ctx in self.contexts.values():
             ctx.clear()
-        print("✅ 已清空所有记忆和对话")
+        print("✅ 已清空所有记忆、用户画像与对话")
     
     def show_branch_status(self):
         """显示分支状态"""

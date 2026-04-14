@@ -12,6 +12,7 @@ from langgraph.graph import StateGraph, START, END
 
 from core.state import WorkflowState
 from context.context_manager import ContextManager
+from config.planner_config import DEFAULT_HISTORY_MODE
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,18 +31,25 @@ def load_workflow_graph_config(workflow_name: str = "default") -> Tuple[list, li
 def build_app_from_workflow(
     workflow_name: str = "default",
     context_manager: Optional[ContextManager] = None,
-    shared_memory: Optional[Any] = None,
+    persona_memory: Optional[Any] = None,
+    default_history_mode: Optional[str] = None,
 ) -> Any:
     """
     统一的工作流构建入口：所有 workflow（默认/自定义）均走 dynamic graph。
+
+    Args:
+        default_history_mode: 全局默认的 history_mode（full / minimal），
+            None 时使用 config.planner_config.DEFAULT_HISTORY_MODE。
+            单节点仍可通过 NodeConfig.config[\"history_mode\"] 覆盖。
     """
     nodes, edges = load_workflow_graph_config(workflow_name)
     return build_dynamic_graph(
         nodes=nodes,
         edges=edges,
         context_manager=context_manager,
-        shared_memory=shared_memory,
+        persona_memory=persona_memory,
         default_workflow_name=workflow_name,
+        default_history_mode=default_history_mode,
     )
 
 
@@ -88,8 +96,9 @@ def build_dynamic_graph(
     nodes: list,
     edges: list,
     context_manager: Optional[ContextManager] = None,
-    shared_memory: Optional[Any] = None,
+    persona_memory: Optional[Any] = None,
     default_workflow_name: str = "default",
+    default_history_mode: Optional[str] = None,
 ) -> Any:
     """
     根据 NodeConfig / EdgeConfig 列表动态构建并编译 LangGraph 图。
@@ -105,12 +114,18 @@ def build_dynamic_graph(
                          或 YAMLWorkflowParser.parse_nodes()）。
         edges:           EdgeConfig 对象列表（同上）。
         context_manager: 共享上下文管理器，None 时自动创建。
-        shared_memory:   共享长期记忆实例（可选，注入每个通用节点）。
+        persona_memory:  全局用户画像 UserPersonaMemory（可选），注入各节点 system 头部；入口节点可写回。
+        default_history_mode: 全局默认 history_mode（full / minimal），
+            None 时使用 DEFAULT_HISTORY_MODE；节点 config.history_mode 可覆盖。
 
     Returns:
         已编译的 LangGraph CompiledGraph，支持 .invoke() / .ainvoke()。
     """
     from workflow.nodes import make_generic_agent_node
+
+    eff_history_mode = (
+        default_history_mode if default_history_mode is not None else DEFAULT_HISTORY_MODE
+    )
 
     # 兜底：nodes 为空时退回 default workflow 配置图
     if not nodes:
@@ -128,6 +143,17 @@ def build_dynamic_graph(
 
     graph = StateGraph(WorkflowState)
 
+    # ---- 汇节点（无出边），供 minimal 模式下判断终端 ctx ----
+    terminal_nodes: set = set(node_ids)
+    for edge_cfg in edges:
+        terminal_nodes.discard(edge_cfg.from_node)
+
+    # ---- 入口节点（START 第一个执行的节点），用于画像更新与格式约束 ----
+    target_nodes = {e.to_node for e in edges}
+    entry_candidates = [n.node_id for n in nodes if n.node_id not in target_nodes]
+    entry_node = entry_candidates[0] if entry_candidates else nodes[0].node_id
+    logger.debug(f"[DynamicGraph] 入口节点: {entry_node}")
+
     # ---- 注册节点 ----
     for node_cfg in nodes:
         agent = _build_agent_instance(node_cfg.agent_name, node_cfg.node_id, node_cfg.config)
@@ -136,21 +162,17 @@ def build_dynamic_graph(
             ctx=ctx,
             node_id=node_cfg.node_id,
             node_config=node_cfg.config,
-            memory=shared_memory,
+            persona_memory=persona_memory,
+            default_history_mode=eff_history_mode,
+            is_terminal=node_cfg.node_id in terminal_nodes,
+            is_entry_node=node_cfg.node_id == entry_node,
         )
         graph.add_node(node_cfg.node_id, node_fn)
         logger.debug(f"[DynamicGraph] 注册节点: {node_cfg.node_id} ({node_cfg.agent_name})")
 
-    # ---- 确定入口节点 ----
-    # 入口为没有任何边指向它的节点（拓扑源头），或直接取第一个节点
-    target_nodes = {e.to_node for e in edges}
-    entry_candidates = [n.node_id for n in nodes if n.node_id not in target_nodes]
-    entry_node = entry_candidates[0] if entry_candidates else nodes[0].node_id
     graph.add_edge(START, entry_node)
-    logger.debug(f"[DynamicGraph] 入口节点: {entry_node}")
 
     # ---- 注册边 ----
-    terminal_nodes = set(node_ids)
     for edge_cfg in edges:
         if edge_cfg.condition is None:
             graph.add_edge(edge_cfg.from_node, edge_cfg.to_node)
@@ -162,7 +184,6 @@ def build_dynamic_graph(
                 f"待 make_conditional_router 实现后激活"
             )
             graph.add_edge(edge_cfg.from_node, edge_cfg.to_node)
-        terminal_nodes.discard(edge_cfg.from_node)
 
     # ---- 末端节点连接 END ----
     for terminal in terminal_nodes:

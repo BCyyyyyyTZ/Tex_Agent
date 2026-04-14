@@ -1,9 +1,13 @@
 #memory/factory.py
 
+from pathlib import Path
+from typing import Dict, Optional
+
 from memory.branch_memory import BranchMemory
 from memory.base_memory import MemoryType
-from typing import Dict
 from memory.simple_memory import SimpleMemory
+
+_DEFAULT_STORE_DIR = Path(__file__).resolve().parent.parent / "memory_store"
 
 
 class MemoryFactory:
@@ -27,43 +31,48 @@ class MemoryFactory:
             raise ValueError(f"Unknown mode: {mode}")
     
     @staticmethod
-    def create_shared_memory(branch_enabled: bool = False) -> BranchMemory:
-        """创建共享记忆"""
+    def create_shared_memory(
+        branch_enabled: bool = False,
+        persist_path: Optional[str] = None,
+    ) -> BranchMemory:
+        """创建共享记忆；默认持久化到 memory_store/shared.jsonl。"""
+        path = persist_path or str(_DEFAULT_STORE_DIR / "shared.jsonl")
         return BranchMemory(
             memory_type=MemoryType.SHARED,
-            branch_enabled=branch_enabled
+            branch_enabled=branch_enabled,
+            persist_path=path,
         )
-    
+
     @staticmethod
-    def create_private_memory(agent_id: str, branch_enabled: bool = False) -> BranchMemory:
-        """创建私有记忆"""
+    def create_private_memory(
+        agent_id: str,
+        branch_enabled: bool = False,
+        persist_path: Optional[str] = None,
+    ) -> BranchMemory:
+        """创建私有记忆；默认持久化到 memory_store/private_<agent_id>.jsonl。"""
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in agent_id) or "agent"
+        path = persist_path or str(_DEFAULT_STORE_DIR / f"private_{safe}.jsonl")
         return BranchMemory(
             memory_type=MemoryType.PRIVATE,
             agent_id=agent_id,
-            branch_enabled=branch_enabled
+            branch_enabled=branch_enabled,
+            persist_path=path,
         )
     
     @staticmethod
     def create_hybrid_memory(branch_enabled: bool = False) -> Dict[str, BranchMemory]:
-        """创建混合记忆系统（各 Agent 独立）"""
+        """创建混合记忆系统（各 Agent 独立），各槽位默认独立 JSONL 文件。"""
         return {
-            "design": BranchMemory(
-                memory_type=MemoryType.PRIVATE,
-                agent_id="design",
+            "design": MemoryFactory.create_private_memory(
+                "design", branch_enabled=branch_enabled
+            ),
+            "think": MemoryFactory.create_private_memory(
+                "think", branch_enabled=branch_enabled
+            ),
+            "execute": MemoryFactory.create_private_memory(
+                "execute", branch_enabled=branch_enabled
+            ),
+            "shared": MemoryFactory.create_shared_memory(
                 branch_enabled=branch_enabled
             ),
-            "think": BranchMemory(
-                memory_type=MemoryType.PRIVATE,
-                agent_id="think",
-                branch_enabled=branch_enabled
-            ),
-            "execute": BranchMemory(
-                memory_type=MemoryType.PRIVATE,
-                agent_id="execute",
-                branch_enabled=branch_enabled
-            ),
-            "shared": BranchMemory(
-                memory_type=MemoryType.SHARED,
-                branch_enabled=branch_enabled
-            )
         }

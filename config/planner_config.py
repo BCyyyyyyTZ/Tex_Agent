@@ -42,6 +42,61 @@ NODE_OUTPUT_FORMAT_INSTRUCTION: str = """
 ```
 ---"""
 
+# 工作流入口节点（拓扑上的第一个节点）在输出 JSON 中必须携带的画像更新字段说明。
+# 实际解析与落盘见 memory.persona_memory.UserPersonaMemory；不实现 tools / function call。
+PERSONA_ENTRY_NODE_FORMAT_ADDON: str = """
+---
+[入口节点专用 - 顶层 JSON 额外字段 | 必须严格遵守]
+你是本工作流的第一个执行节点，除 result / summary / confidence / metadata 外，必须在同一 JSON 顶层包含：
+
+  "persona_memory_update": {
+    "action": "none" | "merge" | "set" | "clear",
+    "delta": { ... },
+    "fields": { ... },
+    "clear_keys": [ ... ],
+    "remove": { ... }
+  }
+
+各 action 用法（互斥，只选一种主操作）：
+
+1) action 为 "none"
+   - 不修改用户画像文件；其它子字段可省略。
+
+2) action 为 "merge"（追加式更新）
+   - "delta"：与原先相同。列表字段为去重追加；字符串字段仅当新值非空时覆盖原值；extra 为键值合并。
+   - 可选 "remove"：从列表字段中删除指定条目（字符串与画像中某项去空白后完全一致才删除），例如：
+     "remove": { "preferences": ["请用中文回答"], "research_areas": ["旧领域"] }
+
+3) action 为 "set"（整字段覆盖，用于「改偏好」如中文→英文）
+   - 必须提供 "fields" 对象，按字段整体写入画像：
+     - 字符串类字段（display_name / writing_preferences / latex_preferences / citation_preferences / other_notes）：
+       写成空字符串 "" 表示清空该字段。
+     - 列表类字段（research_areas / preferences）：整表替换为给定数组（可 [] 清空）。
+     - "extra"：传入对象则整体替换 extra；传 null 则 extra 变为 {}。
+
+4) action 为 "clear"（按字段恢复默认空画像）
+   - 必须提供 "clear_keys" 字符串数组，如 ["writing_preferences", "preferences"]，
+     将对应字段恢复为系统默认值（等同删除该字段上的用户内容）。
+
+示例（用户要求改为英文回答）：
+  "persona_memory_update": {
+    "action": "set",
+    "fields": { "writing_preferences": "请使用英文回答与写作建议。" }
+  }
+---
+"""
+
+
+# ------------------------------------------------------------------
+# 动态图：消息 / 记忆写入策略
+# - full：每节点将 prompt 与回复写入 state.messages，并 ctx.save
+# - minimal：不在 state.messages 中累积中间轮次；上游依赖走 metadata；仅终端节点 ctx.save
+# 长期用户画像由 UserPersonaMemory 单独文件维护，不由各节点写入 BranchMemory。
+# 节点可在 NodeConfig.config 中设置 history_mode 覆盖构图时的 default_history_mode。
+# ------------------------------------------------------------------
+
+DEFAULT_HISTORY_MODE: str = "minimal"
+
 
 # ------------------------------------------------------------------
 # 复杂度 → Agent 类型映射表
