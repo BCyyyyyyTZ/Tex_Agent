@@ -311,9 +311,35 @@ pipeline.is_ready() 检查是否有准备好的知识库 -> pipeline.retrieve(in
 + rag_top_k: int = 5          # 次检索返回的最大片段数，注入 Prompt 的片段越多 Token 消耗越大
 + rag_persist_directory       # 向量库持久化路径，空字符串表示使用内存模式（进程退出后清空）
 
+#### 向量库持久化路径说明
+
+RAG_PERSIST_DIR ↔ rag_persist_directory
+
+目前的环境变量是默认在项目根目录下的`./knowledge_base`路径
+
+在`settings.py`中添加了对路径转化为绝对路径的解析函数，相对路径可以转化成绝对路径而直接使用
+
 ---
 
 ## 外部调用说明
+
+### 向量库手动注入
+
+> 目录：Tex_Agent/rag/rag_index_cli.py
+
+需要在Tex_Agent根目录执行：
+
+```bash
+python rag/rag_index_cli.py              # 交互输入路径
+# 或者
+python rag/rag_index_cli.py a.md b.tex   # 直接指定文件
+```
+
+路径方面可以使用绝对路径也可以使用相对路径，相对于当前工作目录
+
+可以在交互输入路径中输入多个文件路径，最后输入空行或 quit / exit 结束即可开始索引
+
+**注：目前没有支持pdf直接注入，可以注入的文本类型为.txt, .md, .tex**
 
 ---
 

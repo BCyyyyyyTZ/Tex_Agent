@@ -11,6 +11,16 @@ from dotenv import load_dotenv
 _project_root = Path(__file__).parent.parent
 load_dotenv(_project_root / ".env")
 
+def _resolve_rag_persist_dir(raw: str) -> str:
+    """将 RAG 持久化目录解析为绝对路径：相对路径相对于项目根（config 上一级）。"""
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    p = Path(text)
+    if p.is_absolute():
+        return str(p.resolve())
+    return str((_project_root / p).resolve())
+
 
 @dataclass
 class Settings:
@@ -54,7 +64,7 @@ class Settings:
     rag_chunk_overlap: int = 50
     rag_top_k: int = 5
     rag_persist_directory: str = field(
-        default_factory=lambda: os.getenv("RAG_PERSIST_DIR", "")
+        default_factory=lambda: _resolve_rag_persist_dir(os.getenv("RAG_PERSIST_DIR", ""))
     )
 
     def __repr__(self) -> str:
