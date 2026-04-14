@@ -1,0 +1,74 @@
+\section{Background}\label{sec:backgound}
+
+% 两种，一种处理ingest任务，一种处理retreivial任务。前者要低时延，后者要高吞吐。
+% 数据video或者image，都是rgb space。
+% 利用AI技术自动处理。
+% domain-specific task
+\noindent
+\textbf{Vision applications} on mobile and edge platforms exploit AI technology to process images or videos in RGB spaces~\cite{zhang2018awstream, khani2023recl, Romil2022Ekya}.
+Termial devices (\eg smartphones, drones, and wearable cameras) continuously capture massive vision data and transmit to nearby edge servers for analysis~\cite{xu2025joint, dai2024context}.
+On the edge server, multiple DNNs that are well-trained on domain-specific datasets separately take care of one target task and together serve the application well, such as image classification~\cite{yuan2022PacketGame, kang2022viva}, vehicle counting~\cite{li2020reducto, kang2017noscope}, and target detection~\cite{du2020server, yu2024vqpy}.
+With the natural language interface inherited from LLM, VLMs extend these capabilities to more complex, open-ended vision tasks.
+For example, a VLM can locate a target when only given a text-described query such as ``A boy wearing a red sweater lost at the corner''.
+In this paradigm, the edge server must handle highly concurrent streams from multiple clients, each with domain-specific tasks.
+Instead of deploying multiple full-parameter VLMs, the edge server can utilize LoRA to dynamically equip a shared base model with diverse adapters tailored for different queries.
+% multimodal ability and preserve user-friendly
+
+% current video analytics is limited by the poor language understanding capacity of , thus hardly handling multi-modal tasks
+
+% \subsection{Large Multimodal Models}\label{sec:ParaEfficient}
+% \vspace{0.2em}
+\noindent
+\textbf{Vision language models (VLMs)} aim to achieve stronger general intelligence via extending LLMs with multimodal inputs. 
+Since more than 80\% of human beings’ perception and activities are mediated through vision~\cite{thomas2024vision}, it is natural to start the exploration by equipping LLMs with ``eyes''.
+By introducing a visual receptor, comprised of a \textit{visual encoder} (\eg ViT~\cite{radford2021learning}) and a \textit{vision-language projector} (\eg Q-former~\cite{li2023blip}), VLMs power LLMs with visual capacity. 
+Fig. \ref{fig:VLM} illustrates the inference procedure of VLMs.
+Given an image input and its prompt, the visual encoder splits the image into small patches (\eg 14$\times$14 pixels block) and extracts the visual features of each. 
+The vision-language projector then converts patches' visual features into visual tokens and feeds into LLM~\cite{achiam2023gpt4, chowdhery2023palm, touvron2023llama2, jiang2023mistral}, together with the embedded text tokens from the prompt, to generate the answer. %another sequence of tokens as the answer.
+LLM maps the input into high-level features and predicts the probability distribution of the next token with the \textit{language modeling (LM) head} in an autoregressive pattern \cite{kwon2023efficient, yu2022orca}. 
+As the dotted arrows depicted in Fig. \ref{fig:VLM}, it iteratively generates tokens with input tokens and previous output tokens once a time, until an end-of-sentence (\texttt{<EOS>}) token is emitted. 
+
+% This parameter-efficient method capitalizes on the observation that only a small portion of model parameters, referred to as adapters, change during fine-tuning~\cite{peft}.
+
+
+% \subsection{Integrating External Knowledge}\label{sec:ExternalKnowledge}
+% 三种方式：few-shot，RAG，LoRA
+% 前两种通过修改输入，即增强prompt的方法，后一种通过更改模型参数。
+% few-shot怎么做
+% RAG怎么做
+% 它们的缺点①精度不稳定，且无法保证输出一致；②增加了输入长度，延长推理时延；③RAG的方式需要在大模型外retreival，更耗时。
+% 因此，针对有精度和时延要求的vision application中，本文选择LoRA的方式。
+% 而对增强prompt的方法的优化放在future work中。
+
+
+\noindent
+
+\textbf{Low-rank adaptation (LoRA)}~\cite{hu2021lora, dettmers2024qlora, chavan2023one} is a widely used parameter-efficient fine-tuning method~\cite{peft} %, which offers great accuracy gain on 
+to integrate the external knowledge into large models.
+% by fine-tuning only 
+The LoRA adapter is a small number of trainable parameters to learn this knowledge, typically placed in attention layers~\cite{hu2021lora}.
+The core of LoRA, as illustrated in Fig. \ref{fig:Alongside}, is to represent each weight update $\Delta W$ as a product of two matrices, $A$ and $B$, with dimensions $r\times d$ and $d\times r$, respectively. 
+Their ranks are much smaller than the base model weight $W$, with dimensions $d\times d$.
+This makes sense since the low intrinsic rank phenomenon of weight updates in large models~\cite{hu2021lora}.
+When fine-tuning, LoRA adapters only update $A$ and $B$ while keeping $W$ frozen. 
+At inference, the computation of all LoRA adapters can be placed bypass, as shown in Fig. \ref{fig:Alongside}, and only adds the results onto the output.  
+Or merge one multiplied matrix $B\times A$ (\ie $\Delta W$) into base model $W$, which keeps computation overhead the same as the base model in Fig. \ref{fig:Merging}.
+% ; such merged inference mode yields the exact inference overhead 
+
+
+% for instance in Fig. \ref{fig:Alongside}, three adapters 
+
+
+% \subsection{LoRA Model Serving System}\label{sec:LoRAServing}
+% \vspace{0.2em}
+\noindent
+\textbf{LoRA model serving systems}~\cite{chen2024punica, sheng2023slora, wu2024dlora} aim to improve LoRA model inference efficiency when serving concurrent requests that invokes heterogeneous adapters.
+In unmerged inference, the core characteristic is that computidng two small matrices of the adapter underutilizes GPU computing units, leading to unnecessary delay and resource waste.
+To tackle this, Punica~\cite{chen2024punica} and S-LoRA~\cite{sheng2023slora} batch multiple heterogeneous adapters, as the cascade LoRA adapters illustrated in Fig. \ref{fig:Alongside}, and compute them within one single custom CUDA kernel.
+This method boosts the system throughput indeed but causes significant additional overhead (more in \S \ref{sec:challenges}).
+% 增加了吞吐，但是①引入了时延，②没法针对不同时延敏感性的lora分or别计算。
+dLoRA~\cite{wu2024dlora} merges the most accessed LoRA adapter into the base model and switches to unmerge if necessary.  % under skewed workloads and unmerge it in other cases.
+However, its mode switch causes an unacceptable time cost (more in \S \ref{sec:challenges}).
+Besides, like Punica and S-LoRA, dLoRA's unmerged inference also fails to address the large number of extra computation overhead.
+
+
