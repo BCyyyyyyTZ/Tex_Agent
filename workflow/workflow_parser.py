@@ -136,7 +136,11 @@ class WorkflowParser(ABC):
 
     @abstractmethod
     def build_graph(
-        self, nodes: List[NodeConfig], edges: List[EdgeConfig]
+        self,
+        nodes: List[NodeConfig],
+        edges: List[EdgeConfig],
+        default_history_mode: Optional[str] = None,
+        persona_memory: Optional[Any] = None,
     ) -> Any:
         """
         根据节点和边配置动态构建并编译 LangGraph 图。
@@ -144,6 +148,8 @@ class WorkflowParser(ABC):
         Args:
             nodes: NodeConfig 对象列表（由 parse_nodes() 返回）。
             edges: EdgeConfig 对象列表（由 parse_edges() 返回）。
+            default_history_mode: 可选，传入 build_dynamic_graph。
+            persona_memory: 可选，全局 UserPersonaMemory 实例。
 
         Returns:
             编译完成的 LangGraph CompiledGraph 实例，可直接 .invoke()。
@@ -434,7 +440,13 @@ class YAMLWorkflowParser(WorkflowParser):
             ))
         return edges
 
-    def build_graph(self, nodes: List[NodeConfig], edges: List[EdgeConfig]) -> Any:
+    def build_graph(
+        self,
+        nodes: List[NodeConfig],
+        edges: List[EdgeConfig],
+        default_history_mode: Optional[str] = None,
+        persona_memory: Optional[Any] = None,
+    ) -> Any:
         """
         调用 build_dynamic_graph() 编译 LangGraph 图。
 
@@ -442,7 +454,12 @@ class YAMLWorkflowParser(WorkflowParser):
         nodes / edges 为空时，build_dynamic_graph() 内部自动回退到硬编码图。
         """
         from workflow.graph_builder import build_dynamic_graph
-        return build_dynamic_graph(nodes=nodes, edges=edges)
+        return build_dynamic_graph(
+            nodes=nodes,
+            edges=edges,
+            default_history_mode=default_history_mode,
+            persona_memory=persona_memory,
+        )
 
     def from_task_plan(
         self,

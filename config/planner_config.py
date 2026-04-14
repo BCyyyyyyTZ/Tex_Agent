@@ -42,6 +42,45 @@ NODE_OUTPUT_FORMAT_INSTRUCTION: str = """
 ```
 ---"""
 
+# 工作流入口节点（拓扑上的第一个节点）在输出 JSON 中必须携带的画像更新字段说明。
+# 实际解析与落盘见 memory.persona_memory.UserPersonaMemory；不实现 tools / function call。
+PERSONA_ENTRY_NODE_FORMAT_ADDON: str = """
+---
+[入口节点专用 - 顶层 JSON 额外字段 | 必须严格遵守]
+你是本工作流的第一个执行节点，除 result / summary / confidence / metadata 外，必须在同一 JSON 顶层包含：
+
+  "persona_memory_update": {
+    "action": "none" 或 "merge",
+    "delta": {
+      "display_name": "<可选，非空则覆盖>",
+      "research_areas": ["<领域1>", "<领域2>"],
+      "preferences": ["<写作或交互偏好>"],
+      "writing_preferences": "<论文结构/语气等偏好，非空则覆盖>",
+      "latex_preferences": "<公式/宏包等偏好，非空则覆盖>",
+      "citation_preferences": "<引用风格如 GB/T APA，非空则覆盖>",
+      "other_notes": "<其它长期有效说明，非空则覆盖>",
+      "extra": { "<任意键>": "<任意值>" }
+    }
+  }
+
+规则：
+- action 为 "none"：不修改全局用户画像文件。
+- action 为 "merge"：将 delta 合并进用户画像（列表字段为去重追加，字符串字段非空则覆盖）。
+- 若本轮对话没有出现任何可确认的偏好/领域信息，action 必须为 "none"，delta 可为 {}。
+---
+"""
+
+
+# ------------------------------------------------------------------
+# 动态图：消息 / 记忆写入策略
+# - full：每节点将 prompt 与回复写入 state.messages，并 ctx.save
+# - minimal：不在 state.messages 中累积中间轮次；上游依赖走 metadata；仅终端节点 ctx.save
+# 长期用户画像由 UserPersonaMemory 单独文件维护，不由各节点写入 BranchMemory。
+# 节点可在 NodeConfig.config 中设置 history_mode 覆盖构图时的 default_history_mode。
+# ------------------------------------------------------------------
+
+DEFAULT_HISTORY_MODE: str = "minimal"
+
 
 # ------------------------------------------------------------------
 # 复杂度 → Agent 类型映射表
