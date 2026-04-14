@@ -141,21 +141,107 @@ class UserPersonaMemory:
             if key in DEFAULT_USER_PERSONA and key not in ("version", "extra"):
                 self._data[key] = val
 
+    def _remove_from_lists(self, remove: Dict[str, Any]) -> None:
+        """从列表型字段中删除与给定条目完全相同的项（去首尾空白后比较）。"""
+        if not isinstance(remove, dict):
+            return
+        for key, to_drop in remove.items():
+            if key not in _LIST_KEYS:
+                continue
+            if not isinstance(to_drop, list):
+                continue
+            drop_set = {str(x).strip() for x in to_drop if str(x).strip()}
+            if not drop_set:
+                continue
+            cur = self._data.get(key) or []
+            if not isinstance(cur, list):
+                cur = []
+            self._data[key] = [x for x in cur if str(x).strip() not in drop_set]
+
+    def _set_fields(self, fields: Dict[str, Any]) -> None:
+        """
+        整字段覆盖：字符串可用空串清空；列表整表替换；extra 传入 dict 时整表替换。
+        """
+        if not isinstance(fields, dict):
+            return
+        for key, val in fields.items():
+            if key == "version":
+                if isinstance(val, int):
+                    self._data["version"] = val
+                elif isinstance(val, str) and val.strip().isdigit():
+                    self._data["version"] = int(val.strip())
+                continue
+            if key == "extra":
+                if val is None:
+                    self._data["extra"] = {}
+                elif isinstance(val, dict):
+                    self._data["extra"] = deepcopy(val)
+                continue
+            if key in _LIST_KEYS:
+                if isinstance(val, list):
+                    self._data[key] = [
+                        str(x).strip() for x in val if str(x).strip()
+                    ]
+                elif val is None:
+                    self._data[key] = []
+                continue
+            if key in _STRING_KEYS:
+                self._data[key] = "" if val is None else str(val)
+                continue
+            if key in DEFAULT_USER_PERSONA and key != "extra":
+                self._data[key] = deepcopy(val)
+
+    def _clear_keys(self, keys: List[Any]) -> None:
+        """将指定顶层字段恢复为默认值（等同删除该字段上的用户内容）。"""
+        if not isinstance(keys, list):
+            return
+        for raw in keys:
+            k = str(raw).strip() if raw is not None else ""
+            if not k or k not in DEFAULT_USER_PERSONA:
+                continue
+            self._data[k] = deepcopy(DEFAULT_USER_PERSONA[k])
+
     def apply_persona_memory_update(self, update: Any) -> None:
         """
-        解析入口节点 JSON 中的 persona_memory_update 对象。
-        期望: {"action": "none"|"merge", "delta": { ... }}
+        解析入口节点 JSON 中的 persona_memory_update。
+
+        支持 action:
+        - none: 不写盘
+        - merge: delta 合并；可选 remove 从列表字段按精确项删除
+        - set: fields 整字段覆盖（字符串可改为空串以清空；列表整表替换）
+        - clear: clear_keys 将若干字段恢复为默认空值
         """
         if not isinstance(update, dict):
             return
         action = str(update.get("action", "none")).strip().lower()
-        if action != "merge":
+        if action == "none":
             return
-        delta = update.get("delta")
-        if not isinstance(delta, dict):
-            return
+
         with self._lock:
-            self._merge_delta(delta)
+            if action == "merge":
+                delta = update.get("delta")
+                if isinstance(delta, dict):
+                    self._merge_delta(delta)
+                rem = update.get("remove")
+                if isinstance(rem, dict):
+                    self._remove_from_lists(rem)
+            elif action == "set":
+                fields = update.get("fields")
+                if isinstance(fields, dict):
+                    self._set_fields(fields)
+                else:
+                    logger.warning("persona_memory_update action=set 但缺少 fields 对象，已忽略")
+                    return
+            elif action == "clear":
+                keys = update.get("clear_keys")
+                if isinstance(keys, list):
+                    self._clear_keys(keys)
+                else:
+                    logger.warning("persona_memory_update action=clear 但 clear_keys 非数组，已忽略")
+                    return
+            else:
+                logger.warning(f"未知 persona_memory_update.action={action!r}，已忽略")
+                return
             try:
                 self._atomic_write()
             except OSError as e:
