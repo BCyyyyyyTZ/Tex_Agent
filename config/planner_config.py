@@ -8,7 +8,7 @@ AutoAgentsMASPlanner 规划器相关配置。
 """
 import json
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ------------------------------------------------------------------
@@ -18,7 +18,9 @@ from typing import Dict, List, Optional
 PLANNER_TEMPERATURE: float = 0.2        # 规划/Supervisor 任务：低随机性，保证结构稳定
 # 模型名称不在此定义，统一从 config/settings.py 的 settings.llm_model 读取（对应 .env 的 LLM_MODEL）
 NODE_DEFAULT_TEMPERATURE: float = 0.7   # 执行节点：适度创造性
-MAX_PLAN_ROUNDS_DEFAULT: int = 3        # PlanAgent ↔ Supervisor 最大迭代轮数
+MAX_PLAN_ROUNDS_DEFAULT: int = 6        # PlanAgent ↔ Supervisor 最大迭代轮数
+# Supervisor 评分统一采用 1~10 分制；阈值 8 分表示“可通过”基准线。
+SUPERVISOR_MIN_QUALITY_SCORE: float = 8.0
 
 
 # ------------------------------------------------------------------
@@ -156,10 +158,12 @@ PLAN_OUTPUT_SCHEMA: str = """{
 
 SUPERVISOR_OUTPUT_SCHEMA: str = """{
   "approved": <true 或 false>,
-  "quality_score": <0.0到1.0>,
+  "quality_score": <1到10>,
   "issues": ["<问题1>", "<问题2>"],
   "suggestions": "<整体改进建议>",
-  "revised_agents": [<若 approved=false，提供修订后的完整 agents 列表，格式同上；approved=true 时为空数组>]
+  "revised_agents": [<若 approved=false，提供修订后的完整 agents 列表，格式同上；approved=true 时可为空数组>],
+  "revised_edges": [<若 approved=false，提供修订后的完整 edges；approved=true 时可为空数组>],
+  "revised_entry_node": "<若 approved=false，提供修订后的 entry_node；approved=true 时可为空字符串>"
 }"""
 
 
@@ -175,7 +179,7 @@ def parse_llm_json(
     fallback: Optional[Dict] = None,
 ) -> Dict:
     """
-    三级容错解析 LLM 输出的 JSON 字符串。
+    多级容错解析 LLM 输出的 JSON 字符串。
 
     尝试顺序：
       1. 直接 json.loads（LLM 严格输出时）
@@ -197,30 +201,196 @@ def parse_llm_json(
     if fallback is None:
         fallback = {}
 
-    # 尝试 1：直接解析
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        pass
+    text = _normalize_text(raw)
+    if not text:
+        logger.warning(f"[{context}] LLM 输出为空，使用兜底值。")
+        return fallback
 
-    # 尝试 2：提取 ```json ... ``` 代码块
-    match = re.search(r'```(?:json)?\s*(.*?)\s*```', raw, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except (json.JSONDecodeError, TypeError):
-            pass
+    candidates: List[str] = [text]
+    candidates.extend(_extract_code_blocks(text))
+    first_obj = _extract_first_balanced_object(text)
+    if first_obj:
+        candidates.append(first_obj)
 
-    # 尝试 3：正则抽取第一个完整 {...} 块
-    match = re.search(r'\{.*\}', raw, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except (json.JSONDecodeError, TypeError):
-            pass
+    # 尝试 1：原文/代码块/首个对象解析
+    for candidate in candidates:
+        parsed = _parse_dict_or_wrapped(candidate)
+        if parsed is not None:
+            return parsed
+
+    # 尝试 2：节点统一输出格式修复（尽量保住 result/summary/confidence）
+    recovered = _recover_node_payload(text, fallback)
+    if recovered is not None:
+        logger.warning(
+            f"[{context}] JSON 解析失败，但字段修复成功。"
+            f"原始输出前200字：{text[:200]}"
+        )
+        return recovered
 
     logger.warning(
         f"[{context}] JSON 解析全部失败，使用兜底值。"
-        f"原始输出前200字：{raw[:200]}"
+        f"原始输出前200字：{text[:200]}"
     )
     return fallback
+
+
+def _normalize_text(raw: Any) -> str:
+    if raw is None:
+        return ""
+    return str(raw).strip().lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _parse_dict_or_wrapped(candidate: str) -> Optional[Dict[str, Any]]:
+    candidate = candidate.strip()
+    if not candidate:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    if isinstance(parsed, str):
+        inner = _normalize_text(parsed)
+        if inner.startswith("{") and inner.endswith("}"):
+            try:
+                inner_parsed = json.loads(inner)
+                if isinstance(inner_parsed, dict):
+                    return inner_parsed
+            except (json.JSONDecodeError, TypeError):
+                return None
+    return None
+
+
+def _extract_code_blocks(text: str) -> List[str]:
+    blocks: List[str] = []
+    for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE):
+        body = match.group(1).strip()
+        if body:
+            blocks.append(body)
+    return blocks
+
+
+def _extract_first_balanced_object(text: str) -> Optional[str]:
+    n = len(text)
+    i = 0
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        start = i
+        depth = 0
+        in_str = False
+        escaped = False
+        j = i
+        while j < n:
+            ch = text[j]
+            if escaped:
+                escaped = False
+                j += 1
+                continue
+            if ch == "\\":
+                escaped = True
+                j += 1
+                continue
+            if ch == '"':
+                in_str = not in_str
+                j += 1
+                continue
+            if in_str:
+                j += 1
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:j + 1]
+            j += 1
+        i += 1
+    return None
+
+
+def _recover_node_payload(raw: str, fallback: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    key_hits = sum(1 for k in ('"result"', '"summary"', '"confidence"') if k in raw)
+    if key_hits == 0:
+        return None
+
+    out = dict(fallback or {})
+    extracted_any = False
+
+    result_val = _extract_string_field(raw, "result")
+    if result_val is not None:
+        out["result"] = result_val
+        extracted_any = True
+
+    summary_val = _extract_string_field(raw, "summary")
+    if summary_val is not None:
+        out["summary"] = summary_val
+        extracted_any = True
+
+    conf_val = _extract_numeric_field(raw, "confidence")
+    if conf_val is not None:
+        out["confidence"] = max(0.0, min(1.0, conf_val))
+        extracted_any = True
+
+    meta_val = _extract_object_field(raw, "metadata")
+    if meta_val is not None:
+        out["metadata"] = meta_val
+        extracted_any = True
+
+    pm_val = _extract_object_field(raw, "persona_memory_update")
+    if pm_val is not None:
+        out["persona_memory_update"] = pm_val
+        extracted_any = True
+
+    return out if extracted_any else None
+
+
+def _extract_string_field(raw: str, field: str) -> Optional[str]:
+    marker = f'"{field}"'
+    idx = raw.find(marker)
+    if idx < 0:
+        return None
+    idx = raw.find(":", idx + len(marker))
+    if idx < 0:
+        return None
+    i = idx + 1
+    while i < len(raw) and raw[i].isspace():
+        i += 1
+    if i >= len(raw) or raw[i] != '"':
+        return None
+    candidate = raw[i:]
+    try:
+        decoder = json.JSONDecoder()
+        value, _ = decoder.raw_decode(candidate)
+        if isinstance(value, str):
+            return value
+        return str(value)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _extract_numeric_field(raw: str, field: str) -> Optional[float]:
+    m = re.search(rf'"{re.escape(field)}"\s*:\s*([0-9]+(?:\.[0-9]+)?)', raw)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _extract_object_field(raw: str, field: str) -> Optional[Dict[str, Any]]:
+    marker = f'"{field}"'
+    idx = raw.find(marker)
+    if idx < 0:
+        return None
+    idx = raw.find(":", idx + len(marker))
+    if idx < 0:
+        return None
+    sub = raw[idx + 1:]
+    obj = _extract_first_balanced_object(sub)
+    if not obj:
+        return None
+    return _parse_dict_or_wrapped(obj)
