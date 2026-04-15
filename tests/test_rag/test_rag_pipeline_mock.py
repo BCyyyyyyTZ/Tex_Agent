@@ -17,6 +17,13 @@ from rag.base_retriever import BaseRetriever, RetrievedDocument
 from rag.document_loader import load_and_chunk
 from rag.rag_pipeline import RAGPipeline
 
+from rag.store_listing import (
+    StoreField,
+    StoredChunkRecord,
+    StoredChunksPage,
+    format_stored_chunks_page,
+)
+
 FIXTURE_DIR = Path(__file__).resolve().parent / "test_document"
 
 
@@ -59,6 +66,35 @@ class MockRetriever(BaseRetriever):
     def document_count(self) -> int:
         return self._doc_count
 
+    def list_stored_page(
+        self,
+        offset: int = 0,
+        limit: int = 10,
+        fetch_fields: StoreField = StoreField.DEFAULT,
+    ) -> StoredChunksPage:
+        cap = max(1, min(int(limit), 10))
+        off = max(0, int(offset))
+        total = self._doc_count
+        items: list[StoredChunkRecord] = []
+        for i in range(off, min(off + cap, total)):
+            meta = (
+                {"source": "mock.txt", "chunk_idx": i}
+                if fetch_fields & StoreField.METADATA
+                else None
+            )
+            doc = f"chunk-body-{i}" if fetch_fields & StoreField.DOCUMENT else None
+            emb = [float(i), 0.5] if fetch_fields & StoreField.EMBEDDING else None
+            items.append(
+                StoredChunkRecord(id=f"mock-id-{i}", metadata=meta, document=doc, embedding=emb)
+            )
+        return StoredChunksPage(
+            items=items,
+            total=total,
+            offset=off,
+            limit=cap,
+            persist_directory=None,
+            collection_name="mock",
+        )
 
 @pytest.fixture
 def mock_retriever() -> MockRetriever:
@@ -202,3 +238,32 @@ def test_clear_resets_and_pipeline_document_count(mock_retriever: MockRetriever)
     pipe.clear()
     assert pipe.document_count() == 0
     assert mock_retriever.add_calls == []
+
+
+def test_list_stored_page_delegates_to_retriever(mock_retriever: MockRetriever):
+    pipe = RAGPipeline(retriever=mock_retriever, chunk_size=10, chunk_overlap=2)
+    pipe.index_text("abcdefghijklm", source="s.txt")  # 多 chunk
+    assert pipe.document_count() >= 2
+    page = pipe.list_stored_page(offset=0, limit=10, fetch_fields=StoreField.FULL)
+    assert page.total == pipe.document_count()
+    assert len(page.items) <= 10
+    assert page.items[0].document is not None
+    assert "chunk-body-0" in page.items[0].document
+def test_list_stored_page_offset_and_has_next(mock_retriever: MockRetriever):
+    pipe = RAGPipeline(retriever=mock_retriever, chunk_size=5, chunk_overlap=0)
+    pipe.index_text("0123456789", source="ten.txt")  # 2 chunks of 5
+    page0 = pipe.list_stored_page(offset=0, limit=1, fetch_fields=StoreField.DEFAULT)
+    assert len(page0.items) == 1
+    assert page0.has_next is True
+    page1 = pipe.list_stored_page(offset=1, limit=10, fetch_fields=StoreField.DEFAULT)
+    assert len(page1.items) == 1
+    assert page1.has_next is False
+def test_format_stored_chunks_page_contains_header_and_id(mock_retriever: MockRetriever):
+    pipe = RAGPipeline(retriever=mock_retriever, chunk_size=500, chunk_overlap=50)
+    pipe.index_text("only", source="one.txt")
+    page = pipe.list_stored_page(offset=0, limit=10, fetch_fields=StoreField.DEFAULT)
+    text = format_stored_chunks_page(page, StoreField.DEFAULT)
+    assert "collection='mock'" in text
+    assert "total=1" in text
+    assert "mock-id-0" in text
+    assert "metadata:" in text

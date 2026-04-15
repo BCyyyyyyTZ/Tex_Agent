@@ -33,6 +33,23 @@ except ImportError:
 
 from rag.base_retriever import BaseRetriever, RetrievedDocument
 
+from rag.store_listing import StoreField, StoredChunkRecord, StoredChunksPage, DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE
+
+
+def _chroma_sequence(raw: dict, key: str) -> list:
+    v = raw.get(key)
+    if v is None:
+        return []
+    try:
+        return list(v)
+    except TypeError:
+        return []
+def _embedding_to_list(emb):
+    if emb is None:
+        return None
+    if hasattr(emb, "tolist"):
+        return [float(x) for x in emb.tolist()]
+    return [float(x) for x in list(emb)]
 
 def _check_chromadb() -> None:
     """检查 chromadb 是否已安装，未安装时给出清晰的错误提示。"""
@@ -82,6 +99,7 @@ class ChromaRetriever(BaseRetriever):
             name=collection_name,
             embedding_function=self._embedding_fn,
         )
+        self._persist_directory = persist_directory  # Optional[str]，内存模式为 None
 
     def add_documents(
         self,
@@ -153,3 +171,52 @@ class ChromaRetriever(BaseRetriever):
     def document_count(self) -> int:
         """返回当前集合中存储的文档片段数量。"""
         return self._collection.count()
+
+    def list_stored_page(
+        self,
+        offset: int = 0,
+        limit: int = 10,
+        fetch_fields: StoreField = StoreField.DEFAULT,
+    ) -> StoredChunksPage:
+        _check_chromadb()
+        total = self.document_count()
+        cap = max(1, min(int(limit), MAX_LIST_PAGE_SIZE))
+        off = max(0, int(offset))
+        include: List[str] = []
+        if fetch_fields & StoreField.METADATA:
+            include.append("metadatas")
+        if fetch_fields & StoreField.DOCUMENT:
+            include.append("documents")
+        if fetch_fields & StoreField.EMBEDDING:
+            include.append("embeddings")
+        if not include:
+            include = ["metadatas"]  # Chroma 通常至少要 metadatas 或 documents
+        raw = self._collection.get(
+            include=include,
+            limit=cap,
+            offset=off,
+        )
+        ids = _chroma_sequence(raw, "ids")
+        metas = _chroma_sequence(raw, "metadatas")
+        docs = _chroma_sequence(raw, "documents")
+        embs = _chroma_sequence(raw, "embeddings")
+        items: List[StoredChunkRecord] = []
+        for i, rid in enumerate(ids):
+            meta = metas[i] if i < len(metas) else None
+            doc = docs[i] if i < len(docs) and (fetch_fields & StoreField.DOCUMENT) else None
+            _embedding_to_list(embs[i]) if i < len(embs) and (fetch_fields & StoreField.EMBEDDING) else None
+            if not (fetch_fields & StoreField.DOCUMENT):
+                doc = None
+            if not (fetch_fields & StoreField.EMBEDDING):
+                emb = None
+            items.append(
+                StoredChunkRecord(id=str(rid), metadata=meta, document=doc, embedding=emb)
+            )
+        return StoredChunksPage(
+            items=items,
+            total=total,
+            offset=off,
+            limit=cap,
+            persist_directory=self._persist_directory,
+            collection_name=self._collection_name,
+        )

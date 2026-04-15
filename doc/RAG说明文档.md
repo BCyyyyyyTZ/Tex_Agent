@@ -40,7 +40,7 @@ class RetrievedDocument:
 
 负责：封装对具体向量数据库的增删查操作，屏蔽各向量库的 API 差异
 
-*基类仅是接口，具体的实现细节要在继承子类中实现*
+除 `add_documents` / `retrieve` / `clear` / `document_count` 等抽象方法外，还提供 **`list_stored_page(offset, limit, fetch_fields)`**：分页列举库中已存储的 chunk，返回 **`StoredChunksPage`**（定义见 **`rag/store_listing.py`**）。**默认实现**为抛出 `NotImplementedError`；**`ChromaRetriever`** 与测试用 **`MockRetriever`** 中给出具体实现。
 
 ### 文档加载与分块
 
@@ -184,6 +184,23 @@ ChromaDB 会自动调用 embedding_fn 对文本向量化并存储
 
 返回当前集合中存储的文档片段数量
 
+#### list_stored_page（分页列举）
+
+基于 Chroma `collection.get(include=..., limit=..., offset=...)` 拉取当前集合中的一页记录，返回 `StoredChunksPage`，**不在此层做终端打印**。
+
+### 列举与展示（数据结构 + 格式化）
+
+> 目录：`rag/store_listing.py`
+
+与具体向量库实现解耦的一层：描述一页数据的结构
+
++ **`StoreField`（`Flag`）**：`ID`、`METADATA`、`DOCUMENT`、`EMBEDDING` 的组合；预置 **`DEFAULT = ID | METADATA`**、**`MINIMAL = ID`**、**`FULL`**（含正文与向量，体积大，一般仅调试）。
++ **`StoredChunkRecord`**：单条记录，含 `id` 以及可选的 `metadata` / `document` / `embedding`。
++ **`StoredChunksPage`**：`items`、`total`、`offset`、`limit`、`persist_directory`、`collection_name`；**`has_next`** 表示是否还有下一页。
++ **`format_stored_chunks_page(page, display=..., document_max_chars=...)`** → `str`，便于日志、API 或其它模块再加工。
++ **`print_stored_chunks_page(..., stream=sys.stdout)`**：内部调用 `format_*`，向指定流输出。
+典型数据流：**`RAGPipeline.list_stored_page`**（或 **`ChromaRetriever.list_stored_page`**）得到 **`StoredChunksPage`** → **`format_stored_chunks_page`** / **`print_stored_chunks_page`** 负责展示。
+
 ### 端到端管道 RAGPipeline
 
 > 目录：/Tex_Agent/rag/rag_pipeline.py
@@ -268,6 +285,10 @@ class RAGPipeline(BaseRAGPipeline):
 
 调用底层document_count，返回当前知识库中的文档片段总数
 
+#### list_stored_page
+
+委托底层 `BaseRetriever.list_stored_page`
+
 ### workflow接入：Retrieve 节点 + 图拓扑
 
 [对workflow的说明](../README.md)在README中
@@ -340,6 +361,32 @@ python rag/rag_index_cli.py a.md b.tex   # 直接指定文件
 可以在交互输入路径中输入多个文件路径，最后输入空行或 quit / exit 结束即可开始索引
 
 **注：目前没有支持pdf直接注入，可以注入的文本类型为.txt, .md, .tex**
+
+### 向量库内容查看
+
+> 目录：rag/rag_list_cli.py
+
+用于在终端查看当前 RAG / Chroma 中已有哪些 chunk
+
+
++ 交互浏览（TTY 下）：默认每页 5 条；w 上一页、s 下一页、e / Esc / q 退出:
+    ```bash
+    python -m rag.rag_list_cli
+    ```
++ 只打印一页到 stdout 后退出
+    ```bash
+    python -m rag.rag_list_cli --dump
+    ```
++ 从指定偏移开始的一页；控制每页条数（不超过 5）
+    ```bash
+    python -m rag.rag_list_cli --dump --offset 5 --limit 5
+    ```
+
+用标志位组合控制拉取与展示内容：加上 --metadata 可看 source、chunk_idx 等；加上 --document 可看该块正文节选
+
+``bash
+python -m rag.rag_list_cli --metadata --document
+```
 
 ---
 
