@@ -6,7 +6,8 @@
   ✅ 统一调用 ctx.build()，自动注入 RAG/Memory/History
   ✅ 彻底移除对 .content 的直接裸露访问
 """
-from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union
+import re
+from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union, List, Set
 from core.state import WorkflowState
 from core.message import AgentMessage
 from agents.base_agent import BaseAgent
@@ -16,6 +17,11 @@ from config.planner_config import (
     DEFAULT_HISTORY_MODE,
     NODE_OUTPUT_FORMAT_INSTRUCTION,
     PERSONA_ENTRY_NODE_FORMAT_ADDON,
+    SINGLE_TURN_NODE_CONTRACT,
+    FINAL_DELIVERY_SYSTEM_ADDON,
+    UPSTREAM_RESULT_MAX_CHARS,
+    FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS,
+    FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS,
     parse_llm_json,
 )
 from workflow.run_dump import write_node_trace
@@ -59,6 +65,47 @@ def _safe_to_dict(msg: Union[AgentMessage, Dict[str, Any], str, Any]) -> Dict[st
         }
     # 兜底：如果是字符串或其他类型
     return {"role": "assistant", "content": str(msg), "agent_name": "unknown"}
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...（已截断，共{len(text)}字符）"
+
+
+def _extract_metadata_chain_node_ids(built_context: str) -> Set[str]:
+    """
+    从 ctx.build() 产物中识别 metadata_chain 已覆盖的节点，便于 upstream 去重。
+    """
+    if "<context type='metadata_chain'>" not in built_context:
+        return set()
+    return set(re.findall(r"### \[([^\]]+)\]", built_context))
+
+
+def _detect_terminal_delivery_risks(output_text: str) -> List[str]:
+    """
+    终节点轻量交付检查：仅产生日志告警，不中断流程。
+    """
+    text = (output_text or "").strip()
+    if not text:
+        return ["终节点输出为空"]
+
+    lower_text = text.lower()
+    risks: List[str] = []
+    if any(kw.lower() in lower_text for kw in FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS):
+        risks.append("疑似等待式反问用户")
+
+    question_marks = text.count("?") + text.count("？")
+    actionable_markers = ("步骤", "示例", "例如", "建议", "你可以", "请按", "操作")
+    restate_hits = sum(1 for kw in FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS if kw in text)
+    has_actionable = any(marker in text for marker in actionable_markers)
+    if question_marks >= 2 and not has_actionable:
+        risks.append("疑似以反问为主，缺少可执行交付")
+    if restate_hits >= 3 and not has_actionable:
+        risks.append("疑似以上游复述为主，缺少直接答案/步骤")
+    return risks
 
 
 # ================= 🔧 通用动态节点工厂（供 build_dynamic_graph 使用） =================
@@ -122,7 +169,7 @@ def make_generic_agent_node(
         if mode_norm not in ("full", "minimal"):
             mode_norm = "minimal"
 
-    def _upstream_blocks(meta: dict) -> str:
+    def _upstream_blocks(meta: dict, covered_by_history: Set[str]) -> str:
         lines: list = []
         for dep_id in depends_on:
             dep_result = meta.get(dep_id)
@@ -135,8 +182,10 @@ def make_generic_agent_node(
             block_lines = [f"[{dep_id}]"]
             if summary:
                 block_lines.append(f"摘要: {summary}")
-            if result:
-                block_lines.append(f"完整产出:\n{result}")
+            # 若 history(metadata_chain) 已覆盖该节点，则 upstream 只保留摘要，避免重复灌入
+            if result and dep_id not in covered_by_history:
+                compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
+                block_lines.append(f"补充产出(截断):\n{compact_result}")
             lines.append("\n".join(block_lines))
         return "\n\n".join(lines) if lines else "（无上游节点输出）"
 
@@ -150,14 +199,17 @@ def make_generic_agent_node(
 
         persona_head = persona_memory.format_for_prompt() if persona_memory else ""
         entry_addon = PERSONA_ENTRY_NODE_FORMAT_ADDON if is_entry_node else ""
+        terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
         full_system_prompt = (
-            persona_head + system_prompt + NODE_OUTPUT_FORMAT_INSTRUCTION + entry_addon
+            persona_head
+            + system_prompt
+            + SINGLE_TURN_NODE_CONTRACT
+            + terminal_addon
+            + NODE_OUTPUT_FORMAT_INSTRUCTION
+            + entry_addon
         )
 
-        # 1. 上游：强依赖时使用完整 result，并保留摘要便于扫读
-        upstream_ctx = _upstream_blocks(meta)
-
-        # 2. 构建上下文（历史消息 + RAG；minimal 时用 metadata 链合成；画像不走 memory.search）
+        # 1. 构建上下文（历史消息 + RAG；minimal 时用 metadata 链合成；画像不走 memory.search）
         built_context = ctx.build(
             state,
             memory=None,
@@ -169,6 +221,9 @@ def make_generic_agent_node(
                 "synthetic_metadata_history": mode_norm == "minimal",
             },
         )
+        # 2. 基于 history 是否已包含 metadata_chain 做 upstream 去重
+        covered_node_ids = _extract_metadata_chain_node_ids(built_context)
+        upstream_ctx = _upstream_blocks(meta, covered_node_ids)
 
         # 3. 构建 prompt（system + 历史上下文 + 上游结果 + 原始任务 + 具体子任务）
         prompt = (
@@ -231,6 +286,13 @@ def make_generic_agent_node(
             exec_order.append(node_id)
         current_metadata["__execution_order__"] = exec_order
         current_metadata[node_id] = structured
+
+        if is_terminal:
+            delivery_risks = _detect_terminal_delivery_risks(structured.get("result", ""))
+            if delivery_risks:
+                logger.warning(
+                    f"[{node_id} 节点] 终节点交付告警: {'; '.join(delivery_risks)}"
+                )
 
         logger.info(
             f"[{node_id} 节点] 完成，"
