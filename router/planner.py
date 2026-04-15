@@ -179,6 +179,7 @@ from config.planner_config import (
     COMPLEXITY_MEDIUM_KEYWORDS,
     PLAN_OUTPUT_SCHEMA,
     SUPERVISOR_OUTPUT_SCHEMA,
+    SINGLE_TURN_NODE_CONTRACT,
     parse_llm_json,
 )
 
@@ -486,11 +487,16 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"1) 默认按“指导型任务”处理：讲清概念 + 给可执行步骤。\n"
             f"2) 节点数控制在 2~8 个，根据任务复杂程度选择。\n"
             f"3) 必须包含“最终交付节点”（负责整合并给用户最终行动建议）。\n"
+            f"   最终交付节点必须直接回答原始问题，并给出可执行步骤/示例，禁止仅复述上游摘要。\n"
             f"4) 除非用户明确要求完整开发与测试，不要引入重型实现/测试流水线。\n"
             f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n\n"
+            f"6) 每个节点的 system_prompt/subtask 必须满足“单次流水线执行契约”，"
+            f"严禁等待式追问用户；信息不足时应采用默认假设继续交付。\n\n"
+            f"单次流水线执行契约（所有节点必须遵守）：\n"
+            f"{SINGLE_TURN_NODE_CONTRACT}\n\n"
             f"推荐结构（可等价改名）：\n"
-            f"- requirement_clarifier：确认目标与前置知识\n"
-            f"- learning_guide：给分阶段学习路径与实践建议\n"
+            f"- requirement_clarifier：提炼目标与默认假设（禁止等待用户补充）\n"
+            f"- learning_guide：给分阶段路径、关键风险与实践建议（禁止再次追问）\n"
             f"- final_response_builder：整合并输出最终行动清单（最终交付节点）\n\n"
             f"【图结构强制约束 - 必须严格遵守】\n"
             f"- 图必须是严格的单链（线性序列）：A → B → C → ...\n"
@@ -539,6 +545,7 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"   - 图结构不合法（非单链、边数不匹配、节点引用错误）\n"
             f"   - 与用户意图明显相反（例如用户问“怎么做”，却输出完整实现+测试流水线）\n"
             f"   - 节点职责严重冲突或无法执行\n"
+            f"   - 任一节点出现等待式追问用户/把任务抛给用户或下游节点\n"
             f"2) 轻微优化建议（如时序可更优、措辞可更好）不能作为拒绝理由。\n"
             f"3) 若 approved=false，必须同时提供 revised_agents + revised_edges + revised_entry_node，且三者一致可运行。\n"
             f"4) quality_score 使用 1~10 分制；若本轮修复了上一轮关键问题，评分应尽量提高，不应无故下降。\n"
@@ -581,6 +588,7 @@ class AutoAgentsMASPlanner(MASPlanner):
 
         reasons.extend(self._local_topology_issues(plan_json))
         reasons.extend(self._local_intent_issues(task, plan_json))
+        reasons.extend(self._local_single_turn_contract_issues(plan_json))
         # 去重保序
         out: List[str] = []
         seen = set()
@@ -643,6 +651,36 @@ class AutoAgentsMASPlanner(MASPlanner):
                         "任务偏答疑/指导，但规划中出现明显测试/验收型节点，存在意图偏移"
                     )
                     break
+        return issues
+
+    def _local_single_turn_contract_issues(self, plan_json: Dict[str, Any]) -> List[str]:
+        """
+        本地守门：拦截违反单次流水线契约的节点文案（等待式追问/任务外抛）。
+        """
+        issues: List[str] = []
+        agents = plan_json.get("agents", [])
+        if not isinstance(agents, list):
+            return issues
+
+        waiting_tokens = (
+            "请先回答", "请先告诉我", "等你回复", "等你回答", "先确认后再",
+            "please answer first", "wait for your reply", "after you reply",
+        )
+        handoff_tokens = (
+            "下一节点", "下一个节点", "交给下一步", "由下游处理",
+            "next node", "downstream node",
+        )
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            node_id = str(agent.get("node_id", "")).strip() or "unknown_node"
+            text = " ".join(
+                str(agent.get(k, "")) for k in ("system_prompt", "subtask", "role")
+            ).lower()
+            if any(tok.lower() in text for tok in waiting_tokens):
+                issues.append(f"节点 {node_id} 存在等待式追问用户，违反单次流水线契约")
+            if any(tok.lower() in text for tok in handoff_tokens):
+                issues.append(f"节点 {node_id} 存在任务外抛给下游/用户的描述，违反单次流水线契约")
         return issues
 
     def _normalize_quality_score(self, score: Any) -> float:

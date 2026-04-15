@@ -4,6 +4,7 @@ from typing import List, Optional, Dict, Any, Union
 from context.base import BaseContext
 from core.message import AgentMessage
 from utils.logger import get_logger
+from config.planner_config import METADATA_CHAIN_RESULT_MAX_CHARS
 
 logger = get_logger(__name__)
 MsgType = Union[Dict[str, Any], AgentMessage, str]
@@ -20,6 +21,14 @@ _METADATA_RESERVED_KEYS = frozenset({
 
 def _is_structured_node_output(value: Any) -> bool:
     return isinstance(value, dict) and ("result" in value or "summary" in value)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...（已截断，共{len(text)}字符）"
 
 
 def format_metadata_chain_for_prompt(state: Dict[str, Any]) -> str:
@@ -47,7 +56,10 @@ def format_metadata_chain_for_prompt(state: Dict[str, Any]) -> str:
         if summary:
             parts.append(f"摘要: {summary}")
         if result:
-            parts.append(f"完整产出:\n{result}")
+            # metadata_chain 优先给摘要，result 只保留截断版，降低历史噪声
+            compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
+            if compact_result and compact_result != summary:
+                parts.append(f"补充产出(截断):\n{compact_result}")
         if len(parts) > 1:
             blocks.append("\n".join(parts))
     return "\n\n".join(blocks)
