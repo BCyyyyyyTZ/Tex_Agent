@@ -33,9 +33,9 @@ class ArxivSearchTool(BaseTool):
     def __init__(self, max_results: Optional[int] = None):
         super().__init__(
             name="arxiv_search",
-            description="在 arXiv 平台检索论文。输入关键词或论文主题（英文效果最佳），返回相关论文的标题、作者、摘要和链接。",
+            description="在 arXiv 平台检索论文。输入关键词或论文主题（建议使用英文以获得最佳结果），返回相关论文的标题、作者、摘要和链接。",
             input_schema={
-                "query": "用户输入的关键词或论文主题（英文效果最佳）"
+                "query": "用户输入的关键词或论文主题，如果是中文，应该转换成对应的英文表述"
             }
         )
         self._max_results = max_results if max_results is not None else settings.arxiv_max_results
@@ -103,7 +103,7 @@ class ArxivSearchTool(BaseTool):
             logger.error(f"arXiv 检索失败: {e}")
             return ToolResult(
                 success=False,
-                output=None,
+                output="",
                 error=f"{e}",
                 metadata={"query": query},
             )

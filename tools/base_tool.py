@@ -30,7 +30,6 @@ class BaseTool(ABC):
         self.input_schema = input_schema
 
 
-    @abstractmethod
     def run(self, input: str) -> ToolResult:
         """
         同步执行工具。

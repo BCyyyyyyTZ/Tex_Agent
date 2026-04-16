@@ -7,8 +7,14 @@ from typing import List, Optional, Union
 import asyncio
 import openai
 
-from core.message import AgentMessage
+from core.message import AgentMessage, ToolResult
 from tools.base_tool import BaseTool
+from utils.utils import set_nested_value
+
+import os
+import time
+from google import genai
+from google.genai import types
 
 class AgentMemoryItem:
     """
@@ -38,8 +44,8 @@ class AgentMemory:
         return [item for item in self.memory if item.type == item_type]
 
 class LlmClient:
-	def __init__(self, model: str, api_key: str, base_url: str = "https://api.groq.com/openai/v1", temperature: float = 0.2):
-		self.model = model
+	def __init__(self, model_name: str, api_key: str, base_url: str = "https://api.groq.com/openai/v1", temperature: float = 0.2):
+		self.model_name = model_name
 		self.api_key = api_key
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 		self.temperature = temperature
@@ -72,7 +78,7 @@ class LlmClient:
 			message_content = message_content[0]["text"]
 		
 		response = self.client.chat.completions.create(
-				model=self.model,
+				model=self.model_name,
 				messages=[
 					{"role": "user", "content": message_content}
 				],
@@ -80,6 +86,89 @@ class LlmClient:
 				max_tokens=4096
 			)
 		return response.choices[0].message.content.strip()
+
+class GeminiClient:
+    def __init__(self, model_name: str, api_key: str, temperature: float = 0.2):
+        """
+        :param api_key: 你的 Google AI Studio API Key
+        :param model_id: 推荐使用 gemini-1.5-flash (免费额度高且支持长文本)
+        """
+        self.model_name = model_name
+        self.api_key = api_key
+        self.client = genai.Client(api_key=self.api_key)
+        self.temperature = temperature
+        self.files = {}
+        
+    def _upload_files_parallel(self, file_paths: List[str]):
+        """
+        内部方法：上传多个文件并确保它们都进入 ACTIVE 状态
+        """
+        uploaded_files = []
+        for path in file_paths:
+            if not os.path.exists(path):
+                print(f"跳过不存在的文件: {path}")
+                continue
+            
+            print(f"正在上传: {os.path.basename(path)}...")
+            file_obj = self.client.files.upload(file=path)
+            uploaded_files.append(file_obj)
+            self.files[path] = file_obj
+
+        # 轮询检查所有文件的状态
+        print("等待所有文件处理完成...")
+        while True:
+            # 检查是否还有文件在 PROCESSING 状态
+            states = [self.client.files.get(name=f.name).state.name for f in uploaded_files]
+            if all(state == "ACTIVE" for state in states):
+                break
+            if "FAILED" in states:
+                raise RuntimeError("部分文件处理失败。")
+            time.sleep(2)
+        
+        print("\n所有文件处理完成")
+
+        return uploaded_files
+
+    def response(self, prompt: str, file_paths: Union[str, List[str]] = None):
+        """
+        上传文件并根据内容进行提问
+        """
+        contents = []
+
+        if file_paths is not None:
+            if isinstance(file_paths, str):
+                file_paths = [file_paths]
+
+            file_paths_to_upload = []
+            
+            for path in file_paths:
+                if path in self.files:
+                    contents.append(self.files[path])
+                else:
+                    file_paths_to_upload.append(path)
+            
+            if file_paths_to_upload:
+                uploaded_files = self._upload_files_parallel(file_paths_to_upload)
+                contents.extend(uploaded_files)
+
+        contents.append(prompt)
+
+        # 3. 发起对话
+        # 传入的 contents 可以是一个列表，包含文件对象和文本 Prompt
+        #print("===模型列表===")
+        #for model in self.client.models.list():
+            #print(f"{model.name:<40}")
+        print(f"===调用模型{self.model_name}===")
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                    temperature=self.temperature,
+                    #max_output_tokens=8192 # 综述任务建议调大输出上限
+                )
+        )
+
+        return response.text.strip()
 
 
 class BaseAgent(ABC):
@@ -109,11 +198,37 @@ class BaseAgent(ABC):
         self.name = name
         self.system_prompt = system_prompt
         self.tools: List[BaseTool] = tools
+        self.tool_args = {}
         self.memory = AgentMemory()
         self.llms = {}
   
     def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
         self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
+
+    def set_gemini(self, llm_name: str, model_name: str, api_key: str) -> None:
+        self.llms[llm_name] = GeminiClient(model_name, api_key) 
+
+    def set_tool_args(self, args: dict) -> None:
+        for tool_name, tool_args in args.items():
+            for arg_name, arg_value in tool_args.items():
+                set_nested_value(self.tool_args, [tool_name, arg_name], arg_value)
+
+    def call_tool(self, tool_name: str, tool_args: dict) -> ToolResult:
+        """
+        调用指定工具，返回工具执行结果。
+        """
+        target_tool = None
+        for tool in self.tools:
+            if tool.name == tool_name:
+                target_tool = tool
+                break
+        if target_tool is None:
+            raise ValueError(f"工具 {tool_name} 未注册")
+        
+        tool_args.update(self.tool_args.get(tool_name, {}))
+
+        tool_result = target_tool.run(**tool_args)
+        return tool_result
 
     def _normalize_message(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
         """

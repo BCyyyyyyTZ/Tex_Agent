@@ -18,7 +18,8 @@ from tools.tool_list import tool_list
 
 logger = get_logger(__name__)
 
-MODEL_NAME = "llama-3.3-70b-versatile"
+#MODEL_NAME = "llama-3.3-70b-versatile"
+MODEL_NAME = "gemini-2.5-flash-lite"
 API_KEY = ""
 BASE_URL = "https://api.groq.com/openai/v1"
 TEMPERATURE = 0.2
@@ -37,7 +38,8 @@ SYSTEM_PROMPT = """你是一个专业的助手，你的任务是根据用户的�
 2. 如果你认为当前信息不足以给出答案，则使用工具列表中的工具来获取缺失信息，按照如下格式调用工具，注意把工具名称和工具输入参数用英文中括号包围：
    TOOL_NAME [工具名称]
    TOOL_INPUT [工具输入参数]
-   其中，工具名称必须字符串意义上匹配对应工具列表中工具的 tool_name 属性，工具输入参数必须符合工具列表中对应工具的 tool_input_schema 属性要求
+   其中，工具名称必须字符串意义上匹配对应工具列表中工具的 tool_name 属性，工具输入参数必须符合工具列表中对应工具的 tool_input_schema 属性要求，且一定不要包含tool_input_schema中未定义的参数。
+   下面给出几个例子，例子中的工具是虚构的，实际可用工具及使用方法以上面的工具列表为准。
    例如工具列表如下：[{{"tool_name": "arxiv_search", "tool_description": "搜索 arXiv 论文", "tool_input_schema": [{{"arg_name": "query", "arg_description": "可选，搜索查询词"}}, {{"arg_name": "author", "arg_description": "可选，论文作者"}}]}}，
                    {{"tool_name": "latex_parser", "tool_description": "解析 LaTeX 文档", "tool_input_schema": [{{"arg_name": "latex_path", "arg_description": "必填，LaTeX 文档路径"}}, {{"arg_name": "output_format", "arg_description": "可选，输出格式"}}]}}]
    如需调用工具arxiv_search查询机器学习领域的论文,作者为 Sam，则按照如下格式返回：
@@ -88,7 +90,7 @@ class SimpleAgent(BaseAgent):
                 tools_info_list.append({"tool_name": tool.name, "tool_description": tool.description, "tool_input_schema": tool.input_schema})
             system_prompt = SYSTEM_PROMPT.format(tools=tools_info_list)
         super().__init__(name, system_prompt, tools)
-        self.set_llm("llm", model_name or MODEL_NAME, api_key or API_KEY, base_url or BASE_URL, temperature or TEMPERATURE)
+        self.set_gemini("llm", model_name or MODEL_NAME, api_key or API_KEY)
         self.history = []
         self.max_history = max_history
 
@@ -137,6 +139,10 @@ class SimpleAgent(BaseAgent):
         # 1. 标准化输入消息
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)
+        attachment = normalized_msg.metadata.get("attachment", None)
+        tool_args = normalized_msg.metadata.get("tool_args", None)
+        if tool_args is not None:
+            self.set_tool_args(tool_args)
         
         # 2. 日志记录（安全截取）
         content_preview = normalized_msg.content[:80] + "..." if len(normalized_msg.content) > 80 else normalized_msg.content
@@ -152,7 +158,7 @@ class SimpleAgent(BaseAgent):
                     print("="*100)
                     print(f"PROMPT:\n{prompt}")
                 # 3. 调用 LLM  
-                llm_content = self.llms["llm"].response(prompt)
+                llm_content = self.llms["llm"].response(prompt = prompt, file_paths = attachment)
                 if MODE == "debug":
                     print(f"LLM_CONTENT:\n{llm_content}")
                 # 4. 解析 LLM 响应
@@ -193,6 +199,7 @@ class SimpleAgent(BaseAgent):
                             try:
                                 import json
                                 tool_input = json.loads(tool_input_str)
+                                tool_input.update(self.tool_args.get(tool_name, {}))
                             except Exception as e:
                                 logger.error(f"[{self.name}] 解析工具输入失败: {e}")
                                 print(f"工具输入参数: {tool_input_str}")
@@ -213,7 +220,7 @@ class SimpleAgent(BaseAgent):
                             # 执行工具
                             logger.debug(f"[{self.name}] 执行工具: {tool_name}")
                             try:
-                                tool_result = tool.run(tool_input)
+                                tool_result = tool.run(**tool_input)
                                 
                                 # 构建工具执行结果消息
                                 assistant_msg = AgentMessage(
@@ -266,5 +273,10 @@ class SimpleAgent(BaseAgent):
 
 if __name__ == "__main__":
     agent = SimpleAgent("TestAgent")
-    result = agent.run("搜索机器学习领域的论文")
-    print(result.content)
+    pdf_path = r""
+    msg = AgentMessage(
+        role="user",
+        content="搜索与附件中论文相同主题的其他论文,并返回查找到的论文的标题和摘要",
+        metadata={"attachment": pdf_path},
+    )
+    result = agent.run(msg)
