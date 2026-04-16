@@ -10,7 +10,7 @@ from tools.pdf_comment_tool import PdfCommentTool
 import json
 
 MODEL_NAME = "gemini-3.1-flash-lite-preview"
-API_KEY = "AIzaSyAHcplLeP1uPTOTtmj11RoN9bdd7mYQ1As"
+API_KEY = ""
 TEMPERATURE = 0.2
 
 MODE = "release"
