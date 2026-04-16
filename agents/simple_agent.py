@@ -19,7 +19,7 @@ from tools.tool_list import tool_list
 logger = get_logger(__name__)
 
 #MODEL_NAME = "llama-3.3-70b-versatile"
-MODEL_NAME = "gemini-2.5-flash-lite"
+MODEL_NAME = "gemini-3.1-flash-lite-preview"
 API_KEY = ""
 BASE_URL = "https://api.groq.com/openai/v1"
 TEMPERATURE = 0.2
@@ -76,10 +76,10 @@ class SimpleAgent(BaseAgent):
         name: str,
         system_prompt: str = None,
         tools: Optional[List[BaseTool]] = None,
-        model_name: str = None,
-        api_key: str = None,
-        base_url: str = None,
-        temperature: float = None,
+        model_name: str = MODEL_NAME,
+        api_key: str = API_KEY,
+        base_url: str = BASE_URL,
+        temperature: float = TEMPERATURE,
         max_history: int = 100,
     ):
         if tools is None:
@@ -90,11 +90,11 @@ class SimpleAgent(BaseAgent):
                 tools_info_list.append({"tool_name": tool.name, "tool_description": tool.description, "tool_input_schema": tool.input_schema})
             system_prompt = SYSTEM_PROMPT.format(tools=tools_info_list)
         super().__init__(name, system_prompt, tools)
-        self.set_gemini("llm", model_name or MODEL_NAME, api_key or API_KEY)
+        self.set_gemini("llm", model_name, api_key, temperature)
         self.history = []
         self.max_history = max_history
 
-    def _build_history_messages(self) -> list:
+    def _build_history_messages(self) -> List[str]:
         """构建对话历史消息列表"""
         history_messages = [f"SYSTEM\n{self.system_prompt}"]
         for hist in self.history:

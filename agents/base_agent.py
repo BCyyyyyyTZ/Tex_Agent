@@ -44,7 +44,7 @@ class AgentMemory:
         return [item for item in self.memory if item.type == item_type]
 
 class LlmClient:
-	def __init__(self, model_name: str, api_key: str, base_url: str = "https://api.groq.com/openai/v1", temperature: float = 0.2):
+	def __init__(self, model_name: str, api_key: str, base_url: str, temperature: float):
 		self.model_name = model_name
 		self.api_key = api_key
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
@@ -88,7 +88,7 @@ class LlmClient:
 		return response.choices[0].message.content.strip()
 
 class GeminiClient:
-    def __init__(self, model_name: str, api_key: str, temperature: float = 0.2):
+    def __init__(self, model_name: str, api_key: str, temperature: float):
         """
         :param api_key: 你的 Google AI Studio API Key
         :param model_id: 推荐使用 gemini-1.5-flash (免费额度高且支持长文本)
@@ -129,7 +129,7 @@ class GeminiClient:
 
         return uploaded_files
 
-    def response(self, prompt: str, file_paths: Union[str, List[str]] = None):
+    def response(self, prompt: str, file_paths: Union[str, List[str]] = None) -> str:
         """
         上传文件并根据内容进行提问
         """
@@ -205,8 +205,8 @@ class BaseAgent(ABC):
     def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
         self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
 
-    def set_gemini(self, llm_name: str, model_name: str, api_key: str) -> None:
-        self.llms[llm_name] = GeminiClient(model_name, api_key) 
+    def set_gemini(self, llm_name: str, model_name: str, api_key: str, temperature: float) -> None:
+        self.llms[llm_name] = GeminiClient(model_name, api_key, temperature)    
 
     def set_tool_args(self, args: dict) -> None:
         for tool_name, tool_args in args.items():

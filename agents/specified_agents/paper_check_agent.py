@@ -10,7 +10,7 @@ from tools.pdf_comment_tool import PdfCommentTool
 import json
 
 MODEL_NAME = "gemini-3.1-flash-lite-preview"
-API_KEY = None
+API_KEY = "AIzaSyAHcplLeP1uPTOTtmj11RoN9bdd7mYQ1As"
 TEMPERATURE = 0.2
 
 MODE = "release"
@@ -50,10 +50,9 @@ class PaperCheckAgent(SimpleAgent):
         self,
         name: str,
         rules_path: str,
-        model_name: str = None,
-        api_key: str = None,
-        base_url: str = None,
-        temperature: float = None,
+        model_name: str = MODEL_NAME,
+        api_key: str = API_KEY,
+        temperature: float = TEMPERATURE,
         max_history: int = 100,
     ):
         try:
@@ -65,17 +64,14 @@ class PaperCheckAgent(SimpleAgent):
             raise RuntimeError(f"读取论文要求文件 {rules_path} 时出错: {e}") from e
         
         tools = [PdfCommentTool()]   
-        tools_info_list = []
-        for tool in tools:
-            tools_info_list.append({"tool_name": tool.name, "tool_description": tool.description, "tool_input_schema": tool.input_schema})
         system_prompt = SYSTEM_PROMPT.format(rules=rules)
         super().__init__(
             name = name, 
             system_prompt = system_prompt, 
             tools = tools, 
-            model_name = model_name or MODEL_NAME, 
-            api_key = api_key or API_KEY,
-            temperature = temperature or TEMPERATURE,
+            model_name = model_name, 
+            api_key = api_key,
+            temperature = temperature,
             max_history = max_history
         )
 
