@@ -43,3 +43,7 @@ build/
 # ---- 日志文件 ----
 *.log
 logs/
+
+# ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
+output/
+memory_store/

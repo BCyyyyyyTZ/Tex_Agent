@@ -6,17 +6,28 @@
   ✅ 统一调用 ctx.build()，自动注入 RAG/Memory/History
   ✅ 彻底移除对 .content 的直接裸露访问
 """
-from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union
-from datetime import datetime
+import re
+from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union, List, Set
 from core.state import WorkflowState
 from core.message import AgentMessage
 from agents.base_agent import BaseAgent
 from context.base import BaseContext
 from utils.logger import get_logger
+from config.planner_config import (
+    DEFAULT_HISTORY_MODE,
+    NODE_OUTPUT_FORMAT_INSTRUCTION,
+    PERSONA_ENTRY_NODE_FORMAT_ADDON,
+    SINGLE_TURN_NODE_CONTRACT,
+    FINAL_DELIVERY_SYSTEM_ADDON,
+    UPSTREAM_RESULT_MAX_CHARS,
+    FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS,
+    FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS,
+    parse_llm_json,
+)
+from workflow.run_dump import write_node_trace
 
 if TYPE_CHECKING:
-    from rag.base_retriever import BaseRAGPipeline
-    from memory.base_memory import BaseMemory
+    from memory.persona_memory import UserPersonaMemory
 
 logger = get_logger(__name__)
 
@@ -56,198 +67,45 @@ def _safe_to_dict(msg: Union[AgentMessage, Dict[str, Any], str, Any]) -> Dict[st
     return {"role": "assistant", "content": str(msg), "agent_name": "unknown"}
 
 
+def _truncate_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...（已截断，共{len(text)}字符）"
 
 
-# ================= 🟨 Retrieve 节点 =================
-def make_retrieve_node(
-    pipeline: "BaseRAGPipeline",
-    ctx: BaseContext,
-) -> Callable[[WorkflowState], dict]:
-    def retrieve_node(state: WorkflowState) -> dict:
-        logger.info("[Retrieve 节点] 开始执行...")
-        if not pipeline.is_ready():
-            return {"retrieved_context": "", "current_node": "retrieve", "error": None}
-
-        try:
-            retrieved = pipeline.retrieve(query=state["input"])
-            return {"retrieved_context": retrieved, "current_node": "retrieve", "error": None}
-        except Exception as e:
-            logger.error(f"Retrieve 节点执行失败: {e}")
-            return {"retrieved_context": "", "current_node": "retrieve", "error": str(e)}
-    return retrieve_node
-
-# ================= 📝 Design 节点（修复版） =================
-def make_design_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def design_node(state: WorkflowState) -> dict:
-        logger.info("[Design 节点] 开始执行...")
-
-        # 1. 安全获取任务输入
-        raw_input = state.get('input', '')
-        if hasattr(raw_input, 'content'):
-            input_str = str(raw_input.content)
-        elif isinstance(raw_input, str):
-            input_str = raw_input
-        else:
-            input_str = str(raw_input)
-
-        # 2. 构造用户消息
-        user_msg = AgentMessage(
-            role="user",
-            content=f"请分析任务并制定设计方案：\n\n{input_str}",
-            agent_name="user"
-        )
-        ctx.save(user_msg)
-
-        # 3. GSSC 上下文构建
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 10, "mem_limit": 3, "max_tokens": 6000, "format": "plain"
-        })
-
-        # 4. 生成 Prompt 并调用 Agent
-        prompt = f"<system>你是论文架构师。请基于上下文制定结构化设计方案。</system>\n\n{context}\n\n<task>{input_str}</task>"
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "design")
-        except Exception as e:
-            logger.error(f"Design 节点执行失败: {e}")
-            return {
-                "messages": state["messages"] + [_safe_to_dict(user_msg)],
-                "current_node": "design", 
-                "error": str(e)
-            }
-
-        # 5. 保存响应到上下文
-        ctx.save(resp)
-        
-        # 🔧 修复：保存到长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"design_{abs(hash(input_str)) % 10000}",
-                    value={
-                        "task": input_str[:100],
-                        "design": resp.content,
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    metadata={"node": "design", "agent": "design"}
-                )
-                logger.info(f"[Design 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-
-        logger.info(f"[Design 节点] 完成，输出 {len(resp.content)} 字符")
-
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "design",
-            "error": None,
-        }
-    return design_node
+def _extract_metadata_chain_node_ids(built_context: str) -> Set[str]:
+    """
+    从 ctx.build() 产物中识别 metadata_chain 已覆盖的节点，便于 upstream 去重。
+    """
+    if "<context type='metadata_chain'>" not in built_context:
+        return set()
+    return set(re.findall(r"### \[([^\]]+)\]", built_context))
 
 
-# ================= 🟩 Think 节点（修复版） =================
-def make_think_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def think_node(state: WorkflowState) -> dict:
-        logger.info("[Think 节点] 开始执行...")
+def _detect_terminal_delivery_risks(output_text: str) -> List[str]:
+    """
+    终节点轻量交付检查：仅产生日志告警，不中断流程。
+    """
+    text = (output_text or "").strip()
+    if not text:
+        return ["终节点输出为空"]
 
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 12, "mem_limit": 5, "max_tokens": 8000, "format": "plain"
-        })
+    lower_text = text.lower()
+    risks: List[str] = []
+    if any(kw.lower() in lower_text for kw in FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS):
+        risks.append("疑似等待式反问用户")
 
-        prompt = f"<system>你是技术评审专家。请对设计方案进行批判性思考与细化。</system>\n\n{context}\n\n<task>{state['input']}\n\n请输出：\n1）关键技术细节\n2）潜在问题与风险\n3）优化建议</task>"
-
-        user_msg = AgentMessage(role="user", content=prompt[:150]+"...", agent_name="system")
-        ctx.save(user_msg)
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "think")
-        except Exception as e:
-            return {"messages": state["messages"] + [_safe_to_dict(user_msg)], "current_node": "think", "error": str(e)}
-            
-        ctx.save(resp)
-        
-        # 🔧 修复：保存到长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"think_{abs(hash(state['input'])) % 10000}",
-                    value={
-                        "task": state['input'][:100],
-                        "analysis": resp.content[:500],
-                        "timestamp": datetime.now().isoformat()
-                    },
-                    metadata={"node": "think", "agent": "think"}
-                )
-                logger.info(f"[Think 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-        
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "think", 
-            "error": None,
-        }
-    return think_node
-
-
-# ================= 🟥 Execute 节点（保持原样，已有记忆保存） =================
-def make_execute_node(
-    agent: BaseAgent,
-    ctx: BaseContext,
-    memory: Optional["BaseMemory"] = None,
-) -> Callable[[WorkflowState], dict]:
-    def execute_node(state: WorkflowState) -> dict:
-        logger.info("[Execute 节点] 开始执行...")
-
-        context = ctx.build(state, memory=memory, config={
-            "conv_limit": 20, "mem_limit": 5, "max_tokens": 10000, "format": "plain"
-        })
-
-        prompt = f"<system>你是最终执行者，请直接输出可用结果。</system>\n\n{context}\n\n<task>{state['input']}</task>"
-        user_msg = AgentMessage(role="user", content=prompt[:150]+"...", agent_name="system")
-        ctx.save(user_msg)
-
-        try:
-            raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", "execute")
-        except Exception as e:
-            return {"messages": state["messages"] + [_safe_to_dict(user_msg)], "current_node": "execute", "output": f"失败: {e}", "error": str(e)}
-            
-        ctx.save(resp)
-
-        # 结果持久化到 Memory
-        if memory:
-            try:
-                memory.save(
-                    key=f"result_{abs(hash(state['input'])) % 10000}", 
-                    value={
-                        "task": state['input'], 
-                        "output": resp.content,
-                        "timestamp": datetime.now().isoformat()
-                    }, 
-                    metadata={"agent": "execute", "node": "execute"}
-                )
-                logger.info(f"[Execute 节点] 已保存到长期记忆，当前记忆数: {memory.get_size()}")
-            except Exception as e:
-                logger.error(f"保存到长期记忆失败: {e}", exc_info=True)
-
-        return {
-            "messages": state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
-            "current_node": "execute",
-            "output": resp.content,
-            "error": None,
-        }
-    return execute_node
+    question_marks = text.count("?") + text.count("？")
+    actionable_markers = ("步骤", "示例", "例如", "建议", "你可以", "请按", "操作")
+    restate_hits = sum(1 for kw in FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS if kw in text)
+    has_actionable = any(marker in text for marker in actionable_markers)
+    if question_marks >= 2 and not has_actionable:
+        risks.append("疑似以反问为主，缺少可执行交付")
+    if restate_hits >= 3 and not has_actionable:
+        risks.append("疑似以上游复述为主，缺少直接答案/步骤")
+    return risks
 
 
 # ================= 🔧 通用动态节点工厂（供 build_dynamic_graph 使用） =================
@@ -257,7 +115,11 @@ def make_generic_agent_node(
     ctx: BaseContext,
     node_id: str,
     node_config: dict,
-    memory: Optional["BaseMemory"] = None,
+    persona_memory: Optional["UserPersonaMemory"] = None,
+    *,
+    default_history_mode: str = DEFAULT_HISTORY_MODE,
+    is_terminal: bool = False,
+    is_entry_node: bool = False,
 ) -> Callable[[WorkflowState], dict]:
     """
     通用 Agent 节点工厂，供 build_dynamic_graph() 按 NodeConfig 动态创建节点。
@@ -267,7 +129,8 @@ def make_generic_agent_node(
       - 统一在 system_prompt 末尾注入 NODE_OUTPUT_FORMAT_INSTRUCTION，
         强制 LLM 输出结构化 JSON（result / summary / confidence / metadata）
       - 解析 JSON 输出后存入 state["metadata"][node_id]，供下游节点精确读取
-      - 自动从 state["metadata"] 提取 depends_on 节点的 summary 注入上游上下文
+      - 自动从 state["metadata"] 提取 depends_on 节点的完整产出（result + 摘要）注入上游上下文
+      - history_mode：节点 config.history_mode 优先，否则使用工厂参数 default_history_mode（full / minimal）
 
     Args:
         agent:       已实例化的 BaseAgent（SimpleAgent / ReActAgent 等）。
@@ -279,93 +142,157 @@ def make_generic_agent_node(
                        output_schema : 输出字段描述（仅用于注释说明，不影响解析）
                        depends_on    : 上游节点 node_id 列表
                        temperature   : （由 build_dynamic_graph 在实例化 agent 时使用）
-        memory:      长期记忆实例（可选）。
+                       history_mode  : 可选 "full" | "minimal"，覆盖构图时的 default_history_mode
+        persona_memory: 全局用户画像（单文件）；在 system 段头部注入，仅入口节点可写回。
+        default_history_mode: 当 node_config 未指定 history_mode 时使用（由 build_dynamic_graph 注入）。
+        is_terminal: 是否为汇节点（无出边）；minimal 模式下仅终端节点 ctx.save。
+        is_entry_node: 是否为工作流入口节点；负责在 JSON 中输出 persona_memory_update。
 
     Returns:
         符合 LangGraph 规范的节点函数 WorkflowState -> dict。
     """
-    # 从 config 层导入，避免 workflow → router 的跨层依赖
-    from config.planner_config import NODE_OUTPUT_FORMAT_INSTRUCTION, parse_llm_json
-
     system_prompt: str = node_config.get("system_prompt", f"你是 {node_id} 专家。")
     subtask: str       = node_config.get("subtask", "")
     depends_on: list   = node_config.get("depends_on", [])
 
-    # 将输出格式约束追加到 system_prompt（框架统一注入，agent 自身 prompt 无需包含）
-    full_system_prompt = system_prompt + NODE_OUTPUT_FORMAT_INSTRUCTION
+    raw_mode = node_config.get("history_mode")
+    if raw_mode is None or (isinstance(raw_mode, str) and not raw_mode.strip()):
+        raw_mode = default_history_mode
+    if not isinstance(raw_mode, str):
+        raw_mode = str(default_history_mode)
+    mode_norm = raw_mode.strip().lower()
+    if mode_norm not in ("full", "minimal"):
+        logger.warning(
+            f"[{node_id}] 非法 history_mode={raw_mode!r}，回退为 {default_history_mode!r}"
+        )
+        mode_norm = str(default_history_mode).strip().lower()
+        if mode_norm not in ("full", "minimal"):
+            mode_norm = "minimal"
+
+    def _upstream_blocks(meta: dict, covered_by_history: Set[str]) -> str:
+        lines: list = []
+        for dep_id in depends_on:
+            dep_result = meta.get(dep_id)
+            if not isinstance(dep_result, dict):
+                continue
+            summary = str(dep_result.get("summary", "")).strip()
+            result = str(dep_result.get("result", "")).strip()
+            if not summary and not result:
+                continue
+            block_lines = [f"[{dep_id}]"]
+            if summary:
+                block_lines.append(f"摘要: {summary}")
+            # 若 history(metadata_chain) 已覆盖该节点，则 upstream 只保留摘要，避免重复灌入
+            if result and dep_id not in covered_by_history:
+                compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
+                block_lines.append(f"补充产出(截断):\n{compact_result}")
+            lines.append("\n".join(block_lines))
+        return "\n\n".join(lines) if lines else "（无上游节点输出）"
 
     def generic_node(state: WorkflowState) -> dict:
-        logger.info(f"[{node_id} 节点] 开始执行...")
-
-        # 1. 收集上游节点 summary（从 state["metadata"] 精确读取）
-        upstream_summaries: list = []
-        for dep_id in depends_on:
-            dep_result = state.get("metadata", {}).get(dep_id, {})
-            if dep_result:
-                summary = dep_result.get("summary", str(dep_result)[:200])
-                upstream_summaries.append(f"[{dep_id}] {summary}")
-
-        upstream_ctx = (
-            "\n".join(upstream_summaries)
-            if upstream_summaries
-            else "（无上游节点输出）"
+        logger.info(
+            f"[{node_id} 节点] 开始执行... "
+            f"(history_mode={mode_norm}, terminal={is_terminal}, entry={is_entry_node})"
         )
 
-        # 2. 构建 prompt（system + 上游结果 + 原始任务 + 具体子任务）
+        meta = state.get("metadata", {}) or {}
+
+        persona_head = persona_memory.format_for_prompt() if persona_memory else ""
+        entry_addon = PERSONA_ENTRY_NODE_FORMAT_ADDON if is_entry_node else ""
+        terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
+        full_system_prompt = (
+            persona_head
+            + system_prompt
+            + SINGLE_TURN_NODE_CONTRACT
+            + terminal_addon
+            + NODE_OUTPUT_FORMAT_INSTRUCTION
+            + entry_addon
+        )
+
+        # 1. 构建上下文（历史消息 + RAG；minimal 时用 metadata 链合成；画像不走 memory.search）
+        built_context = ctx.build(
+            state,
+            memory=None,
+            config={
+                "conv_limit": int(node_config.get("conv_limit", 12)),
+                "mem_limit": int(node_config.get("mem_limit", 5)),
+                "max_tokens": int(node_config.get("max_tokens", 8000)),
+                "format": node_config.get("format", "plain"),
+                "synthetic_metadata_history": mode_norm == "minimal",
+            },
+        )
+        # 2. 基于 history 是否已包含 metadata_chain 做 upstream 去重
+        covered_node_ids = _extract_metadata_chain_node_ids(built_context)
+        upstream_ctx = _upstream_blocks(meta, covered_node_ids)
+
+        # 3. 构建 prompt（system + 历史上下文 + 上游结果 + 原始任务 + 具体子任务）
         prompt = (
+            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}"
             f"{full_system_prompt}\n\n"
+            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
             f"[原始任务]\n{state.get('input', '')}\n\n"
             f"[上游节点输出]\n{upstream_ctx}\n\n"
-            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}"
         )
 
-        user_msg = AgentMessage(role="user", content=prompt[:150] + "...", agent_name="system")
-        ctx.save(user_msg)
+        user_msg = AgentMessage(role="user", content=prompt, agent_name="system")
+        if mode_norm == "full":
+            ctx.save(user_msg)
 
-        # 3. 调用 Agent
+        run_dir = meta.get("__run_output_dir__")
+
+        # 4. 调用 Agent
         try:
             raw_resp = agent.run(prompt)
             resp = _ensure_agent_message(raw_resp, "assistant", node_id)
         except Exception as e:
             logger.error(f"[{node_id} 节点] 执行失败: {e}")
-            return {
-                "messages":    state["messages"] + [_safe_to_dict(user_msg)],
+            write_node_trace(run_dir, node_id, prompt, error=str(e))
+            err: Dict[str, Any] = {
                 "current_node": node_id,
-                "error":       str(e),
+                "error": str(e),
             }
+            if mode_norm == "full":
+                err["messages"] = state["messages"] + [_safe_to_dict(user_msg)]
+            return err
 
-        ctx.save(resp)
+        if mode_norm == "full":
+            ctx.save(resp)
+        elif mode_norm == "minimal" and is_terminal:
+            ctx.save(resp)
 
-        # 4. 解析结构化输出（三级容错）
-        structured: dict = parse_llm_json(
-            resp.content,
-            context=node_id,
-            fallback={
-                "result":     resp.content,
-                "summary":    resp.content[:80],
-                "confidence": 0.5,
-                "metadata":   {},
-            },
-        )
+        # 5. 解析结构化输出（三级容错）
+        fb = {
+            "result": resp.content,
+            "summary": resp.content[:80],
+            "confidence": 0.5,
+            "metadata": {},
+        }
+        if is_entry_node:
+            fb["persona_memory_update"] = {"action": "none", "delta": {}}
+        structured: dict = parse_llm_json(resp.content, context=node_id, fallback=fb)
 
-        # 5. 写入长期记忆
-        if memory:
-            try:
-                memory.save(
-                    key=f"{node_id}_{abs(hash(state.get('input', ''))) % 10000}",
-                    value={
-                        "task":    state.get("input", "")[:100],
-                        "result":  structured.get("result", "")[:500],
-                        "summary": structured.get("summary", ""),
-                    },
-                    metadata={"node": node_id},
-                )
-            except Exception as e:
-                logger.error(f"[{node_id} 节点] 保存长期记忆失败: {e}")
+        structured = dict(structured)
+        pm_update = structured.pop("persona_memory_update", None)
+        if persona_memory:
+            if is_entry_node:
+                persona_memory.apply_persona_memory_update(pm_update)
+            elif pm_update is not None:
+                logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
 
-        # 6. 更新 state：metadata 存结构化结果供下游读取，output 跟踪最新节点产出
+        # 6. 更新 state：metadata + 执行顺序（供 ctx.build 合成历史）
         current_metadata: dict = dict(state.get("metadata", {}))
+        exec_order = list(current_metadata.get("__execution_order__", []))
+        if node_id not in exec_order:
+            exec_order.append(node_id)
+        current_metadata["__execution_order__"] = exec_order
         current_metadata[node_id] = structured
+
+        if is_terminal:
+            delivery_risks = _detect_terminal_delivery_risks(structured.get("result", ""))
+            if delivery_risks:
+                logger.warning(
+                    f"[{node_id} 节点] 终节点交付告警: {'; '.join(delivery_risks)}"
+                )
 
         logger.info(
             f"[{node_id} 节点] 完成，"
@@ -373,12 +300,24 @@ def make_generic_agent_node(
             f"输出 {len(structured.get('result', ''))} 字符"
         )
 
-        return {
-            "messages":    state["messages"] + [_safe_to_dict(user_msg), _safe_to_dict(resp)],
+        out: Dict[str, Any] = {
             "current_node": node_id,
-            "output":      structured.get("result", resp.content),
-            "metadata":    current_metadata,
-            "error":       None,
+            "output": structured.get("result", resp.content),
+            "metadata": current_metadata,
+            "error": None,
         }
+        if mode_norm == "full":
+            out["messages"] = state["messages"] + [
+                _safe_to_dict(user_msg),
+                _safe_to_dict(resp),
+            ]
+        write_node_trace(
+            run_dir,
+            node_id,
+            prompt,
+            raw_response=resp.content,
+            structured=structured,
+        )
+        return out
 
     return generic_node

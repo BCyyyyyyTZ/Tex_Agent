@@ -5,7 +5,6 @@
 TODO: 开发者 D 负责实现此类（第二阶段任务，建议与 BaseRouter 配合使用）
 """
 import json
-import re
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -174,13 +173,26 @@ class MASPlanner(ABC):
 from config.planner_config import (
     PLANNER_TEMPERATURE,
     MAX_PLAN_ROUNDS_DEFAULT,
+    SUPERVISOR_MIN_QUALITY_SCORE,
     COMPLEXITY_AGENT_MAP,
     COMPLEXITY_COMPLEX_KEYWORDS,
     COMPLEXITY_MEDIUM_KEYWORDS,
     PLAN_OUTPUT_SCHEMA,
     SUPERVISOR_OUTPUT_SCHEMA,
+    SINGLE_TURN_NODE_CONTRACT,
     parse_llm_json,
 )
+
+_PLAN_FALLBACK: Dict[str, Any] = {"agents": [], "edges": [], "entry_node": ""}
+_SUPERVISOR_FALLBACK: Dict[str, Any] = {
+    "approved": False,
+    "quality_score": 0.0,
+    "issues": ["Supervisor 输出不可解析"],
+    "suggestions": "请按要求返回严格 JSON，并给出 revised_agents。",
+    "revised_agents": [],
+    "revised_edges": [],
+    "revised_entry_node": "",
+}
 
 
 # ============================================================
@@ -274,17 +286,30 @@ class AutoAgentsMASPlanner(MASPlanner):
         plan_json = self._plan_agent_call(task)
 
         # Round 2～N：Supervisor 迭代审查
+        prev_supervisor: Optional[Dict[str, Any]] = None
         for round_idx in range(1, self.max_plan_rounds):
-            supervisor_result = self._supervisor_call(task, plan_json)
-            if supervisor_result.get("approved", False):
+            supervisor_result = self._supervisor_call(
+                task,
+                plan_json,
+                round_idx=round_idx,
+                prev_supervisor=prev_supervisor,
+            )
+            prev_supervisor = supervisor_result
+            reject_reasons = self._collect_supervisor_reject_reasons(
+                task=task,
+                plan_json=plan_json,
+                supervisor_result=supervisor_result,
+            )
+            if not reject_reasons:
                 logger.info(f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查通过 "
                             f"(score={supervisor_result.get('quality_score', '?')})")
                 break
-            logger.info(f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查未通过，"
-                        f"issues={supervisor_result.get('issues', [])}")
-            revised = supervisor_result.get("revised_agents")
-            if revised:
-                plan_json["agents"] = revised
+            logger.info(
+                f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查未通过，"
+                f"issues={reject_reasons}"
+            )
+            supervisor_result["issues"] = reject_reasons
+            self._apply_supervisor_revisions(plan_json, supervisor_result)
 
         agents: List[Dict] = plan_json.get("agents", [])
         # subtasks 保存有序 node_id 列表（执行顺序由 entry_node + edges 决定，
@@ -456,12 +481,23 @@ class AutoAgentsMASPlanner(MASPlanner):
         """Round 1：PlanAgent LLM 调用，生成初始 agent 列表和图结构。"""
         prompt = (
             f"你是多智能体系统规划师（PlanAgent）。\n"
-            f"给定以下任务，规划完成任务所需的专家 Agent 列表和执行图结构。\n\n"
+            f"给定以下任务，请输出一个“高质量、但结构简洁”的执行方案。\n\n"
             f"任务：{task}\n\n"
-            f"要求：\n"
-            f"1. 每个 Agent 职责明确、不重叠\n"
-            f"2. system_prompt 详细描述角色、专长和行为准则（不含输出格式约束，由框架统一注入）\n"
-            f"3. 节点数量控制在 2～6 个\n\n"
+            f"规划原则：\n"
+            f"1) 默认按“指导型任务”处理：讲清概念 + 给可执行步骤。\n"
+            f"2) 节点数控制在 2~8 个，根据任务复杂程度选择。\n"
+            f"3) 必须包含“最终交付节点”（负责整合并给用户最终行动建议）。\n"
+            f"   最终交付节点必须直接回答原始问题，并给出可执行步骤/示例，禁止仅复述上游摘要。\n"
+            f"4) 除非用户明确要求完整开发与测试，不要引入重型实现/测试流水线。\n"
+            f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n\n"
+            f"6) 每个节点的 system_prompt/subtask 必须满足“单次流水线执行契约”，"
+            f"严禁等待式追问用户；信息不足时应采用默认假设继续交付。\n\n"
+            f"单次流水线执行契约（所有节点必须遵守）：\n"
+            f"{SINGLE_TURN_NODE_CONTRACT}\n\n"
+            f"推荐结构（可等价改名）：\n"
+            f"- requirement_clarifier：提炼目标与默认假设（禁止等待用户补充）\n"
+            f"- learning_guide：给分阶段路径、关键风险与实践建议（禁止再次追问）\n"
+            f"- final_response_builder：整合并输出最终行动清单（最终交付节点）\n\n"
             f"【图结构强制约束 - 必须严格遵守】\n"
             f"- 图必须是严格的单链（线性序列）：A → B → C → ...\n"
             f"- 禁止并行分支：每个节点只能有最多一个后继节点\n"
@@ -471,47 +507,272 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"必须且只能输出如下 JSON 格式（不要任何其他内容）：\n{PLAN_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
-        return parse_llm_json(raw, context="PlanAgent",
-                              fallback={"agents": [], "edges": [], "entry_node": ""})
+        return parse_llm_json(raw, context="PlanAgent", fallback=dict(_PLAN_FALLBACK))
 
-    def _supervisor_call(self, task: str, plan_json: Dict) -> Dict:
+    def _supervisor_call(
+        self,
+        task: str,
+        plan_json: Dict,
+        round_idx: int,
+        prev_supervisor: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
         """Round 2～N：Supervisor LLM 调用，审查并修订 agent 列表。"""
         agents = plan_json.get("agents", [])
-        edges  = plan_json.get("edges", [])
-        n_nodes = len(agents)
-        n_edges = len(edges)
-        # 统计每个 from 节点出现次数，大于 1 则存在并行分支
-        from_counts: Dict[str, int] = {}
-        for e in edges:
-            key = e.get("from", "")
-            from_counts[key] = from_counts.get(key, 0) + 1
-        parallel_nodes = [k for k, v in from_counts.items() if v > 1]
-
-        topology_report = (
-            f"\n【图结构自动检测报告】\n"
-            f"  节点数：{n_nodes}，边数：{n_edges}，"
-            f"线性链期望边数：{max(0, n_nodes - 1)}\n"
-            f"  边数检查：{'✅ 正确' if n_edges == max(0, n_nodes - 1) else '❌ 不符（存在缺失或多余的边）'}\n"
-            f"  并行分支：{'✅ 无' if not parallel_nodes else f'❌ 以下节点有多个后继（并行），必须修正：{parallel_nodes}'}\n"
-        )
+        topology = self._analyze_plan_topology(plan_json)
+        topology_report = self._format_topology_report(topology)
+        prev_score = ""
+        prev_issues = ""
+        if isinstance(prev_supervisor, dict):
+            s = prev_supervisor.get("quality_score")
+            if s is not None:
+                prev_score = str(s)
+            prev_iss = prev_supervisor.get("issues")
+            if isinstance(prev_iss, list) and prev_iss:
+                prev_issues = "\n".join(f"- {x}" for x in prev_iss)
 
         prompt = (
             f"你是多智能体工作流审查员（Supervisor）。\n"
-            f"请你严格审查以下多 Agent 规划方案是否合理完整。\n\n"
+            f"请审查以下规划方案。目标是：不降低质量前提下，减少无效打回并持续改进评分。\n\n"
+            f"当前轮次：第 {round_idx} 轮\n"
             f"原始任务：{task}\n\n"
             f"当前规划方案：\n{json.dumps(plan_json, ensure_ascii=False, indent=2)}\n"
             f"{topology_report}\n"
-            f"审查要点（按优先级）：\n"
-            f"1. 【最高优先 - 图结构】若上方检测报告有 ❌，必须返回 approved=false，\n"
-            f"   并在 revised_agents 中提供修正方案（确保为单链、边数=节点数-1、无并行分支）\n"
-            f"2. Agent 列表是否覆盖完成任务的所有关键环节？\n"
-            f"3. 执行顺序（edges / depends_on）是否合理？\n"
-            f"4. 是否存在冗余或职责不清的 Agent？\n"
-            f"5. 每个 Agent 的 system_prompt 是否足够详细？\n\n"
+            f"上一轮参考（若有）：\n"
+            f"- 上一轮评分：{prev_score or '无'}\n"
+            f"- 上一轮 issues：\n{prev_issues or '无'}\n\n"
+            f"审查规则（仅拦截关键硬问题）：\n"
+            f"1) 只有在以下情况才拒绝（approved=false）：\n"
+            f"   - 图结构不合法（非单链、边数不匹配、节点引用错误）\n"
+            f"   - 与用户意图明显相反（例如用户问“怎么做”，却输出完整实现+测试流水线）\n"
+            f"   - 节点职责严重冲突或无法执行\n"
+            f"   - 任一节点出现等待式追问用户/把任务抛给用户或下游节点\n"
+            f"2) 轻微优化建议（如时序可更优、措辞可更好）不能作为拒绝理由。\n"
+            f"3) 若 approved=false，必须同时提供 revised_agents + revised_edges + revised_entry_node，且三者一致可运行。\n"
+            f"4) quality_score 使用 1~10 分制；若本轮修复了上一轮关键问题，评分应尽量提高，不应无故下降。\n"
+            f"5) 当评分 >= {SUPERVISOR_MIN_QUALITY_SCORE:.2f} 且不存在关键硬问题时，优先 approved=true。\n\n"
             f"必须且只能输出如下 JSON 格式：\n{SUPERVISOR_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
-        return parse_llm_json(raw, context="Supervisor", fallback={"approved": True})
+        return parse_llm_json(
+            raw,
+            context="Supervisor",
+            fallback=dict(_SUPERVISOR_FALLBACK),
+        )
+
+    def _collect_supervisor_reject_reasons(
+        self,
+        task: str,
+        plan_json: Dict[str, Any],
+        supervisor_result: Dict[str, Any],
+    ) -> List[str]:
+        reasons: List[str] = []
+        approved = bool(supervisor_result.get("approved", False))
+        if not approved:
+            reasons.append("Supervisor 未批准该方案")
+
+        score_val = self._normalize_quality_score(supervisor_result.get("quality_score", 0.0))
+        if score_val < SUPERVISOR_MIN_QUALITY_SCORE:
+            reasons.append(
+                f"Supervisor 分数过低({score_val:.2f} < {SUPERVISOR_MIN_QUALITY_SCORE:.2f})"
+            )
+
+        # 仅在 Supervisor 明确拒绝时，才把 issues 作为拒绝原因；
+        # 否则 issues 仅作为改进建议，不应阻断通过。
+        if not approved:
+            issues = supervisor_result.get("issues", [])
+            if isinstance(issues, list):
+                for issue in issues:
+                    txt = str(issue).strip()
+                    if txt:
+                        reasons.append(txt)
+
+        reasons.extend(self._local_topology_issues(plan_json))
+        reasons.extend(self._local_intent_issues(task, plan_json))
+        reasons.extend(self._local_single_turn_contract_issues(plan_json))
+        # 去重保序
+        out: List[str] = []
+        seen = set()
+        for r in reasons:
+            if r not in seen:
+                seen.add(r)
+                out.append(r)
+        return out
+
+    def _local_topology_issues(self, plan_json: Dict[str, Any]) -> List[str]:
+        issues: List[str] = []
+        topology = self._analyze_plan_topology(plan_json)
+        if not topology["has_valid_agents"]:
+            issues.append("规划中 agents 为空或格式错误")
+            return issues
+        if not topology["has_valid_edges"]:
+            issues.append("规划中 edges 不是数组")
+            return issues
+        if not topology["edge_count_ok"]:
+            issues.append(
+                f"边数不匹配：当前 {topology['n_edges']}，应为 {topology['expected_edges']}"
+            )
+        multi_from = topology["parallel_nodes"]
+        if multi_from:
+            issues.append(f"存在并行后继节点：{multi_from}")
+        dangling = topology["dangling_nodes"]
+        if dangling:
+            issues.append(f"edges 引用了不存在节点：{dangling}")
+        return issues
+
+    def _local_intent_issues(self, task: str, plan_json: Dict[str, Any]) -> List[str]:
+        """
+        本地守门：当用户任务偏“答疑/解释”时，拦截明显“实现+测试”导向的规划。
+        """
+        issues: List[str] = []
+        task_l = task.lower()
+        consult_like = any(k in task for k in ["解答", "讲解", "说明", "分析", "怎么做", "如何", "步骤"]) or any(
+            k in task_l for k in ["explain", "analysis", "answer", "how to", "steps"]
+        )
+        implement_like = any(k in task for k in ["实现", "编码", "写代码", "测试"]) or any(
+            k in task_l for k in ["implement", "code", "test"]
+        )
+        if not consult_like or implement_like:
+            return issues
+
+        agents = plan_json.get("agents", [])
+        risky_tokens = (
+            "tester", "test", "unit test", "integration test",
+            "测试", "单元测试", "集成测试", "回归测试",
+        )
+        if isinstance(agents, list):
+            for agent in agents:
+                if not isinstance(agent, dict):
+                    continue
+                text = " ".join(
+                    str(agent.get(k, "")) for k in ("node_id", "role", "subtask", "expertise")
+                ).lower()
+                if any(tok in text for tok in risky_tokens):
+                    issues.append(
+                        "任务偏答疑/指导，但规划中出现明显测试/验收型节点，存在意图偏移"
+                    )
+                    break
+        return issues
+
+    def _local_single_turn_contract_issues(self, plan_json: Dict[str, Any]) -> List[str]:
+        """
+        本地守门：拦截违反单次流水线契约的节点文案（等待式追问/任务外抛）。
+        """
+        issues: List[str] = []
+        agents = plan_json.get("agents", [])
+        if not isinstance(agents, list):
+            return issues
+
+        waiting_tokens = (
+            "请先回答", "请先告诉我", "等你回复", "等你回答", "先确认后再",
+            "please answer first", "wait for your reply", "after you reply",
+        )
+        handoff_tokens = (
+            "下一节点", "下一个节点", "交给下一步", "由下游处理",
+            "next node", "downstream node",
+        )
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            node_id = str(agent.get("node_id", "")).strip() or "unknown_node"
+            text = " ".join(
+                str(agent.get(k, "")) for k in ("system_prompt", "subtask", "role")
+            ).lower()
+            if any(tok.lower() in text for tok in waiting_tokens):
+                issues.append(f"节点 {node_id} 存在等待式追问用户，违反单次流水线契约")
+            if any(tok.lower() in text for tok in handoff_tokens):
+                issues.append(f"节点 {node_id} 存在任务外抛给下游/用户的描述，违反单次流水线契约")
+        return issues
+
+    def _normalize_quality_score(self, score: Any) -> float:
+        try:
+            score_val = float(score)
+        except (TypeError, ValueError):
+            return 0.0
+        # 兼容旧输出：若返回 0~1，则自动换算到 1~10 分制
+        if 0.0 <= score_val <= 1.0:
+            return score_val * 10.0
+        return score_val
+
+    def _apply_supervisor_revisions(
+        self,
+        plan_json: Dict[str, Any],
+        supervisor_result: Dict[str, Any],
+    ) -> None:
+        revised_agents = supervisor_result.get("revised_agents")
+        if isinstance(revised_agents, list) and revised_agents:
+            plan_json["agents"] = revised_agents
+        revised_edges = supervisor_result.get("revised_edges")
+        if isinstance(revised_edges, list):
+            plan_json["edges"] = revised_edges
+        revised_entry = str(supervisor_result.get("revised_entry_node", "")).strip()
+        if revised_entry:
+            plan_json["entry_node"] = revised_entry
+
+    def _analyze_plan_topology(self, plan_json: Dict[str, Any]) -> Dict[str, Any]:
+        agents = plan_json.get("agents", [])
+        edges = plan_json.get("edges", [])
+        has_valid_agents = isinstance(agents, list) and bool(agents)
+        has_valid_edges = isinstance(edges, list)
+        n_nodes = len(agents) if isinstance(agents, list) else 0
+        n_edges = len(edges) if isinstance(edges, list) else 0
+        expected_edges = max(0, n_nodes - 1)
+
+        node_ids: set = set()
+        if isinstance(agents, list):
+            for a in agents:
+                if isinstance(a, dict):
+                    node_id = str(a.get("node_id", "")).strip()
+                    if node_id:
+                        node_ids.add(node_id)
+
+        from_counts: Dict[str, int] = {}
+        dangling_nodes: set = set()
+        if isinstance(edges, list):
+            for e in edges:
+                if not isinstance(e, dict):
+                    continue
+                frm = str(e.get("from", "")).strip()
+                to = str(e.get("to", "")).strip()
+                if frm:
+                    from_counts[frm] = from_counts.get(frm, 0) + 1
+                    if node_ids and frm not in node_ids:
+                        dangling_nodes.add(frm)
+                if to and node_ids and to not in node_ids:
+                    dangling_nodes.add(to)
+
+        parallel_nodes = [k for k, v in from_counts.items() if v > 1]
+        return {
+            "has_valid_agents": has_valid_agents,
+            "has_valid_edges": has_valid_edges,
+            "n_nodes": n_nodes,
+            "n_edges": n_edges,
+            "expected_edges": expected_edges,
+            "edge_count_ok": n_edges == expected_edges,
+            "parallel_nodes": parallel_nodes,
+            "dangling_nodes": sorted(dangling_nodes),
+        }
+
+    def _format_topology_report(self, topology: Dict[str, Any]) -> str:
+        parallel_nodes = topology["parallel_nodes"]
+        dangling_nodes = topology["dangling_nodes"]
+        parallel_desc = (
+            "✅ 无"
+            if not parallel_nodes
+            else f"❌ 以下节点有多个后继（并行），必须修正：{parallel_nodes}"
+        )
+        dangling_desc = (
+            "✅ 合法"
+            if not dangling_nodes
+            else f"❌ 引用了不存在节点：{dangling_nodes}"
+        )
+        return (
+            f"\n【图结构自动检测报告】\n"
+            f"  节点数：{topology['n_nodes']}，边数：{topology['n_edges']}，"
+            f"线性链期望边数：{topology['expected_edges']}\n"
+            f"  边数检查：{'✅ 正确' if topology['edge_count_ok'] else '❌ 不符（存在缺失或多余的边）'}\n"
+            f"  并行分支：{parallel_desc}\n"
+            f"  节点引用：{dangling_desc}\n"
+        )
 
     def _call_llm(self, prompt: str) -> str:
         """统一 LLM 调用入口，返回纯文本响应字符串。"""

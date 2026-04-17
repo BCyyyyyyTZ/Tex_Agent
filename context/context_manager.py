@@ -4,9 +4,66 @@ from typing import List, Optional, Dict, Any, Union
 from context.base import BaseContext
 from core.message import AgentMessage
 from utils.logger import get_logger
+from config.planner_config import METADATA_CHAIN_RESULT_MAX_CHARS
 
 logger = get_logger(__name__)
 MsgType = Union[Dict[str, Any], AgentMessage, str]
+
+# metadata 中保留的系统键，不参与「节点产出」合成
+_METADATA_RESERVED_KEYS = frozenset({
+    "__execution_order__",
+    "__run_output_dir__",
+    "branch",
+    "workflow",
+    "timestamp",
+})
+
+
+def _is_structured_node_output(value: Any) -> bool:
+    return isinstance(value, dict) and ("result" in value or "summary" in value)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars] + f"\n...（已截断，共{len(text)}字符）"
+
+
+def format_metadata_chain_for_prompt(state: Dict[str, Any]) -> str:
+    """
+    当 state.messages 不累积中间对话时，用已执行节点的结构化 metadata 拼出可读上下文链。
+    顺序优先使用 metadata['__execution_order__']，否则按节点 id 排序以保证稳定。
+    """
+    meta = state.get("metadata") or {}
+    order = meta.get("__execution_order__")
+    if isinstance(order, list) and order:
+        node_ids = [str(x) for x in order if str(x) not in _METADATA_RESERVED_KEYS]
+    else:
+        node_ids = sorted(
+            k for k in meta
+            if k not in _METADATA_RESERVED_KEYS and _is_structured_node_output(meta.get(k))
+        )
+    blocks: List[str] = []
+    for nid in node_ids:
+        blob = meta.get(nid)
+        if not _is_structured_node_output(blob):
+            continue
+        summary = str(blob.get("summary", "")).strip()
+        result = str(blob.get("result", "")).strip()
+        parts = [f"### [{nid}]"]
+        if summary:
+            parts.append(f"摘要: {summary}")
+        if result:
+            # metadata_chain 优先给摘要，result 只保留截断版，降低历史噪声
+            compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
+            if compact_result and compact_result != summary:
+                parts.append(f"补充产出(截断):\n{compact_result}")
+        if len(parts) > 1:
+            blocks.append("\n".join(parts))
+    return "\n\n".join(blocks)
+
 
 def _safe_get(msg: Any, key: str, default: str = "") -> str:
     """兼容 dict / AgentMessage / str 的安全取值"""
@@ -93,6 +150,10 @@ class ContextManager(BaseContext):
             parts.append(f"<context type='memory'>\n{mem_str}\n</context>")
         if window:
             parts.append(f"<context type='history'>\n{self.structure(window, cfg.get('format', 'plain'))}\n</context>")
-            
+        elif cfg.get("synthetic_metadata_history"):
+            chain = format_metadata_chain_for_prompt(state)
+            if chain.strip():
+                parts.append(f"<context type='metadata_chain'>\n{chain}\n</context>")
+
         structured = "\n\n".join(parts)
         return self.compress(structured, cfg.get("max_tokens"))

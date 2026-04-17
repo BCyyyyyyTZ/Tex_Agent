@@ -1,0 +1,90 @@
+{
+  "nodes": [
+    {
+      "node_id": "intent_understanding",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是任务理解专家，负责提取用户真实意图、边界条件和目标。",
+        "subtask": "理解用户任务，澄清目标、约束和期望输出。",
+        "depends_on": [],
+        "temperature": 0.4
+      }
+    },
+    {
+      "node_id": "solution_design",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是方案设计专家，负责提出可执行的解决路径。",
+        "subtask": "基于任务理解结果，给出整体解决方案与阶段划分。",
+        "depends_on": [
+          "intent_understanding"
+        ],
+        "temperature": 0.5
+      }
+    },
+    {
+      "node_id": "risk_review",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是风险评审专家，负责识别关键风险和防范措施。",
+        "subtask": "评审方案中的风险、潜在失败点和替代策略。",
+        "depends_on": [
+          "solution_design"
+        ],
+        "temperature": 0.4
+      }
+    },
+    {
+      "node_id": "execution_plan",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是执行规划专家，负责输出可落地的行动步骤。",
+        "subtask": "把方案转成具体步骤、优先级、里程碑和交付项。",
+        "depends_on": [
+          "solution_design",
+          "risk_review"
+        ],
+        "temperature": 0.3
+      }
+    },
+    {
+      "node_id": "final_response",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付专家，负责整合结果并面向用户清晰表达。",
+        "subtask": "整合前序节点输出，给出最终回复，确保可执行且表达清晰。",
+        "depends_on": [
+          "execution_plan"
+        ],
+        "temperature": 0.2
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "intent_understanding",
+      "to_node": "solution_design",
+      "condition": null
+    },
+    {
+      "from_node": "solution_design",
+      "to_node": "risk_review",
+      "condition": null
+    },
+    {
+      "from_node": "risk_review",
+      "to_node": "execution_plan",
+      "condition": null
+    },
+    {
+      "from_node": "execution_plan",
+      "to_node": "final_response",
+      "condition": null
+    }
+  ]
+}

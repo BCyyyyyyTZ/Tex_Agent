@@ -1,8 +1,13 @@
 # memory/branch_memory.py
-from typing import Dict, List, Optional, Any
+import json
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 from copy import deepcopy
 from memory.simple_memory import SimpleMemory
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class BranchMixin:
@@ -159,11 +164,13 @@ class BranchMixin:
         if self.current_branch == source_branch:
             self.switch_branch("main")
         
-        return {
+        out = {
             "success": True,
             "merged_count": merged_count,
             "branch": source_branch
         }
+        self._rewrite_persist_from_memory()
+        return out
     
     def delete_branch(self, branch_name: str, force: bool = False) -> bool:
         """删除分支"""
@@ -180,8 +187,9 @@ class BranchMixin:
             return False
         
         del self.branches[branch_name]
+        self._rewrite_persist_from_memory()
         return True
-    
+
     # ========== 覆盖父类方法以支持分支 ==========
     
     def save(self, key: str, value: Any, metadata: Dict = None) -> None:
@@ -209,14 +217,25 @@ class BranchMixin:
         
         # 直接添加到当前存储
         self._storage.append(memory_item)
-        
+
+        evicted = False
         # 保持大小限制
-        if hasattr(self, 'max_size') and len(self._storage) > self.max_size:
+        if hasattr(self, "max_size") and len(self._storage) > self.max_size:
             self._storage.pop(0)
-        
+            evicted = True
+
         # 更新索引
         self._index[key] = memory_item
-    
+
+        br_name = (
+            self.current_branch
+            if self.branch_enabled and self.current_branch
+            else "main"
+        )
+        self._persist_append(str(br_name), memory_item)
+        if evicted and getattr(self, "persist_path", None):
+            self._rewrite_persist_from_memory()
+
     def load(self, key: str = None, limit: int = None) -> List[Any]:
         """加载记忆（支持分支）"""
         if not self.branch_enabled:
@@ -256,6 +275,7 @@ class BranchMixin:
             if self.current_branch and self.current_branch in self.branches:
                 self.branches[self.current_branch]["storage"] = self._storage
                 self.branches[self.current_branch]["index"] = self._index
+        self._rewrite_persist_from_memory()
     
     def get_size(self) -> int:
         """获取记忆数量（支持分支）"""
@@ -283,6 +303,17 @@ class BranchMixin:
         }
 
 
+def _parse_ts(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+    return datetime.now()
+
+
 class BranchMemory(BranchMixin, SimpleMemory):
     """
     高级记忆：基础记忆 + 可选分支功能
@@ -302,17 +333,138 @@ class BranchMemory(BranchMixin, SimpleMemory):
         memory.create_branch("experiment")
     """
     
-    def __init__(self, *args, branch_enabled: bool = False, **kwargs):
-        # 先初始化 SimpleMemory
+    def __init__(
+        self,
+        *args,
+        branch_enabled: bool = False,
+        persist_path: Optional[Union[str, Path]] = None,
+        **kwargs,
+    ):
+        self.persist_path = Path(persist_path) if persist_path else None
+        # 与历史行为一致：不在此把 branch_enabled 传给 BranchMixin，避免 SimpleMemory
+        # 初始化覆盖分支 storage；由本类在 super() 之后打开分支并初始化。
         super().__init__(*args, **kwargs)
-        
-        # 设置分支相关属性
         self.branch_enabled = branch_enabled
-        self.branches: Dict[str, Dict] = {}
-        self.current_branch: Optional[str] = None
-        self.branch_history: Dict[str, List[Dict]] = {}
-        
-        # 如果启用分支，初始化分支系统
+        self.branches = {}
+        self.current_branch = None
+        self.branch_history = {}
         if self.branch_enabled:
             self._init_branch_system()
+        if self.persist_path:
+            self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+            self._load_persisted()
+
+    def _persist_append(self, branch_name: str, memory_item: Dict[str, Any]) -> None:
+        if not self.persist_path:
+            return
+        ts = memory_item.get("timestamp")
+        if isinstance(ts, datetime):
+            ts_s = ts.isoformat()
+        else:
+            ts_s = str(ts)
+        rec = {
+            "branch": branch_name,
+            "key": memory_item.get("key"),
+            "value": memory_item.get("value"),
+            "metadata": memory_item.get("metadata") or {},
+            "timestamp": ts_s,
+            "agent": memory_item.get("agent"),
+        }
+        try:
+            with self.persist_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        except OSError as e:
+            logger.warning(f"记忆追加落盘失败 {self.persist_path}: {e}")
+
+    def _rewrite_persist_from_memory(self) -> None:
+        if not self.persist_path:
+            return
+        lines: List[str] = []
+        try:
+            if self.branch_enabled and self.branches:
+                for br_name, data in self.branches.items():
+                    for it in data.get("storage", []):
+                        ts = it.get("timestamp")
+                        ts_s = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+                        rec = {
+                            "branch": br_name,
+                            "key": it.get("key"),
+                            "value": it.get("value"),
+                            "metadata": it.get("metadata") or {},
+                            "timestamp": ts_s,
+                            "agent": it.get("agent"),
+                        }
+                        lines.append(json.dumps(rec, ensure_ascii=False, default=str))
+            else:
+                for it in self._storage:
+                    ts = it.get("timestamp")
+                    ts_s = ts.isoformat() if isinstance(ts, datetime) else str(ts)
+                    rec = {
+                        "branch": "main",
+                        "key": it.get("key"),
+                        "value": it.get("value"),
+                        "metadata": it.get("metadata") or {},
+                        "timestamp": ts_s,
+                        "agent": it.get("agent"),
+                    }
+                    lines.append(json.dumps(rec, ensure_ascii=False, default=str))
+            self.persist_path.write_text(
+                ("\n".join(lines) + "\n") if lines else "",
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.warning(f"记忆重写落盘失败 {self.persist_path}: {e}")
+
+    def _load_persisted(self) -> None:
+        if not self.persist_path or not self.persist_path.exists():
+            return
+        try:
+            raw = self.persist_path.read_text(encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"记忆加载失败 {self.persist_path}: {e}")
+            return
+        max_sz = getattr(self, "max_size", 1000) or 1000
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = {
+                "key": rec.get("key"),
+                "value": rec.get("value"),
+                "metadata": rec.get("metadata") or {},
+                "timestamp": _parse_ts(rec.get("timestamp")),
+                "agent": rec.get("agent"),
+            }
+            if item["key"] is None:
+                continue
+            br_name = str(rec.get("branch") or "main")
+            if self.branch_enabled:
+                if br_name not in self.branches:
+                    self.branches[br_name] = {
+                        "storage": [],
+                        "index": {},
+                        "created_at": datetime.now(),
+                        "parent": "main",
+                    }
+                st = self.branches[br_name]["storage"]
+                ix = self.branches[br_name]["index"]
+                st.append(item)
+                ix[item["key"]] = item
+                while len(st) > max_sz:
+                    old = st.pop(0)
+                    ix.pop(old.get("key"), None)
+            else:
+                self._storage.append(item)
+                self._index[item["key"]] = item
+                while len(self._storage) > max_sz:
+                    old = self._storage.pop(0)
+                    self._index.pop(old.get("key"), None)
+        if self.branch_enabled and "main" in self.branches:
+            self.current_branch = "main"
+            self._storage = self.branches["main"]["storage"]
+            self._index = self.branches["main"]["index"]
 

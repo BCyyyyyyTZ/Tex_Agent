@@ -21,6 +21,8 @@ from rag.document_loader import chunk_text, load_and_chunk
 from config.settings import settings
 from utils.logger import get_logger
 
+from rag.store_listing import StoreField, StoredChunksPage
+
 logger = get_logger(__name__)
 
 
@@ -184,3 +186,14 @@ class RAGPipeline(BaseRAGPipeline):
     def document_count(self) -> int:
         """返回当前知识库中的文档片段总数。"""
         return self._retriever.document_count()
+
+    def list_stored_page(
+        self,
+        offset: int = 0,
+        limit: int = 10,
+        fetch_fields: StoreField = StoreField.DEFAULT,
+    ) -> StoredChunksPage:
+        getter = getattr(self._retriever, "list_stored_page", None)
+        if getter is None:
+            raise NotImplementedError("当前 retriever 不支持 list_stored_page")
+        return getter(offset=offset, limit=limit, fetch_fields=fetch_fields)

@@ -4,6 +4,8 @@ SimpleAgent：最基础的可运行 Agent 实现。
 """
 from typing import List, Optional, Union
 import asyncio
+from datetime import datetime
+from pathlib import Path
 
 #from langchain_openai import ChatOpenAI
 #from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -17,6 +19,7 @@ from utils.logger import get_logger
 from tools.tool_list import tool_list
 
 logger = get_logger(__name__)
+_LLM_TRACE_PATH = Path(__file__).resolve().parent.parent / "logs" / "llm_interactions_trace.txt"
 
 #MODEL_NAME = "llama-3.3-70b-versatile"
 MODEL_NAME = "gemini-3.1-flash-lite-preview"
@@ -119,6 +122,36 @@ class SimpleAgent(BaseAgent):
             excess = excess + (excess % 2)
             self._history = self._history[excess:]
 
+    def _append_llm_trace(self, lc_messages: list, response_text: str) -> None:
+        """
+        统一记录所有模式下的 LLM 交互（默认/自定义/plan）。
+        """
+        try:
+            _LLM_TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().isoformat(timespec="seconds")
+
+            serialized_messages = []
+            for idx, msg in enumerate(lc_messages, start=1):
+                role = getattr(msg, "type", msg.__class__.__name__)
+                content = getattr(msg, "content", str(msg))
+                serialized_messages.append(f"[{idx}] role={role}\n{content}\n")
+
+            block = (
+                "\n" + "=" * 88 + "\n"
+                f"[{ts}] agent={self._name} model={self.model} temperature={self.temperature}\n"
+                "\n[llm_messages]\n"
+                + "\n".join(serialized_messages)
+                + "\n[llm_response]\n"
+                + str(response_text)
+                + "\n"
+                + "=" * 88 + "\n"
+            )
+
+            with _LLM_TRACE_PATH.open("a", encoding="utf-8") as f:
+                f.write(block)
+        except Exception as e:
+            logger.error(f"[{self._name}] 写入 LLM 交互日志失败: {e}")
+
     def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
         """
         同步执行推理。
@@ -149,32 +182,11 @@ class SimpleAgent(BaseAgent):
         logger.debug(f"[{self.name}] 接收消息: {content_preview}")
         
         try:
-            while True:
-                history_messages = self._build_history_messages()
-                # 构建完整的提示文本
-                prompt = "\n\n".join(history_messages)
-
-                if MODE == "debug":
-                    print("="*100)
-                    print(f"PROMPT:\n{prompt}")
-                # 3. 调用 LLM  
-                llm_content = self.llms["llm"].response(prompt = prompt, file_paths = attachment)
-                if MODE == "debug":
-                    print(f"LLM_CONTENT:\n{llm_content}")
-                # 4. 解析 LLM 响应
-                # 检查是否为直接回答
-                result_index = llm_content.find("RESULT")
-                if result_index != -1:
-                    # 直接回答，提取结果
-                    result_content = llm_content[result_index + len("RESULT"):].strip().strip('[]')
-                    result = AgentMessage(
-                        role="assistant",
-                        content=result_content,
-                        agent_name=self.name,
-                    )
-                     # 5. 更新对话历史（用于下一轮 run() 时构建上下文）并按上限裁剪
-                    self.history.append(result)
-                    #self._trim_history()
+            # 3. 调用 LLM
+            llm = self._get_llm()
+            lc_messages = self._build_lc_messages(normalized_msg)
+            response = llm.invoke(lc_messages)
+            self._append_llm_trace(lc_messages, response.content)
 
                     logger.debug(f"[{self.name}] 响应生成完毕，长度: {len(result.content)} 字符")
 

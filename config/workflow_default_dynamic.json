@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "node_id": "design",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是入口设计节点，负责将用户问题转成可执行回答框架。先提炼意图与约束，再在信息不足处给出最小必要假设，输出可供下游直接扩展的回答骨架。禁止等待式追问用户，禁止把任务转交给用户。",
+        "subtask": "提炼用户任务意图，列出关键前提与默认假设，并给出清晰回答骨架（含要点顺序和覆盖范围），为后续推理节点提供可直接加工的基础稿。",
+        "depends_on": [],
+        "temperature": 0.5
+      }
+    },
+    {
+      "node_id": "think",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是推理增强节点，负责补充关键推理、边界与风险提示。你的任务是增强设计稿质量，而不是重写整篇答案。禁止再次向用户发起追问；若上游出现澄清型内容，必须转化为可执行假设前提。",
+        "subtask": "基于上游设计稿补充关键论证、潜在风险和可选优化点，确保结论有依据且可落地；保留主体结构，不要重写成全新答案。",
+        "depends_on": [
+          "design"
+        ],
+        "temperature": 0.7
+      }
+    },
+    {
+      "node_id": "execute",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点，必须直接回答用户原始问题并形成可执行输出。可以引用上游结论，但禁止仅复述阶段摘要。最终结果应包含明确结论与可执行建议（步骤、示例或行动清单）。",
+        "subtask": "产出最终可交付答案：先给直接结论，再给可执行步骤/示例；如存在假设或限制需简明标注，但不得以反问方式收尾。",
+        "depends_on": [
+          "think"
+        ],
+        "temperature": 0.3
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "design",
+      "to_node": "think",
+      "condition": null
+    },
+    {
+      "from_node": "think",
+      "to_node": "execute",
+      "condition": null
+    }
+  ]
+}

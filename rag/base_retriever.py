@@ -12,6 +12,7 @@ RAG 模块抽象接口定义。
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
+from rag.store_listing import StoreField, StoredChunksPage
 
 
 @dataclass
@@ -108,6 +109,20 @@ class BaseRetriever(ABC):
             NotImplementedError: 子类必须实现。
         """
         raise NotImplementedError
+
+    def list_stored_page(
+        self,
+        offset: int = 0,
+        limit: int = 10,
+        fetch_fields: StoreField = StoreField.DEFAULT,
+    ) -> StoredChunksPage:
+        """
+        分页列举当前向量库中的记录（纯数据，不做打印）。
+        默认实现：子类未实现时抛出 NotImplementedError。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 未实现 list_stored_page"
+        )
 
 
 class BaseRAGPipeline(ABC):
