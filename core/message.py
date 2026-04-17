@@ -29,6 +29,7 @@ class AgentMessage(BaseModel):
     role: Literal["user", "assistant", "system", "tool"] = "user"
     content: str
     agent_name: str = "unknown"
+    tool_name: str = "unknown"
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict = Field(default_factory=dict)
 

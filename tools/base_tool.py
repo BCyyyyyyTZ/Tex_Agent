@@ -24,20 +24,12 @@ class BaseTool(ABC):
         便于开发者 C 独立开发和测试每个工具，无需关心 Agent 实现细节。
     """
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """工具唯一标识名（英文，snake_case，如 "arxiv_search"）。"""
+    def __init__(self, name: str, description: str, input_schema: dict[str, str]):
+        self.name = name
+        self.description = description
+        self.input_schema = input_schema
 
-    @property
-    @abstractmethod
-    def description(self) -> str:
-        """
-        工具功能描述（自然语言）。
-        此描述将被 LLM 读取以决定何时使用该工具，应清晰说明工具的能力和适用场景。
-        """
 
-    @abstractmethod
     def run(self, input: str) -> ToolResult:
         """
         同步执行工具。
@@ -51,6 +43,7 @@ class BaseTool(ABC):
         Raises:
             ToolError: 工具执行失败时抛出（内部应 catch 后封装为 ToolResult 返回）。
         """
+        pass
 
     async def arun(self, input: str) -> ToolResult:
         """

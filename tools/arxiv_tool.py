@@ -31,25 +31,21 @@ class ArxivSearchTool(BaseTool):
     """
 
     def __init__(self, max_results: Optional[int] = None):
+        super().__init__(
+            name="arxiv_search",
+            description="在 arXiv 平台检索论文。输入关键词或论文主题（建议使用英文以获得最佳结果），返回相关论文的标题、作者、摘要和链接。",
+            input_schema={
+                "query": "用户输入的关键词或论文主题，如果是中文，应该转换成对应的英文表述"
+            }
+        )
         self._max_results = max_results if max_results is not None else settings.arxiv_max_results
         self._client = arxiv.Client()
 
-    @property
-    def name(self) -> str:
-        return "arxiv_search"
-
-    @property
-    def description(self) -> str:
-        return (
-            "在 arXiv 学术预印本平台检索论文。"
-            "输入关键词或论文主题（英文效果最佳），返回相关论文的标题、作者、摘要和链接。"
-            "适用于文献调研、寻找相关研究、获取某领域最新学术动态等场景。"
-        )
 
     def _format_results(self, results: List[arxiv.Result]) -> str:
         """将 arXiv 检索结果格式化为可读的文本字符串。"""
         if not results:
-            return "未找到相关论文，请尝试其他关键词或更宽泛的主题描述。"
+            raise RuntimeError("未找到相关论文。")
 
         lines = [f"共检索到 {len(results)} 篇相关论文：\n"]
         for i, paper in enumerate(results, 1):
@@ -72,21 +68,21 @@ class ArxivSearchTool(BaseTool):
 
         return "\n".join(lines)
 
-    def run(self, input: str) -> ToolResult:
+    def run(self, query: str) -> ToolResult:
         """
         执行 arXiv 文献检索。
 
         Args:
-            input: 检索关键词或论文主题描述（建议使用英文以获得最佳结果）。
+            query: 检索关键词或论文主题描述（建议使用英文以获得最佳结果）。
 
         Returns:
             ToolResult，成功时 output 为格式化的论文列表文本，
             失败时 success=False 且 error 字段包含错误信息。
         """
-        logger.info(f"arXiv 检索启动 | 查询: {input!r} | 最大结果数: {self._max_results}")
+        logger.info(f"arXiv 检索启动 | 查询: {query!r} | 最大结果数: {self._max_results}")
         try:
             search = arxiv.Search(
-                query=input,
+                query=query,
                 max_results=self._max_results,
                 sort_by=arxiv.SortCriterion.Relevance,
             )
@@ -98,9 +94,8 @@ class ArxivSearchTool(BaseTool):
                 success=True,
                 output=formatted,
                 metadata={
-                    "query": input,
-                    "count": len(results),
-                    "max_results": self._max_results,
+                    "query": query,
+                    "result_num": len(results),
                 },
             )
 
@@ -109,6 +104,6 @@ class ArxivSearchTool(BaseTool):
             return ToolResult(
                 success=False,
                 output="",
-                error=f"arXiv 检索失败: {e}",
-                metadata={"query": input},
+                error=f"{e}",
+                metadata={"query": query},
             )
