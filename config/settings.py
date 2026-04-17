@@ -21,6 +21,33 @@ def _resolve_rag_persist_dir(raw: str) -> str:
         return str(p.resolve())
     return str((_project_root / p).resolve())
 
+def _resolve_parsed_doc_dir(raw: str) -> str:
+    """解析结果输出根目录：空则默认 doc/parsed_doc；相对路径相对于项目根。"""
+    text = (raw or "").strip()
+    if not text:
+        text = "doc/parsed_doc"
+    p = Path(text)
+    if p.is_absolute():
+        return str(p.resolve())
+    return str((_project_root / p).resolve())
+
+
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.getenv(key)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(key: str, default: int) -> int:
+    raw = os.getenv(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(str(raw).strip())
+    except ValueError:
+        return default
+
 
 @dataclass
 class Settings:
@@ -65,6 +92,29 @@ class Settings:
     rag_top_k: int = 5
     rag_persist_directory: str = field(
         default_factory=lambda: _resolve_rag_persist_dir(os.getenv("RAG_PERSIST_DIR", ""))
+    )
+
+    # ---- 文档解析（Docling）导出路径 ----
+    parsed_doc_dir: str = field(
+        default_factory=lambda: _resolve_parsed_doc_dir(os.getenv("PARSED_DOC_DIR", ""))
+    )
+
+    # ---- Docling 大 PDF 旁路（页数阈值与分块参数，见 rag/docling_parse.py）----
+    # PAGE_THRESHOLD：页数 >= 该值走旁路；目前仅统计 PDF。
+    docling_page_threshold: int = field(
+        default_factory=lambda: max(1, _env_int("PAGE_THRESHOLD", 30))
+    )
+    # CHUNK_PAGES / CHUNK_OVERLAP：预留给分块拼接旁路，当前解析逻辑仅记录日志。
+    docling_chunk_pages: int = field(
+        default_factory=lambda: max(1, _env_int("CHUNK_PAGES", 25))
+    )
+    docling_chunk_overlap: int = field(
+        default_factory=lambda: max(0, _env_int("CHUNK_OVERLAP", 1))
+    )
+    # DOCLING_PDF_DEVICE：PDF 管线加速器。auto=有 CUDA 则用 GPU 线程化管线，否则默认 CPU。
+    # 取值：auto | cpu | cuda（大小写不敏感）。
+    docling_pdf_device: str = field(
+        default_factory=lambda: (os.getenv("DOCLING_PDF_DEVICE", "auto") or "auto").strip().lower()
     )
 
     def __repr__(self) -> str:
