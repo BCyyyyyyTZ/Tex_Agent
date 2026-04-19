@@ -183,12 +183,32 @@ class SimpleAgent(BaseAgent):
         
         try:
             # 3. 调用 LLM
-            llm = self._get_llm()
-            lc_messages = self._build_lc_messages(normalized_msg)
-            response = llm.invoke(lc_messages)
-            self._append_llm_trace(lc_messages, response.content)
+            while True:
+                history_messages = self._build_history_messages()
+                # 构建完整的提示文本
+                prompt = "\n\n".join(history_messages)
 
-                    test
+                if MODE == "debug":
+                    print("="*100)
+                    print(f"PROMPT:\n{prompt}")
+                # 3. 调用 LLM  
+                llm_content = self.llms["llm"].response(prompt = prompt, file_paths = attachment)
+                if MODE == "debug":
+                    print(f"LLM_CONTENT:\n{llm_content}")
+                # 4. 解析 LLM 响应
+                # 检查是否为直接回答
+                result_index = llm_content.find("RESULT")
+                if result_index != -1:
+                    # 直接回答，提取结果
+                    result_content = llm_content[result_index + len("RESULT"):].strip().strip('[]')
+                    result = AgentMessage(
+                        role="assistant",
+                        content=result_content,
+                        agent_name=self.name,
+                    )
+                     # 5. 更新对话历史（用于下一轮 run() 时构建上下文）并按上限裁剪
+                    self.history.append(result)
+                    #self._trim_history()
                     logger.debug(f"[{self.name}] 响应生成完毕，长度: {len(result.content)} 字符")
 
                     return result
