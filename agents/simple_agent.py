@@ -188,6 +188,7 @@ class SimpleAgent(BaseAgent):
             response = llm.invoke(lc_messages)
             self._append_llm_trace(lc_messages, response.content)
 
+                    test
                     logger.debug(f"[{self.name}] 响应生成完毕，长度: {len(result.content)} 字符")
 
                     return result
