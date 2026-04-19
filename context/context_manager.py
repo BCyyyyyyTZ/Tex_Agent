@@ -23,6 +23,13 @@ def _is_structured_node_output(value: Any) -> bool:
     return isinstance(value, dict) and ("result" in value or "summary" in value)
 
 
+def _is_tool_node_output(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    meta = value.get("metadata", {})
+    return isinstance(meta, dict) and meta.get("node_type") == "tool"
+
+
 def _truncate_text(text: str, max_chars: int) -> str:
     if max_chars <= 0:
         return ""
@@ -56,10 +63,15 @@ def format_metadata_chain_for_prompt(state: Dict[str, Any]) -> str:
         if summary:
             parts.append(f"摘要: {summary}")
         if result:
-            # metadata_chain 优先给摘要，result 只保留截断版，降低历史噪声
-            compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
-            if compact_result and compact_result != summary:
-                parts.append(f"补充产出(截断):\n{compact_result}")
+            if _is_tool_node_output(blob):
+                # 工具输出保留全量，确保后续节点拿到完整检索结果
+                if result != summary:
+                    parts.append(f"补充产出(完整):\n{result}")
+            else:
+                # metadata_chain 优先给摘要，普通节点 result 使用截断版降低噪声
+                compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
+                if compact_result and compact_result != summary:
+                    parts.append(f"补充产出(截断):\n{compact_result}")
         if len(parts) > 1:
             blocks.append("\n".join(parts))
     return "\n\n".join(blocks)

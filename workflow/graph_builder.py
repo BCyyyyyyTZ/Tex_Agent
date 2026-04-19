@@ -48,6 +48,7 @@ def build_app_from_workflow(
     context_manager: Optional[ContextManager] = None,
     persona_memory: Optional[Any] = None,
     default_history_mode: Optional[str] = None,
+    human_input_provider: Optional[Any] = None,
 ) -> Any:
     """
     统一的工作流构建入口：所有 workflow（默认/自定义）均走 dynamic graph。
@@ -65,6 +66,7 @@ def build_app_from_workflow(
         persona_memory=persona_memory,
         default_workflow_name=workflow_name,
         default_history_mode=default_history_mode,
+        human_input_provider=human_input_provider,
     )
 
 
@@ -107,6 +109,22 @@ def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     )
 
 
+def _build_tool_instance(tool_name: str, node_id: str):
+    """
+    根据 tool_name 获取工具实例（来自 tools.tool_list）。
+    """
+    from tools.tool_list import tool_list
+
+    for tool in tool_list:
+        if getattr(tool, "name", "") == tool_name:
+            return tool
+
+    raise ValueError(
+        f"[DynamicGraph] 节点 '{node_id}' 指定的工具 '{tool_name}' 未注册，"
+        "请先在 tools/tool_list.py 中添加该工具实例。"
+    )
+
+
 def build_dynamic_graph(
     nodes: list,
     edges: list,
@@ -114,6 +132,7 @@ def build_dynamic_graph(
     persona_memory: Optional[Any] = None,
     default_workflow_name: str = "default",
     default_history_mode: Optional[str] = None,
+    human_input_provider: Optional[Any] = None,
 ) -> Any:
     """
     根据 NodeConfig / EdgeConfig 列表动态构建并编译 LangGraph 图。
@@ -136,7 +155,7 @@ def build_dynamic_graph(
     Returns:
         已编译的 LangGraph CompiledGraph，支持 .invoke() / .ainvoke()。
     """
-    from workflow.nodes import make_generic_agent_node
+    from workflow.nodes import make_agent_node, make_tool_node, make_user_node
 
     eff_history_mode = (
         default_history_mode if default_history_mode is not None else DEFAULT_HISTORY_MODE
@@ -167,8 +186,42 @@ def build_dynamic_graph(
 
     # ---- 注册节点 ----
     for node_cfg in nodes:
+        node_type = (getattr(node_cfg, "node_type", "agent") or "agent").strip().lower()
+        if node_type == "tool":
+            if not node_cfg.tool_name:
+                raise ValueError(
+                    f"[DynamicGraph] 工具节点 '{node_cfg.node_id}' 缺少 tool_name 配置"
+                )
+            tool = _build_tool_instance(node_cfg.tool_name, node_cfg.node_id)
+            node_fn = make_tool_node(
+                tool=tool,
+                ctx=ctx,
+                node_id=node_cfg.node_id,
+                node_config=node_cfg.config,
+                default_history_mode=eff_history_mode,
+                is_terminal=node_cfg.node_id in terminal_nodes,
+            )
+            graph.add_node(node_cfg.node_id, node_fn)
+            logger.debug(f"[DynamicGraph] 注册工具节点: {node_cfg.node_id} ({node_cfg.tool_name})")
+            continue
+
+        if node_type == "user":
+            node_fn = make_user_node(
+                node_id=node_cfg.node_id,
+                node_config=node_cfg.config,
+                human_input_provider=human_input_provider,
+            )
+            graph.add_node(node_cfg.node_id, node_fn)
+            logger.debug(f"[DynamicGraph] 注册用户节点: {node_cfg.node_id}")
+            continue
+
+        if node_type not in ("agent", "condition", "parallel"):
+            logger.warning(
+                f"[DynamicGraph] 节点 {node_cfg.node_id} 的 node_type='{node_cfg.node_type}' 不受支持，降级为 agent"
+            )
+
         agent = _build_agent_instance(node_cfg.agent_name, node_cfg.node_id, node_cfg.config)
-        node_fn = make_generic_agent_node(
+        node_fn = make_agent_node(
             agent=agent,
             ctx=ctx,
             node_id=node_cfg.node_id,

@@ -31,7 +31,7 @@ core/ (AgentMessage, WorkflowState)   ← 所有人共同依赖，禁止随意�
 #### ✅ 已完成（可直接运行）
 
 - `graph_builder.py`：统一动态构图入口（registry -> nodes/edges -> build_dynamic_graph）
-- `nodes.py`：通用动态节点工厂 `make_generic_agent_node`
+- `nodes.py`：通用动态节点工厂 `make_agent_node`
 - `workflow_registry.py`：按名称加载 workflow 配置
 - `workflow_parser.py`：`NodeConfig` / `EdgeConfig` 数据结构 + `WorkflowParser` ABC，含 `from_task_plan()` 接口占位
 

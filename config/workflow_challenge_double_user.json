@@ -1,0 +1,148 @@
+{
+  "description": "挑战流3：双用户门控 + 工具与约束融合",
+  "test_question": "帮我制定“多智能体协作写作系统”论文从选题到初稿的完整推进方案。",
+  "nodes": [
+    {
+      "node_id": "problem_framer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是问题定义节点。你的任务是把研究题目转换为可执行研究问题与检索关键词。",
+        "subtask": "输出：研究问题、关键变量、关键词建议（用于后续检索）。",
+        "depends_on": [],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "method_selector",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请选择研究方法路径：定量 / 定性 / 混合。请直接回复其中一个词。",
+        "input_schema": {
+          "type": "single_choice",
+          "options": [
+            "定量",
+            "定性",
+            "混合"
+          ]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "混合",
+        "write_to": "user_feedback.method",
+        "depends_on": [
+          "problem_framer"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "query_refiner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 arXiv 查询改写节点。你必须将研究问题与方法偏好转成短英文检索式。",
+        "subtask": "严格只输出一行英文检索字符串（3-12个关键词）。可使用 AND/OR 与括号；必须体现 method_selector 的方法偏好语义；禁止中文、禁止解释、禁止列表和换行。",
+        "depends_on": [
+          "method_selector"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "targeted_retrieval",
+      "node_type": "tool",
+      "tool_name": "arxiv_search",
+      "config": {
+        "tool_input": "${metadata.query_refiner.result}",
+        "depends_on": [
+          "query_refiner"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "outline_designer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是大纲设计节点。必须结合检索证据与方法偏好来设计章节结构。",
+        "subtask": "输出论文章节大纲、每章关键论点与建议证据来源。",
+        "depends_on": [
+          "targeted_retrieval"
+        ],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "constraint_collector",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请补充你的执行约束（建议包含每周投入小时数、截止时间、目标字数），至少10个字。",
+        "input_schema": {
+          "type": "text"
+        },
+        "validation": {
+          "required": true,
+          "min_length": 10
+        },
+        "default_value": "每周10小时，6周完成，目标8000字。",
+        "write_to": "user_feedback.constraints",
+        "depends_on": [
+          "outline_designer"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "delivery_planner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。你必须融合方法偏好和执行约束，给出周度交付计划。",
+        "subtask": "输出分周执行表（周目标、产出、检查点、风险提示），并显式引用 user_feedback.method 与 user_feedback.constraints。",
+        "depends_on": [
+          "constraint_collector"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "problem_framer",
+      "to_node": "method_selector",
+      "condition": null
+    },
+    {
+      "from_node": "method_selector",
+      "to_node": "query_refiner",
+      "condition": null
+    },
+    {
+      "from_node": "query_refiner",
+      "to_node": "targeted_retrieval",
+      "condition": null
+    },
+    {
+      "from_node": "targeted_retrieval",
+      "to_node": "outline_designer",
+      "condition": null
+    },
+    {
+      "from_node": "outline_designer",
+      "to_node": "constraint_collector",
+      "condition": null
+    },
+    {
+      "from_node": "constraint_collector",
+      "to_node": "delivery_planner",
+      "condition": null
+    }
+  ]
+}

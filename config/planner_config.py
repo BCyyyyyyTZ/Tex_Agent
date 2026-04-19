@@ -25,23 +25,24 @@ SUPERVISOR_MIN_QUALITY_SCORE: float = 8.0
 
 # ------------------------------------------------------------------
 # 节点强制输出格式指令
-# 由 make_generic_agent_node() 统一追加到每个专家 Agent system_prompt 末尾，
+# 由 make_agent_node() 统一追加到每个专家 Agent system_prompt 末尾，
 # Agent 自身的 system_prompt 不需要（也不应该）包含此内容。
 # ------------------------------------------------------------------
 
 NODE_OUTPUT_FORMAT_INSTRUCTION: str = """
 ---
 [强制输出格式 - 必须严格遵守]
-你必须且只能输出如下 JSON，禁止在 JSON 之外输出任何内容（包括解释、前言或 Markdown 标题）：
+你必须且只能输出一个 JSON 对象，禁止在 JSON 外输出任何文本。
+绝对禁止输出 Markdown 代码块标记（例如 ```json 或 ```）。
+输出首字符必须是 {，末字符必须是 }。
 
-```json
+必须包含以下字段（键名不可改）：
 {
-  "result": "<你的完整主要输出内容，支持换行>",
-  "summary": "<不超过80字的核心摘要，后续节点将直接读取此字段>",
-  "confidence": <0.0到1.0之间的浮点数，表示输出质量置信度>,
+  "result": "你的完整主要输出内容（字符串，可换行）",
+  "summary": "不超过80字的核心摘要",
+  "confidence": 0.95,
   "metadata": {}
 }
-```
 ---"""
 
 # 单次流水线执行契约：适用于所有节点，约束“不可等待用户回复、必须继续交付”。
@@ -189,14 +190,22 @@ PLAN_OUTPUT_SCHEMA: str = """{
   "agents": [
     {
       "node_id": "<唯一蛇形命名标识，如 literature_review>",
+      "node_type": "<agent 或 tool 或 user>",
       "role": "<该 Agent 的角色名称>",
       "expertise": "<专长简述>",
-      "system_prompt": "<该 Agent 的完整角色 system prompt，不含输出格式约束>",
-      "subtask": "<该节点需要完成的具体子任务描述>",
+      "system_prompt": "<agent 节点必填：该 Agent 的完整角色 system prompt，不含输出格式约束>",
+      "subtask": "<agent 节点必填：该节点需要完成的具体子任务描述>",
       "output_schema": {
         "result": "<主要输出内容描述>",
         "summary": "<摘要描述>"
       },
+      "tool_name": "<tool 节点必填：如 arxiv_search>",
+      "tool_input": "<tool 节点必填：建议使用模板 ${metadata.<node_id>.result}>",
+      "prompt_template": "<user 节点必填：给用户的提问文本，可使用模板变量>",
+      "input_schema": "<user 节点可选：例如 {\"type\":\"text\"} 或 {\"type\":\"single_choice\",\"options\":[...]} >",
+      "validation": "<user 节点可选：例如 {\"required\":true,\"min_length\":3}>",
+      "default_value": "<user 节点可选：无有效输入时使用>",
+      "write_to": "<user 节点可选：写入 metadata 的路径，如 user_feedback.confirm>",
       "depends_on": ["<依赖的前置节点 node_id，无依赖则为空数组>"]
     }
   ],
