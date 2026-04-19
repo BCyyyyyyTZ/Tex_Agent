@@ -1,0 +1,144 @@
+{
+  "description": "挑战流2：风险门控 + 策略重排",
+  "test_question": "我想在8周内完成“教育领域LLM应用”的论文初稿，给我一个可执行且能控风险的阶段计划。",
+  "nodes": [
+    {
+      "node_id": "task_decomposer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是任务分解节点。目标是把高层目标拆成可执行阶段与里程碑，禁止等待式追问。",
+        "subtask": "将用户任务拆成阶段里程碑，至少包含：选题、方法、数据、写作、校对五类工作。",
+        "depends_on": [],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "baseline_evidence",
+      "node_type": "tool",
+      "tool_name": "arxiv_search",
+      "config": {
+        "tool_input": "${metadata.query_refiner.result}",
+        "depends_on": [
+          "query_refiner"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "query_refiner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 arXiv 查询改写节点。你必须把上游阶段计划压缩为高质量英文检索式。",
+        "subtask": "严格只输出一行英文检索字符串（3-12个关键词）。仅保留可检索学术主题词；可使用 AND/OR 与括号；禁止中文、禁止解释性文本、禁止编号与换行。",
+        "depends_on": [
+          "task_decomposer"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "risk_assessor",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是风险评估节点。必须从方法、数据、时间、复现性四个维度识别风险并给出缓解策略。",
+        "subtask": "对阶段计划做风险评分草案，输出高风险点清单和每项风险的应对动作。",
+        "depends_on": [
+          "baseline_evidence"
+        ],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "risk_tolerance_gate",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请输入你的风险容忍度（1~5，1=非常保守，5=非常激进）。若不确定可输入 3。",
+        "input_schema": {
+          "type": "single_choice",
+          "options": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5"
+          ]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "3",
+        "write_to": "user_feedback.risk_tolerance",
+        "depends_on": [
+          "risk_assessor"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "strategy_adjuster",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是策略调整节点。你必须根据 user_feedback.risk_tolerance 的值动态调整计划激进程度。",
+        "subtask": "当容忍度<=2时给保守版；=3给平衡版；>=4给激进版。输出调整后的周计划和资源分配建议。",
+        "depends_on": [
+          "risk_tolerance_gate"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_response_builder",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。你必须输出可执行方案，并解释与基线方案相比的关键变化。",
+        "subtask": "给出最终8周计划，并单独列出“相对基线方案的3项关键调整”。",
+        "depends_on": [
+          "strategy_adjuster"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "task_decomposer",
+      "to_node": "query_refiner",
+      "condition": null
+    },
+    {
+      "from_node": "query_refiner",
+      "to_node": "baseline_evidence",
+      "condition": null
+    },
+    {
+      "from_node": "baseline_evidence",
+      "to_node": "risk_assessor",
+      "condition": null
+    },
+    {
+      "from_node": "risk_assessor",
+      "to_node": "risk_tolerance_gate",
+      "condition": null
+    },
+    {
+      "from_node": "risk_tolerance_gate",
+      "to_node": "strategy_adjuster",
+      "condition": null
+    },
+    {
+      "from_node": "strategy_adjuster",
+      "to_node": "final_response_builder",
+      "condition": null
+    }
+  ]
+}
