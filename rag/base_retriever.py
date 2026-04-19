@@ -124,6 +124,24 @@ class BaseRetriever(ABC):
             f"{type(self).__name__} 未实现 list_stored_page"
         )
 
+    @abstractmethod
+    def delete_by_ids(self, ids: list[str]) -> int:
+        """
+        按 Chroma 存储 id 删除若干条 chunk（幂等：不存在的 id 忽略）。
+        Args:
+            ids: 文档片段 id 列表（与 list_stored_page 返回的 StoredChunkRecord.id 一致）。
+        Returns:
+            实际删除的条数（以底层库返回值或成功删除计数为准）。
+        """
+        raise NotImplementedError
+    def delete_by_source(self, source: str) -> int:
+        """
+        删除 metadata 中 source 等于给定值的所有 chunk。
+        默认未实现；ChromaRetriever 可覆盖。不需要按来源删除时可不实现子类。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} 未实现 delete_by_source"
+        )
 
 class BaseRAGPipeline(ABC):
     """
@@ -224,4 +242,13 @@ class BaseRAGPipeline(ABC):
         Raises:
             NotImplementedError: 子类必须实现。
         """
+        raise NotImplementedError
+    
+    @abstractmethod
+    def delete_chunks_by_ids(self, ids: list[str]) -> int:
+        """按向量库中的 chunk id 删除若干条。"""
+        raise NotImplementedError
+    @abstractmethod
+    def delete_by_source(self, source: str) -> int:
+        """删除某一来源（如文件名）下的全部 chunk。"""
         raise NotImplementedError

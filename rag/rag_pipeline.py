@@ -197,3 +197,15 @@ class RAGPipeline(BaseRAGPipeline):
         if getter is None:
             raise NotImplementedError("当前 retriever 不支持 list_stored_page")
         return getter(offset=offset, limit=limit, fetch_fields=fetch_fields)
+
+    def delete_chunks_by_ids(self, ids: list[str]) -> int:
+        n = self._retriever.delete_by_ids(ids)
+        logger.info(f"RAG 按 id 删除: 请求 {len(ids)} 条, 实际删除 {n} 条")
+        return n
+    def delete_by_source(self, source: str) -> int:
+        getter = getattr(self._retriever, "delete_by_source", None)
+        if getter is None:
+            raise NotImplementedError("当前 retriever 不支持 delete_by_source")
+        n = getter(source)
+        logger.info(f"RAG 按来源删除: source={source!r}, 删除 {n} 条")
+        return n

@@ -66,6 +66,16 @@ class MockRetriever(BaseRetriever):
     def document_count(self) -> int:
         return self._doc_count
 
+    def delete_by_ids(self, ids: list[str]) -> int:
+        if not ids:
+            return 0
+        # 若 Mock 没有真实 id 存储，可仅用于满足接口：
+        self._doc_count = max(0, self._doc_count - len(set(ids)))
+        return len(set(ids))
+    def delete_by_source(self, source: str) -> int:
+        # 占位：与 delete_by_ids 类似，或 return 0
+        return 0
+
     def list_stored_page(
         self,
         offset: int = 0,

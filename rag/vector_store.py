@@ -172,6 +172,31 @@ class ChromaRetriever(BaseRetriever):
         """返回当前集合中存储的文档片段数量。"""
         return self._collection.count()
 
+    def delete_by_ids(self, ids: list[str]) -> int:
+        """按 id 批量删除；空列表返回 0。"""
+        if not ids:
+            return 0
+        # 去重且去掉空串
+        uniq = list({str(i).strip() for i in ids if str(i).strip()})
+        if not uniq:
+            return 0
+        # Chroma: delete 不存在的 id 通常不报错
+        self._collection.delete(ids=uniq)
+        return len(uniq)
+    def delete_by_source(self, source: str) -> int:
+        """删除 metadata.source == source 的所有记录。"""
+        if not source:
+            return 0
+        raw = self._collection.get(
+            where={"source": source},
+            include=[],
+        )
+        id_list = list(raw.get("ids") or [])
+        if not id_list:
+            return 0
+        self._collection.delete(ids=id_list)
+        return len(id_list)
+
     def list_stored_page(
         self,
         offset: int = 0,

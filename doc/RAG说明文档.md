@@ -388,22 +388,42 @@ python rag/rag_index_cli.py a.md b.tex   # 直接指定文件
 
 
 + 交互浏览（TTY 下）：默认每页 5 条；w 上一页、s 下一页、e / Esc / q 退出:
-    ```bash
+```bash
     python -m rag.rag_list_cli
-    ```
+```
 + 只打印一页到 stdout 后退出
-    ```bash
+```bash
     python -m rag.rag_list_cli --dump
-    ```
+```
 + 从指定偏移开始的一页；控制每页条数（不超过 5）
-    ```bash
+```bash
     python -m rag.rag_list_cli --dump --offset 5 --limit 5
-    ```
+```
 
 用标志位组合控制拉取与展示内容：加上 --metadata 可看 source、chunk_idx 等；加上 --document 可看该块正文节选
 
 ```bash
 python -m rag.rag_list_cli --metadata --document
+```
+
+### 向量数据库删除
+
+目前支持按id删除和按resource删除的操作：
+
+```bash
+# 查看可选命令
+python rag/rag_delete_cli.py --help
+
+# 按id删除一条或多条记录
+# 建议通过 rag.rag_list_cli 先查看好需要删除的id，再删除
+python rag/rag_delete_cli.py --ids <uuid1> <uuid2> ...
+
+# 按来源名删整文件产生的 chunk
+python rag/rag_delete_cli.py --source <文件名或字符串>
+
+# 整个库的清空
+# 必须同时带 --yes，防止误删
+python rag/rag_delete_cli.py --clear-all --yes
 ```
 
 ### Docling 解析
