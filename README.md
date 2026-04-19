@@ -59,7 +59,7 @@ python main.py
 
 ##### 3. workflow/nodes.py 节点执行逻辑
 
-当前动态节点统一使用 `make_generic_agent_node()`：
+当前动态节点统一使用 `make_agent_node()`：
 - 从节点配置读取 `system_prompt/subtask/depends_on`
 - 统一注入 JSON 输出约束
 - 解析结构化输出并写入 `state["metadata"]`
@@ -126,7 +126,7 @@ TeX_Agent/
 │
 ├── workflow/                     # 工作流编排模块（LangGraph）
 │   ├── graph_builder.py         # ✅ 统一动态构图入口（registry -> nodes/edges -> build_dynamic_graph）
-│   ├── nodes.py                 # ✅ 通用动态节点工厂 make_generic_agent_node
+│   ├── nodes.py                 # ✅ 通用动态节点工厂 make_agent_node
 │   ├── workflow_registry.py     # ✅ 工作流注册加载器
 │   └── workflow_parser.py       # [扩展] 解析用户 YAML/JSON 配置，动态组装 Graph 节点
 │
@@ -210,7 +210,7 @@ main.py  →  TeXAgentCLI.run_task / run_plan_task
                ▼
        build_dynamic_graph(nodes, edges)
                │
-        make_generic_agent_node()
+        make_agent_node()
                │
     SimpleAgent.run()  →  LLM  →  AgentMessage
                │

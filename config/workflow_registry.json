@@ -7,6 +7,26 @@
     "five_nodes_demo": {
       "type": "file",
       "path": "config/workflow_five_nodes_example.json"
+    },
+    "tool_linear_demo": {
+      "type": "file",
+      "path": "config/workflow_tool_linear_demo.json"
+    },
+    "user_feedback_demo": {
+      "type": "file",
+      "path": "config/workflow_user_feedback_demo.json"
+    },
+    "challenge_evidence_choice": {
+      "type": "file",
+      "path": "config/workflow_challenge_evidence_choice.json"
+    },
+    "challenge_risk_gate": {
+      "type": "file",
+      "path": "config/workflow_challenge_risk_gate.json"
+    },
+    "challenge_double_user": {
+      "type": "file",
+      "path": "config/workflow_challenge_double_user.json"
     }
   }
 }

@@ -6,7 +6,7 @@
 
 - `task`：读取工作流注册表中的静态配置（默认是 `config/workflow_default_dynamic.json`），直接构图执行。
 - `plan`：先由 PlanAgent 生成节点配置（`system_prompt/subtask/depends_on`），再转成动态图执行。
-- 共同点：两条链路最终都走 `workflow/nodes.py` 的 `make_generic_agent_node()` 进行统一拼接，因此很多“公共注入”是共享的。
+- 共同点：两条链路最终都走 `workflow/nodes.py` 的 `make_agent_node()` 进行统一拼接，因此很多“公共注入”是共享的。
 
 ## 2. 入口与构图位置
 

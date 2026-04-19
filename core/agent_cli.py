@@ -91,7 +91,19 @@ class TeXAgentCLI:
             workflow_name=target_name,
             context_manager=self.context,
             persona_memory=self.persona_memory,
+            human_input_provider=self._human_input_provider,
         )
+
+    def _human_input_provider(self, prompt: str, schema: Dict[str, Any], rules: Dict[str, Any]) -> Any:
+        """
+        默认的人类输入提供器，可被替换/注入以支持 GUI、Web、测试桩。
+        """
+        _ = rules
+        print(f"\n🙋 用户节点请求: {prompt}")
+        options = schema.get("options", []) if isinstance(schema, dict) else []
+        if isinstance(options, list) and options:
+            print(f"   可选项: {options}")
+        return input("   请输入反馈: ")
 
     def _execute_with_app(self, user_input: str, app: Any, workflow_label: str) -> dict:
         """
@@ -211,6 +223,7 @@ class TeXAgentCLI:
             edges,
             context_manager=self.context,
             persona_memory=self.persona_memory,
+            human_input_provider=self._human_input_provider,
         )
         result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
 

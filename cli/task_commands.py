@@ -2,7 +2,8 @@
 """
 任务执行命令
 """
-from typing import Any
+from typing import Optional, Tuple
+import shlex
 from cli.commands import Command
 from utils.display import display
 
@@ -14,18 +15,68 @@ class TaskCommand(Command):
         super().__init__(
             name="task",
             description="执行任务（支持默认/指定工作流）",
-            usage="task <任务描述>"
+            usage="task [-wf 工作流名] [-b 分支名] <任务描述>"
         )
+
+    def _parse_task_args(self, args: str) -> Tuple[Optional[str], Optional[str], str]:
+        """
+        解析 task 命令参数。
+        支持：
+          -wf / --wf / --workflow <name>
+          -b  / --branch <name>
+        返回：(workflow_name, branch_name, task_text)
+        """
+        tokens = shlex.split(args)
+        workflow_name: Optional[str] = None
+        branch_name: Optional[str] = None
+        task_tokens = []
+
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok in ("-wf", "--wf", "--workflow"):
+                if i + 1 >= len(tokens):
+                    raise ValueError("参数错误：-wf/--workflow 后缺少工作流名称")
+                workflow_name = tokens[i + 1].strip()
+                i += 2
+                continue
+            if tok in ("-b", "--branch"):
+                if i + 1 >= len(tokens):
+                    raise ValueError("参数错误：-b/--branch 后缺少分支名称")
+                branch_name = tokens[i + 1].strip()
+                i += 2
+                continue
+            task_tokens.append(tok)
+            i += 1
+
+        task_text = " ".join(task_tokens).strip()
+        return workflow_name, branch_name, task_text
     
     def execute(self, args: str, cli) -> bool:
         if not args.strip():
             print("❌ 请提供任务描述")
             print("   示例1: task 请帮我写一篇关于 Transformer 的论文引言")
-            print("   示例2: task --wf report_flow 帮我写摘要")
+            print("   示例2: task -wf report_flow 帮我写摘要")
             return True
-        
+
+        try:
+            workflow_name, branch_name, task_text = self._parse_task_args(args)
+        except ValueError as e:
+            print(f"❌ {e}")
+            print("   用法: task [-wf 工作流名] [-b 分支名] <任务描述>")
+            return True
+
+        if not task_text:
+            print("❌ 请提供任务描述")
+            print("   用法: task [-wf 工作流名] [-b 分支名] <任务描述>")
+            return True
+
         print("\n" + display.separator())
-        result = cli.run_task(args.strip())
+        result = cli.run_task(
+            task_text,
+            branch=branch_name,
+            workflow_name=workflow_name,
+        )
         print(display.separator())
         
         display.print_result(result)

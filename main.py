@@ -2,6 +2,7 @@
 TeX_Agent 程序主入口
 """
 import sys
+import shlex
 from core.agent_cli import TeXAgentCLI
 from utils.display import display
 
@@ -10,27 +11,34 @@ def parse_task_args(raw_args: str):
     """
     解析 task 参数，支持：
     - task <prompt>
+    - task -wf <workflow_name> <prompt>
     - task --wf <workflow_name> <prompt>
+    - task --workflow <workflow_name> <prompt>
+    - task -wf=<workflow_name> <prompt>
     - task --wf=<workflow_name> <prompt>
     """
     args = raw_args.strip()
     if not args:
         return None, ""
 
-    tokens = args.split()
+    tokens = shlex.split(args)
     if not tokens:
         return None, ""
 
-    # 格式：--wf=name xxx
-    if tokens[0].startswith("--wf="):
-        workflow_name = tokens[0].split("=", 1)[1].strip()
+    first = tokens[0]
+    wf_prefixes = ("-wf=", "--wf=", "--workflow=")
+    wf_flags = ("-wf", "--wf", "--workflow")
+
+    # 格式：-wf=name / --wf=name / --workflow=name
+    if any(first.startswith(prefix) for prefix in wf_prefixes):
+        workflow_name = first.split("=", 1)[1].strip()
         task = " ".join(tokens[1:]).strip()
         return workflow_name or None, task
 
-    # 格式：--wf name xxx
-    if tokens[0] == "--wf":
+    # 格式：-wf name / --wf name / --workflow name
+    if first in wf_flags:
         if len(tokens) < 2:
-            raise ValueError("参数格式错误：--wf 后需要指定工作流名称")
+            raise ValueError("参数格式错误：-wf/--wf/--workflow 后需要指定工作流名称")
         workflow_name = tokens[1].strip()
         task = " ".join(tokens[2:]).strip()
         return workflow_name or None, task
