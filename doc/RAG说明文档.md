@@ -334,11 +334,29 @@ pipeline.is_ready() 检查是否有准备好的知识库 -> pipeline.retrieve(in
 
 #### 向量库持久化路径说明
 
-RAG_PERSIST_DIR ↔ rag_persist_directory
+RAG_PERSIST_DIR -- rag_persist_directory
 
 目前的环境变量是默认在项目根目录下的`./knowledge_base`路径
 
 在`settings.py`中添加了对路径转化为绝对路径的解析函数，相对路径可以转化成绝对路径而直接使用
+
+### Docling 文档解析
+
+> 目录：rag/docling_parse.py 与 tools/docling_tool.py
+
+#### 定位与分工
+- **`docling_parse.py`**：底层「单次解析」——把本地文档交给 Docling，写出 `document.md`、`document.json` 及资源目录；不关心是否曾被解析过。
+- **`docling_tool.py`**：对外 **Tool**——在相同落盘规则下，增加 **按文件名复用已有输出** 的策略，减少重复跑 Docling。
+
+#### 设计思路
+1. **落盘结构**：在解析根目录（默认 `doc/parsed_doc`，见配置）下创建子目录 `{净化后的源文件名}_{Unix时间戳}`，避免多次解析互相覆盖。
+2. **设备选择**：PDF 可根据配置在 **CPU 默认管线** 与 **CUDA 线程化 PDF 管线** 间切换；非 PDF 仍走 Docling 的默认格式处理。与「输出路径」无关，GPU/CPU 写入同一套目录逻辑。
+3. **大 PDF**：先按页数做路由（阈值见环境变量）；旁路相关能力在代码中预留，当前以默认管线为主。
+4. **Tool 层缓存**：`redo=False`（默认）时，在解析根目录下查找 **目录名前缀** 与「当前源文件 stem 经同样规则净化后」一致、且已有 **非空** `document.md` / `document.json` 的子目录；命中则 **直接返回路径**，不再次调用 Docling。`redo=True` 时 **始终重新解析**。
+
+#### 对外约定（接口层面）
+- 库函数返回 **`DoclingParseResult`**：含是否成功、`output_dir`、`markdown_path`、`json_path`、`artifacts_dir`、错误信息及路由/页数等观测字段。
+- Tool 返回 **`ToolResult`**：人类可读说明在 **`output`**；机器好用字段在 **`metadata`**（如 `markdown_path`、`json_path`、`from_cache`、`redo` 等）。
 
 ---
 
@@ -384,23 +402,56 @@ python rag/rag_index_cli.py a.md b.tex   # 直接指定文件
 
 用标志位组合控制拉取与展示内容：加上 --metadata 可看 source、chunk_idx 等；加上 --document 可看该块正文节选
 
-``bash
+```bash
 python -m rag.rag_list_cli --metadata --document
 ```
+
+### Docling 解析
+
+> 目录：rag/docling_parse.py
+
++ 命令行直接调用文档解析工具：
+
+  ```bash
+    python rag/docling_parse.py <源文件路径> [-o 输出根目录]
+  ```
+
+  > 不传 `-o` 时使用配置中的解析根目录，目前是`Tex_Agent\doc\parsed_doc`
+
+
++ 代码调用：
+
+  ```python
+  from rag.docling_parse import parse_document_to_dir
+  
+  parse_document_to_dir(source, [output_root])
+
+### Docling 解析：Tool
+
+> 目录：tools/docling_tool.py
+
+- **工具名**：`docling_parse`（已加入 `tools/tool_list.py`）。
+- **参数**：  
+  - `doc_path`（必填）：待解析文件路径。  
+  - `redo`（可选，默认 `False`）：`True` 强制重新解析；`False` 时优先命中缓存。
+- **Python 直接调用**：
+  ```python
+  DoclingParseTool().run(doc_path="...", redo=False)
+  ```
+  检查 `ToolResult.success` 与 `metadata` 中的路径字段，如果非redo且命中就直接复用现有结果
 
 ---
 
 ## 未来实现方向
 
-### 现在已经具备这些“可用底座”：
+### 近期优化目标
 
-+ rag/rag_pipeline.py：有 index_text/index_file/retrieve 端到端管道
-+ rag/document_loader.py：有基础分块（字符窗口）
-+ rag/vector_store.py：有 Chroma 向量检索器
-+ workflow/nodes.py：有 retrieve 节点可接入图
-+ core/state.py：有 retrieved_context 字段可贯穿后续节点
-
-所以你可以把重点放在：检索质量、证据组织、写作任务适配。
+- [ ] docling解析工具对大pdf的支持（目前思路是分块解析+拼接）
+- [ ] RAG库封装入tool
+- [ ] RAG库的删除单项操作
+- [ ] RAG库方法优化：支持markdown文件按标题和段落chunk，而非纯字符数
+- [ ] RAG库方法优化：支持tex文件按标题和段落chunk，而非纯字符数（可能考虑解析tex的方法？）
+- [ ] RAG库多层次设计
 
 ### 按实现难度从易到难的 RAG 功能建议（面向论文写作）
 
