@@ -47,3 +47,5 @@ logs/
 # ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
 output/
 memory_store/
+# RAG 工具集成测试落盘输出（本地查看用）
+tests/test_rag/_rag_tool_output/

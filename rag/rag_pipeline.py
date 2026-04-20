@@ -14,9 +14,9 @@ RAGPipeline 是 BaseRAGPipeline 的具体实现，整合了：
   - 配置通过 config/settings.py 统一管理，不硬编码在此文件
   - retriever 通过构造函数注入，方便单元测试时替换为 MockRetriever
 """
-from typing import Optional
+from typing import List, Optional
 
-from rag.base_retriever import BaseRAGPipeline, BaseRetriever
+from rag.base_retriever import BaseRAGPipeline, BaseRetriever, RetrievedDocument
 from rag.document_loader import chunk_text, load_and_chunk
 from config.settings import settings
 from utils.logger import get_logger
@@ -169,6 +169,16 @@ class RAGPipeline(BaseRAGPipeline):
             for i, d in enumerate(docs)
         ]
         return "\n\n---\n\n".join(parts)
+
+    def retrieve_documents(self, query: str, k: Optional[int] = None) -> List[RetrievedDocument]:
+        """
+        检索与查询相关的文档片段，返回结构化列表（不做 Prompt 格式化）。
+        供工具层等需要 JSON/自定义展示的场景使用；embedding 与 top-k 逻辑与 retrieve() 一致。
+        """
+        if not self.is_ready():
+            return []
+        actual_k = k if k is not None else settings.rag_top_k
+        return self._retriever.retrieve(query, k=actual_k)
 
     def is_ready(self) -> bool:
         """知识库中有索引内容时返回 True。"""
