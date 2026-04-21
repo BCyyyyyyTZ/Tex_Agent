@@ -21,6 +21,9 @@ pytest-asyncio>=0.21.0
 
 # PDF 处理依赖
 pymupdf>=1.24.0
+# file_loading_tool 读取 PDF / Word（按需导入；未安装时仍可启动 plan 等不读 PDF 的流程）
+PyPDF2>=3.0.0
+python-docx>=1.1.0
 
 # 文档解析工具
 docling>=2.0

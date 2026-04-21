@@ -1,8 +1,12 @@
 """
-[扩展] MASPlanner 多智能体系统规划器接口定义。
-预留主控引擎的任务分解、Agent 分配与执行验证接口。
+MASPlanner 多智能体系统规划器（v2）。
 
-TODO: 开发者 D 负责实现此类（第二阶段任务，建议与 BaseRouter 配合使用）
+Breaking Change v2：
+  - 移除 PlanAgent prompt 中"图必须是严格单链/禁止并行"约束
+  - _analyze_plan_topology 支持并行拓扑（parallel_fork/join 节点不计入"非法分支"）
+  - _local_topology_issues 允许合法的并行分叉
+  - Supervisor 审查规则覆盖并行 / 条件边有效性检查
+  - PLAN_OUTPUT_SCHEMA 从 planner_config 导入（v2 版本支持并行）
 """
 import json
 import uuid
@@ -12,7 +16,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
-    # 仅用于类型提示，运行时不导入，避免与 workflow 层产生循环依赖
     from workflow.workflow_parser import NodeConfig, EdgeConfig
     from router.base_router import BaseRouter
 
@@ -23,14 +26,13 @@ class TaskPlan:
     多 Agent 任务执行计划数据结构。
 
     Attributes:
-        plan_id: 计划唯一标识符。
-        original_task: 原始用户任务描述文本。
-        subtasks: 分解后的子任务描述列表（自然语言）。
-        assigned_agents: 子任务与 Agent 的分配映射
-                         {subtask_index: agent_name}。
-        status: 计划状态（"pending" / "running" / "done" / "failed"）。
-        created_at: 计划创建的 UTC 时间戳。
-        results: 各子任务的执行结果列表（与 subtasks 对应）。
+        plan_id:        计划唯一标识符
+        original_task:  原始用户任务描述
+        subtasks:       分解后的 node_id 有序列表
+        assigned_agents:{node_id: agent_spec} + "__edges__" + "__entry__" 特殊键
+        status:         计划状态（pending / running / done / failed）
+        created_at:     创建时间
+        results:        各子任务执行结果
     """
 
     plan_id: str
@@ -43,132 +45,31 @@ class TaskPlan:
 
 
 class MASPlanner(ABC):
-    """
-    [扩展] 多智能体系统规划器抽象基类。
-
-    功能规划：
-        1. 任务分解（Task Decomposition）：
-           将用户的复杂任务分解为可并行或串行的子任务列表
-        2. 任务分配（Task Assignment）：
-           将子任务分配给最合适的 Agent（配合 BaseRouter 使用）
-        3. 执行监控（Execution Monitoring）：
-           追踪各子任务的执行状态，处理失败重试
-        4. 结果验证（Result Validation）：
-           验证子任务结果是否满足质量要求
-
-    适用场景：复杂的多 Agent 协同任务，如：
-        用户任务："帮我写论文的 Introduction 章节"
-        分解为：
-          - subtask_1 → DesignAgent：规划 Introduction 结构
-          - subtask_2 → ArxivSearchTool：检索背景文献
-          - subtask_3 → ExecuteAgent：撰写 Introduction 草稿
-          - subtask_4 → ReflectionAgent：润色与优化
-
-    TODO: 开发者 D 实现建议：
-          - decompose() 使用 LLM 进行任务分解，输出结构化的子任务列表
-          - assign() 配合 BaseRouter.evaluate_complexity() 选择合适 Agent
-          - validate() 使用 LLM 评估结果质量，决定是否需要重试
-    """
+    """多智能体系统规划器抽象基类。"""
 
     @abstractmethod
     def decompose(self, task: str) -> TaskPlan:
-        """
-        将复杂任务分解为子任务计划。
-
-        Args:
-            task: 原始用户任务描述字符串。
-
-        Returns:
-            包含子任务列表的 TaskPlan 对象（subtasks 已填充，status="pending"）。
-
-        Raises:
-            NotImplementedError: 子类必须实现。
-        """
         raise NotImplementedError
 
     @abstractmethod
     def assign(self, plan: TaskPlan, available_agents: List[str]) -> TaskPlan:
-        """
-        为计划中的每个子任务分配合适的 Agent。
-
-        Args:
-            plan: 待分配的 TaskPlan（subtasks 已填充）。
-            available_agents: 当前可用的 Agent 名称列表。
-
-        Returns:
-            填充了 assigned_agents 字典的 TaskPlan。
-
-        Raises:
-            NotImplementedError: 子类必须实现。
-        """
         raise NotImplementedError
 
     @abstractmethod
     def validate(self, plan: TaskPlan, results: List[str]) -> bool:
-        """
-        验证子任务执行结果是否满足质量要求。
-
-        Args:
-            plan: 原始任务计划（含任务描述和分配信息）。
-            results: 各子任务的执行结果列表（与 plan.subtasks 对应）。
-
-        Returns:
-            True 表示所有结果满足要求，可进入整合阶段；
-            False 表示结果不满足要求，需要重试或调整策略。
-
-        Raises:
-            NotImplementedError: 子类必须实现。
-        """
         raise NotImplementedError
 
     def to_graph_config(
         self,
         plan: "TaskPlan",
     ) -> "Tuple[List[NodeConfig], List[EdgeConfig]]":
-        """
-        [扩展] 将 MASPlanner 生成的 TaskPlan 翻译为图拓扑配置。
-
-        这是 MASPlanner 与 WorkflowParser 之间的"协议转换器"，
-        填补任务规划层与图构建层之间缺失的翻译环节。
-
-        典型调用链（未来）：
-            plan          = planner.decompose(task)
-            plan          = planner.assign(plan, available_agents)
-            nodes, edges  = planner.to_graph_config(plan)   ← 此方法
-            app           = parser.build_graph(nodes, edges)
-
-        翻译规则（实现建议）：
-          - plan.subtasks[i]        → NodeConfig(node_id=f"step_{i}", ...)
-          - plan.assigned_agents[i] → NodeConfig.agent_name
-          - 串行依赖                → EdgeConfig(from_node="step_i",
-                                                  to_node="step_{i+1}")
-          - 含 "validate"/"reflect" → EdgeConfig(condition="state['validated']")
-            的校验类子任务            带条件边，支持质量不达标时的回环重试
-
-        Args:
-            plan: 已填充 subtasks 和 assigned_agents 的 TaskPlan 实例。
-
-        Returns:
-            (nodes, edges) 元组，可直接传入 WorkflowParser.build_graph()。
-
-        Raises:
-            NotImplementedError: 子类实现前调用时抛出。
-        """
         raise NotImplementedError(
-            "to_graph_config() 尚未实现，"
-            "请由开发者 D 在 MASPlanner 子类中完成此翻译逻辑。"
+            "to_graph_config() 尚未实现，请在 MASPlanner 子类中完成。"
         )
-
-    # TODO: 未来增加 monitor(plan_id) 接口，实时追踪计划执行状态
-    # TODO: 未来增加 replan(plan, failed_subtask_idx) 接口，
-    #       当子任务失败时动态调整执行计划
-    # TODO: 未来增加 aggregate(plan, results) 接口，
-    #       整合所有子任务结果生成最终答案
 
 
 # ============================================================
 # 从 config/planner_config.py 统一导入常量与工具函数
-# 调参只需修改 config/planner_config.py，无需改动此业务文件
 # ============================================================
 from config.planner_config import (
     PLANNER_TEMPERATURE,
@@ -191,31 +92,19 @@ _SUPERVISOR_FALLBACK: Dict[str, Any] = {
     "revised_entry_node": "",
 }
 
+# 合法的 node_type 集合（v2 新增 parallel_fork / parallel_join）
+_VALID_NODE_TYPES = frozenset({
+    "agent", "tool", "user", "parallel_fork", "parallel_join"
+})
 
-# ============================================================
-# [实现] AutoAgentsMASPlanner 具体类
-# ============================================================
 
 class AutoAgentsMASPlanner(MASPlanner):
     """
-    基于 AutoAgents 论文思路的多智能体规划器具体实现。
+    基于 AutoAgents 论文思路的多智能体规划器（v2）。
 
-    规划流程（PlanAgent + Supervisor 多轮迭代）：
-        Round 1  : PlanAgent（LLM）生成初始专家 Agent 列表 + 图拓扑
-        Round 2～N: Supervisor（LLM）审查并修订，直到 approved=true 或达到 max_plan_rounds
-
-    与 BaseRouter 的集成（预留接口）：
-        assign() 方法是 BaseRouter 的接入点：
-          - router=None（当前）：使用 _infer_complexity() 关键词规则推断复杂度，
-            再通过 COMPLEXITY_AGENT_MAP 映射到 Agent 类型，默认均为 SimpleAgent。
-          - router 已实现（未来）：调用 router.evaluate_complexity() 获取复杂度标签，
-            或升级为 router.route() 直接获取 RouteDecision（含 agent 实例）。
-            届时只需修改 assign() 内部逻辑，planner 其余部分不受影响。
-
-    NodeConfig.agent_name 字段约定：
-        to_graph_config() 将 assigned_agents[node_id]["agent_type"] 写入
-        NodeConfig.agent_name，build_dynamic_graph() 据此从 AGENT_REGISTRY
-        实例化对应类型的 Agent（SimpleAgent / ReActAgent / PlanAndSolveAgent）。
+    规划流程：
+        Round 1  : PlanAgent（LLM）生成初始 Agent 列表 + 图拓扑
+        Round 2～N: Supervisor（LLM）审查并修订，直到通过或达到 max_plan_rounds
     """
 
     def __init__(
@@ -224,27 +113,11 @@ class AutoAgentsMASPlanner(MASPlanner):
         max_plan_rounds: int = MAX_PLAN_ROUNDS_DEFAULT,
         router: Optional["BaseRouter"] = None,
     ):
-        """
-        Args:
-            model:           PlanAgent 和 Supervisor 使用的 LLM 模型名称。
-                             None（默认）时自动读取 config/settings.py 的 settings.llm_model，
-                             即 .env 文件中的 LLM_MODEL 变量，与全局其他 Agent 保持一致。
-                             显式传入时覆盖全局设置（用于单独测试某个模型）。
-            max_plan_rounds: PlanAgent ↔ Supervisor 最大迭代轮数（含第一轮生成）。
-            router:          BaseRouter 实例（可选）。
-                             ┌─ None（默认）：assign() 使用关键词规则推断复杂度。
-                             └─ 已实现时传入：assign() 调用 router.evaluate_complexity()
-                                评估每个节点子任务复杂度，再映射到 Agent 类型。
-                             NOTE: BaseRouter 完整实现后建议始终传入此参数以启用
-                                   智能路由，届时每个节点可获得最适合的 Agent 架构。
-        """
         from langchain_openai import ChatOpenAI
         from config.settings import settings
 
-        # model 未指定时，与全局 Agent 使用同一个模型（统一从 .env 的 LLM_MODEL 读取）
         self.model = model or settings.llm_model
         self.max_plan_rounds = max_plan_rounds
-        # [BaseRouter 预留接口] 存储 router 实例，assign() 中按需调用
         self.router: Optional["BaseRouter"] = router
         self._llm = ChatOpenAI(
             model=self.model,
@@ -260,61 +133,38 @@ class AutoAgentsMASPlanner(MASPlanner):
     def decompose(self, task: str) -> TaskPlan:
         """
         PlanAgent + Supervisor 多轮迭代生成 TaskPlan。
-
-        执行步骤：
-          1. PlanAgent LLM 调用 → 生成初始 agent 规格列表和图拓扑（JSON）
-          2. 循环 max_plan_rounds-1 次：
-             a. Supervisor LLM 调用 → 审查 agent 列表
-             b. approved=True → 提前退出
-             c. approved=False → 用 revised_agents 替换 agents，继续迭代
-          3. 将最终 plan_json 打包为 TaskPlan 返回
-
-        TaskPlan 字段约定（与抽象接口兼容）：
-          subtasks       : List[str]，按执行顺序排列的 node_id 列表
-          assigned_agents: Dict[node_id, agent_spec]，完整 agent 规格字典
-                           （assign() 会在其中追加 agent_type / complexity 字段）
         """
         from utils.logger import get_logger
         logger = get_logger(__name__)
 
         logger.info(f"[AutoAgentsPlanner] 开始规划任务：{task[:80]}...")
 
-        # Round 1：PlanAgent 生成初始方案
         plan_json = self._plan_agent_call(task)
 
-        # Round 2～N：Supervisor 迭代审查
         prev_supervisor: Optional[Dict[str, Any]] = None
         for round_idx in range(1, self.max_plan_rounds):
             supervisor_result = self._supervisor_call(
-                task,
-                plan_json,
-                round_idx=round_idx,
-                prev_supervisor=prev_supervisor,
+                task, plan_json, round_idx=round_idx, prev_supervisor=prev_supervisor,
             )
             prev_supervisor = supervisor_result
             reject_reasons = self._collect_supervisor_reject_reasons(
-                task=task,
-                plan_json=plan_json,
-                supervisor_result=supervisor_result,
+                task=task, plan_json=plan_json, supervisor_result=supervisor_result,
             )
             if not reject_reasons:
-                logger.info(f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查通过 "
-                            f"(score={supervisor_result.get('quality_score', '?')})")
+                logger.info(
+                    f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查通过 "
+                    f"(score={supervisor_result.get('quality_score', '?')})"
+                )
                 break
             logger.info(
-                f"[AutoAgentsPlanner] Supervisor 第 {round_idx} 轮审查未通过，"
-                f"issues={reject_reasons}"
+                f"[AutoAgentsPlanner] 第 {round_idx} 轮未通过: {reject_reasons}"
             )
             supervisor_result["issues"] = reject_reasons
             self._apply_supervisor_revisions(plan_json, supervisor_result)
 
         agents: List[Dict] = plan_json.get("agents", [])
-        # subtasks 保存有序 node_id 列表（执行顺序由 entry_node + edges 决定，
-        # 此处简化为 agents 出现顺序，to_graph_config 会重建边）
         subtasks = [a["node_id"] for a in agents]
-        # assigned_agents 存储完整规格，assign() 和 to_graph_config() 均读取此字段
         agent_specs: Dict[str, Any] = {a["node_id"]: dict(a) for a in agents}
-        # 将顶层 edges 也存入，供 to_graph_config() 构建 EdgeConfig
         agent_specs["__edges__"] = plan_json.get("edges", [])
         agent_specs["__entry__"] = plan_json.get("entry_node", subtasks[0] if subtasks else "")
 
@@ -328,18 +178,7 @@ class AutoAgentsMASPlanner(MASPlanner):
 
     def assign(self, plan: TaskPlan, available_agents: List[str]) -> TaskPlan:
         """
-        为计划中每个节点确定 Agent 类型，并将结果写回 assigned_agents。
-
-        [BaseRouter 预留接口] 路由优先级：
-          1. self.router 已注入 → router.evaluate_complexity(msg) 评估复杂度
-             （未来可升级为 router.route(msg) 直接返回 RouteDecision）
-          2. self.router 为 None → _infer_complexity() 关键词规则推断
-          3. 任何异常 → 兜底 "SimpleAgent"
-
-        写入字段（追加到 assigned_agents[node_id]）：
-          agent_type  : str  — Agent 类名（对应 build_dynamic_graph 中的 AGENT_REGISTRY）
-          complexity  : str  — "simple" / "medium" / "complex"
-          route_source: str  — "BaseRouter" / "rule" / "fallback"
+        为计划中每个节点确定 Agent 类型，写回 assigned_agents。
         """
         from utils.logger import get_logger
         logger = get_logger(__name__)
@@ -349,37 +188,20 @@ class AutoAgentsMASPlanner(MASPlanner):
             if spec is None:
                 continue
             node_type = str(spec.get("node_type", "agent")).strip().lower()
-            if node_type in ("tool", "user"):
+            if node_type in ("tool", "user", "parallel_fork"):
                 spec["route_source"] = f"{node_type}_node"
                 continue
-            subtask_text = spec.get("subtask", node_id)
 
-            # --- [BaseRouter 预留接口] ---
-            # 当前阶段：仅 SimpleAgent 已实现，直接固定使用。
+            agent_type = "SimpleAgent"
+            complexity = "simple"
+            route_source = "hardcoded"
+
             if self.router is not None:
-                # NOTE: 未来升级点——解注释以下代码以启用 BaseRouter 路由
-                # try:
-                #     from core.message import AgentMessage
-                #     msg = AgentMessage(role="user", content=subtask_text)
-                #     complexity = self.router.evaluate_complexity(msg)
-                #     route_source = "BaseRouter"
-                # except Exception as e:
-                #     logger.warning(f"[Planner] BaseRouter 路由失败({e})，回退规则推断")
-                #     complexity = self._infer_complexity(subtask_text)
-                #     route_source = "fallback"
-                agent_type = "SimpleAgent"
-                complexity = "simple"
                 route_source = "BaseRouter(暂用SimpleAgent)"
-            else:
-                # 当前唯一可用 Agent，待其他 Agent 实现后移除此硬编码
-                agent_type = "SimpleAgent"
-                complexity = "simple"
-                route_source = "hardcoded"
 
             spec["agent_type"] = agent_type
             spec["complexity"] = complexity
             spec["route_source"] = route_source
-
             logger.info(
                 f"[Planner] 节点 '{node_id}' → {agent_type} "
                 f"(复杂度={complexity}, 来源={route_source})"
@@ -388,13 +210,6 @@ class AutoAgentsMASPlanner(MASPlanner):
         return plan
 
     def validate(self, plan: TaskPlan, results: List[str]) -> bool:
-        """
-        调用 LLM 对所有子任务结果进行整体质量验证。
-
-        Returns:
-            True  → 所有结果满足要求，可进入整合阶段。
-            False → 结果不满足要求，需要重试或调整策略。
-        """
         results_text = "\n".join(
             f"节点 {node_id}（{plan.assigned_agents.get(node_id, {}).get('role', '')}）："
             f"{result[:300]}..."
@@ -413,15 +228,8 @@ class AutoAgentsMASPlanner(MASPlanner):
     def to_graph_config(self, plan: TaskPlan) -> "Tuple[List[NodeConfig], List[EdgeConfig]]":
         """
         将 TaskPlan 翻译为 (List[NodeConfig], List[EdgeConfig])。
-
-        翻译逻辑委托给 workflow/workflow_parser.py 中的独立函数
-        _translate_plan_to_graph_config()，避免重复实现和循环依赖。
-        本方法在翻译完成后额外执行持久化（写 dynamic_workflow.json）。
-
-        副作用：
-          同步将配置序列化到 config/dynamic_workflow.json（供调试 / 文件路径复用）。
+        翻译逻辑委托给 _translate_plan_to_graph_config。
         """
-        # 局部导入避免循环依赖（调用时两模块均已完整加载）
         from workflow.workflow_parser import _translate_plan_to_graph_config
         from utils.logger import get_logger
         logger = get_logger(__name__)
@@ -436,62 +244,50 @@ class AutoAgentsMASPlanner(MASPlanner):
     # ------------------------------------------------------------------
 
     def _plan_agent_call(self, task: str) -> Dict:
-        """Round 1：PlanAgent LLM 调用，生成初始 agent 列表和图结构。"""
+        """Round 1：PlanAgent LLM 调用。"""
         tool_catalog = self._build_tool_catalog_prompt()
         prompt = (
             f"你是多智能体系统规划师（PlanAgent）。\n"
-            f"给定以下任务，请输出一个“高质量、但结构简洁”的执行方案。\n\n"
+            f"给定以下任务，请输出一个高质量的执行方案。\n\n"
             f"任务：{task}\n\n"
             f"可用工具目录（仅可使用以下工具，不得虚构）：\n"
             f"{tool_catalog}\n\n"
             f"规划原则：\n"
-            f"1) 默认按“指导型任务”处理：讲清概念 + 给可执行步骤。\n"
-            f"2) 节点数控制在 2~8 个，根据任务复杂程度选择。\n"
+            f"1) 默认按[指导型任务]处理：讲清概念 + 给可执行步骤。\n"
+            f"2) 节点数控制在 2~10 个，根据任务复杂程度选择。\n"
             f"2.1) node_type='tool' 与 node_type='user' 都是可选能力，默认不强制使用。\n"
-            f"2.2) 仅当“确实能提升结果质量”时才使用 tool 节点；否则使用 agent 节点直接完成。\n"
+            f"2.2) 仅当[确实能提升结果质量]时才使用 tool 节点；否则使用 agent 节点直接完成。\n"
             f"2.3) 若使用 tool 节点，必须包含 node_type='tool'、tool_name、tool_input；"
             f"tool_input 不能为空字符串，优先引用 ${'{metadata.<上游节点>.result}'}，否则使用 ${'{input}'}。\n"
-            f"2.4) 仅当任务存在真实的人类决策点（偏好/取舍/阈值确认）时，才允许插入 user 节点；"
+            f"2.4) 仅当任务存在真实的人类决策点时，才允许插入 user 节点；"
             f"不得把原本应由 agent 完成的分析任务转嫁给用户。\n"
-            f"2.5) 若使用 user 节点，必须包含 node_type='user'、prompt_template，"
-            f"并建议提供 input_schema/validation/default_value。\n"
-            f"2.6) 最终交付节点必须是 agent 节点，不得设置为 user/tool。\n"
-            f"3) 必须包含“最终交付节点”（负责整合并给用户最终行动建议）。\n"
-            f"   最终交付节点必须直接回答原始问题，并给出可执行步骤/示例，禁止仅复述上游摘要。\n"
-            f"4) 除非用户明确要求完整开发与测试，不要引入重型实现/测试流水线。\n"
-            f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n\n"
-            f"6) 每个 agent/tool 节点的 system_prompt/subtask 必须满足“单次流水线执行契约”，"
-            f"严禁等待式追问用户；信息不足时应采用默认假设继续交付。"
-            f"（仅 user 节点允许向用户发起一次明确提问）\n\n"
-            f"单次流水线执行契约（所有节点必须遵守）：\n"
-            f"{SINGLE_TURN_NODE_CONTRACT}\n\n"
-            f"推荐结构（可等价改名）：\n"
-            f"- requirement_clarifier：提炼目标与默认假设（禁止等待用户补充）\n"
-            f"- learning_guide：给分阶段路径、关键风险与实践建议（禁止再次追问）\n"
-            f"- final_response_builder：整合并输出最终行动清单（最终交付节点）\n\n"
-            f"【图结构强制约束 - 必须严格遵守】\n"
-            f"- 图必须是严格的单链（线性序列）：A → B → C → ...\n"
-            f"- 禁止并行分支：每个节点只能有最多一个后继节点\n"
-            f"- edges 中每个 from 值只能出现一次\n"
-            f"- depends_on 中每个节点只能依赖紧邻的上一个节点（最多一个前驱）\n"
-            f"- edges 数量必须恰好等于节点数量减一（n 个节点对应 n-1 条边）\n\n"
+            f"2.5) 最终交付节点必须是 agent 节点，不得设置为 user/tool。\n"
+            f"3) 图结构支持以下模式（可组合）：\n"
+            f"   A) 线性链（默认）：A → B → C，简单任务推荐。\n"
+            f"   B) 并行分叉：使用 parallel_fork + 多条出边 + parallel_join，"
+            f"适合可并行独立分析的子任务（如同时检索文献 + 分析风险）。\n"
+            f"   C) 条件路由：从一个节点出发，根据 metadata 字段值选择不同后继，"
+            f"适合[如果质量够高就直接交付，否则走 review]类场景。\n"
+            f"   并行节点中：parallel_fork 必须包含 parallel_branches 列表；"
+            f"parallel_join 必须包含 source_branches 和 join_policy。\n"
+            f"   条件边格式：edges 中 condition 字段为 "
+            f'{{\"field\": \"metadata.<node_id>.<key>\", \"op\": \"gte\", \"value\": 0.7}}。\n'
+            f"4) 必须包含[最终交付节点]（整合并输出最终可执行步骤给用户）。\n"
+            f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n"
+            f"6) 每个节点必须满足[单次流水线执行契约]：禁止等待式追问用户。\n\n"
+            f"单次流水线执行契约：\n{SINGLE_TURN_NODE_CONTRACT}\n\n"
             f"【输出规范（硬约束）】\n"
-            f"- 必须且只能输出一个合法 JSON 对象，禁止输出任何解释、前言、后记。\n"
+            f"- 必须且只能输出一个合法 JSON 对象，禁止任何解释、前言、后记。\n"
             f"- 绝对禁止 Markdown 代码块标记（例如 ```json / ```）。\n"
             f"- 输出首字符必须是 '{{'，末字符必须是 '}}'。\n"
             f"- 所有键必须使用双引号，禁止尾随逗号，禁止注释。\n"
-            f"- 严格遵循以下 schema 的键名与层级（可填充内容，但不可改结构）：\n"
-            f"{PLAN_OUTPUT_SCHEMA}"
+            f"- 严格遵循以下 schema：\n{PLAN_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
         return parse_llm_json(raw, context="PlanAgent", fallback=dict(_PLAN_FALLBACK))
 
     def _build_tool_catalog_prompt(self) -> str:
-        """
-        构建供 PlanAgent 使用的工具目录说明（名称/功能/输入接口）。
-        """
         from tools.tool_list import tool_list
-
         lines = []
         for tool in tool_list:
             schema = getattr(tool, "input_schema", {}) or {}
@@ -509,7 +305,7 @@ class AutoAgentsMASPlanner(MASPlanner):
         round_idx: int,
         prev_supervisor: Optional[Dict[str, Any]] = None,
     ) -> Dict:
-        """Round 2～N：Supervisor LLM 调用，审查并修订 agent 列表。"""
+        """Round 2～N：Supervisor LLM 调用。"""
         agents = plan_json.get("agents", [])
         topology = self._analyze_plan_topology(plan_json)
         topology_report = self._format_topology_report(topology)
@@ -535,28 +331,27 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"- 上一轮 issues：\n{prev_issues or '无'}\n\n"
             f"审查规则（仅拦截关键硬问题）：\n"
             f"1) 只有在以下情况才拒绝（approved=false）：\n"
-            f"   - 图结构不合法（非单链、边数不匹配、节点引用错误）\n"
-            f"   - 与用户意图明显相反（例如用户问“怎么做”，却输出完整实现+测试流水线）\n"
-            f"   - 节点职责严重冲突或无法执行\n"
-            f"   - 任一节点出现等待式追问用户/把任务抛给用户或下游节点\n"
-            f"2) 轻微优化建议（如时序可更优、措辞可更好）不能作为拒绝理由。\n"
-            f"3) 若 approved=false，必须同时提供 revised_agents + revised_edges + revised_entry_node，且三者一致可运行。\n"
-            f"4) quality_score 使用 1~10 分制；若本轮修复了上一轮关键问题，评分应尽量提高，不应无故下降。\n"
-            f"5) 当评分 >= {SUPERVISOR_MIN_QUALITY_SCORE:.2f} 且不存在关键硬问题时，优先 approved=true。\n\n"
+            f"   - 图结构不合法（节点引用错误、孤立节点、无法到达所有节点）\n"
+            f"   - parallel_fork 缺少 parallel_branches 或 parallel_branches 为空\n"
+            f"   - parallel_join 缺少 source_branches 或 source_branches 为空\n"
+            f"   - 条件边 condition 字段格式非法（必须是 {{field, op, value}} 对象或 null）\n"
+            f"   - 条件边组缺少 fallback（无 condition=null 的兜底边）\n"
+            f"   - 与用户意图明显相反\n"
+            f"   - 任一节点出现等待式追问用户\n"
+            f"   - 最终交付节点（图中最后一个 agent 节点）的 subtask 未要求生成充分详细内容（subtask 应明确要求生成结构化报告/完整答案/可执行方案）\n"
+            f"2) 【软约束 - 影响 quality_score 但不强制拒绝】：\n"
+            f"   - 最终交付节点 subtask 应明确要求 result 包含：完整结构化输出、各章节标题、至少300字内容\n"
+            f"   - 上游若有并行分析节点，最终节点应明确整合所有分支产出\n"
+            f"3) 轻微优化建议不能作为拒绝理由。\n"
+            f"4) 若 approved=false，必须同时提供 revised_agents + revised_edges + revised_entry_node。\n"
+            f"5) quality_score 使用 1~10 分制。\n"
+            f"6) 当评分 >= {SUPERVISOR_MIN_QUALITY_SCORE:.2f} 且不存在关键硬问题时，优先 approved=true。\n\n"
             f"【输出规范（硬约束）】\n"
-            f"- 必须且只能输出一个合法 JSON 对象，禁止输出任何解释、前言、后记。\n"
-            f"- 绝对禁止 Markdown 代码块标记（例如 ```json / ```）。\n"
-            f"- 输出首字符必须是 '{{'，末字符必须是 '}}'。\n"
-            f"- 所有键必须使用双引号，禁止尾随逗号，禁止注释。\n"
-            f"- 严格遵循以下 schema 的键名与层级（可填充内容，但不可改结构）：\n"
-            f"{SUPERVISOR_OUTPUT_SCHEMA}"
+            f"- 必须且只能输出一个合法 JSON 对象，禁止任何解释、前言、后记。\n"
+            f"- 严格遵循以下 schema：\n{SUPERVISOR_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
-        return parse_llm_json(
-            raw,
-            context="Supervisor",
-            fallback=dict(_SUPERVISOR_FALLBACK),
-        )
+        return parse_llm_json(raw, context="Supervisor", fallback=dict(_SUPERVISOR_FALLBACK))
 
     def _collect_supervisor_reject_reasons(
         self,
@@ -575,8 +370,6 @@ class AutoAgentsMASPlanner(MASPlanner):
                 f"Supervisor 分数过低({score_val:.2f} < {SUPERVISOR_MIN_QUALITY_SCORE:.2f})"
             )
 
-        # 仅在 Supervisor 明确拒绝时，才把 issues 作为拒绝原因；
-        # 否则 issues 仅作为改进建议，不应阻断通过。
         if not approved:
             issues = supervisor_result.get("issues", [])
             if isinstance(issues, list):
@@ -588,9 +381,9 @@ class AutoAgentsMASPlanner(MASPlanner):
         reasons.extend(self._local_topology_issues(plan_json))
         reasons.extend(self._local_intent_issues(task, plan_json))
         reasons.extend(self._local_single_turn_contract_issues(plan_json))
-        # 去重保序
+
         out: List[str] = []
-        seen = set()
+        seen: set = set()
         for r in reasons:
             if r not in seen:
                 seen.add(r)
@@ -598,30 +391,44 @@ class AutoAgentsMASPlanner(MASPlanner):
         return out
 
     def _local_topology_issues(self, plan_json: Dict[str, Any]) -> List[str]:
+        """
+        本地拓扑校验（v2）：
+        - 允许并行分叉（parallel_fork 节点可有多个后继）
+        - 检查 parallel_fork / parallel_join 必填字段
+        - 检查条件边 fallback
+        """
         issues: List[str] = []
         topology = self._analyze_plan_topology(plan_json)
+
         if not topology["has_valid_agents"]:
             issues.append("规划中 agents 为空或格式错误")
             return issues
         if not topology["has_valid_edges"]:
             issues.append("规划中 edges 不是数组")
             return issues
-        if not topology["edge_count_ok"]:
-            issues.append(
-                f"边数不匹配：当前 {topology['n_edges']}，应为 {topology['expected_edges']}"
-            )
-        multi_from = topology["parallel_nodes"]
-        if multi_from:
-            issues.append(f"存在并行后继节点：{multi_from}")
-        dangling = topology["dangling_nodes"]
+
+        # 孤立节点（无法到达）
+        unreachable = topology.get("unreachable_nodes", [])
+        if unreachable:
+            issues.append(f"存在无法从入口到达的孤立节点：{unreachable}")
+
+        # 非法并行节点缺字段
+        for msg in topology.get("parallel_issues", []):
+            issues.append(msg)
+
+        # 条件边组缺 fallback
+        for msg in topology.get("condition_issues", []):
+            issues.append(msg)
+
+        # 孤悬节点引用
+        dangling = topology.get("dangling_nodes", [])
         if dangling:
             issues.append(f"edges 引用了不存在节点：{dangling}")
+
         return issues
 
     def _local_intent_issues(self, task: str, plan_json: Dict[str, Any]) -> List[str]:
-        """
-        本地守门：当用户任务偏“答疑/解释”时，拦截明显“实现+测试”导向的规划。
-        """
+        """拦截意图偏移（答疑任务 → 实现+测试流水线）。"""
         issues: List[str] = []
         task_l = task.lower()
         consult_like = any(k in task for k in ["解答", "讲解", "说明", "分析", "怎么做", "如何", "步骤"]) or any(
@@ -653,9 +460,7 @@ class AutoAgentsMASPlanner(MASPlanner):
         return issues
 
     def _local_single_turn_contract_issues(self, plan_json: Dict[str, Any]) -> List[str]:
-        """
-        本地守门：拦截违反单次流水线契约的节点文案（等待式追问/任务外抛）。
-        """
+        """拦截违反单次流水线契约的节点文案。"""
         issues: List[str] = []
         agents = plan_json.get("agents", [])
         if not isinstance(agents, list):
@@ -673,6 +478,9 @@ class AutoAgentsMASPlanner(MASPlanner):
             if not isinstance(agent, dict):
                 continue
             node_id = str(agent.get("node_id", "")).strip() or "unknown_node"
+            node_type = str(agent.get("node_type", "agent")).lower()
+            if node_type in ("parallel_fork",):
+                continue  # fork 节点无业务文案，跳过契约检查
             text = " ".join(
                 str(agent.get(k, "")) for k in ("system_prompt", "subtask", "role")
             ).lower()
@@ -687,7 +495,6 @@ class AutoAgentsMASPlanner(MASPlanner):
             score_val = float(score)
         except (TypeError, ValueError):
             return 0.0
-        # 兼容旧输出：若返回 0~1，则自动换算到 1~10 分制
         if 0.0 <= score_val <= 1.0:
             return score_val * 10.0
         return score_val
@@ -708,24 +515,41 @@ class AutoAgentsMASPlanner(MASPlanner):
             plan_json["entry_node"] = revised_entry
 
     def _analyze_plan_topology(self, plan_json: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        分析规划拓扑（v2：支持并行 / 条件边）。
+
+        Breaking Change v2：
+          - parallel_fork 节点允许多个后继（不算"非法并行"）
+          - 检查 parallel_fork / parallel_join 必填字段
+          - 检查条件边组是否有 fallback（condition=null 的边）
+        """
         agents = plan_json.get("agents", [])
         edges = plan_json.get("edges", [])
         has_valid_agents = isinstance(agents, list) and bool(agents)
         has_valid_edges = isinstance(edges, list)
-        n_nodes = len(agents) if isinstance(agents, list) else 0
-        n_edges = len(edges) if isinstance(edges, list) else 0
-        expected_edges = max(0, n_nodes - 1)
 
         node_ids: set = set()
+        node_types: Dict[str, str] = {}
+        parallel_forks: set = set()
+        parallel_joins: set = set()
+
         if isinstance(agents, list):
             for a in agents:
                 if isinstance(a, dict):
-                    node_id = str(a.get("node_id", "")).strip()
-                    if node_id:
-                        node_ids.add(node_id)
+                    nid = str(a.get("node_id", "")).strip()
+                    if nid:
+                        node_ids.add(nid)
+                        nt = str(a.get("node_type", "agent")).lower()
+                        node_types[nid] = nt
+                        if nt == "parallel_fork":
+                            parallel_forks.add(nid)
+                        elif nt == "parallel_join":
+                            parallel_joins.add(nid)
 
         from_counts: Dict[str, int] = {}
         dangling_nodes: set = set()
+        condition_groups: Dict[str, List[Any]] = {}  # from_node → list of edge dicts
+
         if isinstance(edges, list):
             for e in edges:
                 if not isinstance(e, dict):
@@ -736,75 +560,164 @@ class AutoAgentsMASPlanner(MASPlanner):
                     from_counts[frm] = from_counts.get(frm, 0) + 1
                     if node_ids and frm not in node_ids:
                         dangling_nodes.add(frm)
+                    condition_groups.setdefault(frm, []).append(e)
                 if to and node_ids and to not in node_ids:
                     dangling_nodes.add(to)
 
-        parallel_nodes = [k for k, v in from_counts.items() if v > 1]
+        # 非法并行：非 parallel_fork 节点有多个后继
+        illegal_parallel: List[str] = [
+            k for k, v in from_counts.items()
+            if v > 1 and k not in parallel_forks
+        ]
+
+        # BFS 可达性检查
+        entry_node = plan_json.get("entry_node", "")
+        if not entry_node and node_ids:
+            to_nodes: set = set()
+            if isinstance(edges, list):
+                for e in edges:
+                    if isinstance(e, dict):
+                        to_nodes.add(str(e.get("to", "")))
+            entry_candidates = [n for n in (list(node_ids)) if n not in to_nodes]
+            entry_node = entry_candidates[0] if entry_candidates else next(iter(node_ids))
+
+        adj: Dict[str, List[str]] = {}
+        if isinstance(edges, list):
+            for e in edges:
+                if isinstance(e, dict):
+                    frm = str(e.get("from", ""))
+                    to = str(e.get("to", ""))
+                    if frm and to:
+                        adj.setdefault(frm, []).append(to)
+
+        visited: set = set()
+        queue = [entry_node] if entry_node else []
+        while queue:
+            cur = queue.pop(0)
+            visited.add(cur)
+            for nxt in adj.get(cur, []):
+                if nxt not in visited:
+                    queue.append(nxt)
+        unreachable = sorted(node_ids - visited)
+
+        # parallel_fork / parallel_join 必填字段检查
+        parallel_issues: List[str] = []
+        if isinstance(agents, list):
+            for a in agents:
+                if not isinstance(a, dict):
+                    continue
+                nid = str(a.get("node_id", ""))
+                nt = str(a.get("node_type", "agent")).lower()
+                if nt == "parallel_fork":
+                    branches = a.get("parallel_branches", [])
+                    if not isinstance(branches, list) or not branches:
+                        parallel_issues.append(
+                            f"parallel_fork 节点 '{nid}' 缺少非空 parallel_branches 列表"
+                        )
+                elif nt == "parallel_join":
+                    src = a.get("source_branches", [])
+                    if not isinstance(src, list) or not src:
+                        parallel_issues.append(
+                            f"parallel_join 节点 '{nid}' 缺少非空 source_branches 列表"
+                        )
+                    jp = str(a.get("join_policy", "all_success"))
+                    from config.planner_config import JOIN_POLICY_VALUES
+                    if jp not in JOIN_POLICY_VALUES:
+                        parallel_issues.append(
+                            f"parallel_join 节点 '{nid}' 的 join_policy='{jp}' 非法，"
+                            f"合法值: {JOIN_POLICY_VALUES}"
+                        )
+
+        # 条件边组 fallback 检查
+        condition_issues: List[str] = []
+        for frm, group in condition_groups.items():
+            has_any_condition = any(
+                isinstance(e.get("condition"), dict) for e in group
+            )
+            if has_any_condition:
+                has_fallback = any(
+                    e.get("condition") is None or e.get("condition") == "" for e in group
+                )
+                if not has_fallback:
+                    condition_issues.append(
+                        f"节点 '{frm}' 的条件边组缺少 fallback（需要一条 condition=null 的边）"
+                    )
+
         return {
             "has_valid_agents": has_valid_agents,
             "has_valid_edges": has_valid_edges,
-            "n_nodes": n_nodes,
-            "n_edges": n_edges,
-            "expected_edges": expected_edges,
-            "edge_count_ok": n_edges == expected_edges,
-            "parallel_nodes": parallel_nodes,
+            "n_nodes": len(node_ids),
+            "n_edges": len(edges) if isinstance(edges, list) else 0,
+            "illegal_parallel_nodes": illegal_parallel,
             "dangling_nodes": sorted(dangling_nodes),
+            "unreachable_nodes": unreachable,
+            "parallel_issues": parallel_issues,
+            "condition_issues": condition_issues,
+            "parallel_forks": sorted(parallel_forks),
+            "parallel_joins": sorted(parallel_joins),
         }
 
     def _format_topology_report(self, topology: Dict[str, Any]) -> str:
-        parallel_nodes = topology["parallel_nodes"]
-        dangling_nodes = topology["dangling_nodes"]
-        parallel_desc = (
-            "✅ 无"
-            if not parallel_nodes
-            else f"❌ 以下节点有多个后继（并行），必须修正：{parallel_nodes}"
-        )
-        dangling_desc = (
-            "✅ 合法"
-            if not dangling_nodes
-            else f"❌ 引用了不存在节点：{dangling_nodes}"
-        )
-        return (
-            f"\n【图结构自动检测报告】\n"
-            f"  节点数：{topology['n_nodes']}，边数：{topology['n_edges']}，"
-            f"线性链期望边数：{topology['expected_edges']}\n"
-            f"  边数检查：{'✅ 正确' if topology['edge_count_ok'] else '❌ 不符（存在缺失或多余的边）'}\n"
-            f"  并行分支：{parallel_desc}\n"
-            f"  节点引用：{dangling_desc}\n"
-        )
+        illegal = topology.get("illegal_parallel_nodes", [])
+        dangling = topology.get("dangling_nodes", [])
+        unreachable = topology.get("unreachable_nodes", [])
+        parallel_forks = topology.get("parallel_forks", [])
+        parallel_joins = topology.get("parallel_joins", [])
+        parallel_issues = topology.get("parallel_issues", [])
+        condition_issues = topology.get("condition_issues", [])
+
+        lines = [
+            f"\n【图结构自动检测报告】",
+            f"  节点数：{topology['n_nodes']}，边数：{topology['n_edges']}",
+            f"  并行分叉节点：{parallel_forks or '无'}",
+            f"  并行汇聚节点：{parallel_joins or '无'}",
+            f"  非法多后继（非 parallel_fork）：{'✅ 无' if not illegal else '❌ ' + str(illegal)}",
+            f"  孤悬节点引用：{'✅ 合法' if not dangling else '❌ ' + str(dangling)}",
+            f"  不可达节点：{'✅ 无' if not unreachable else '❌ ' + str(unreachable)}",
+        ]
+        if parallel_issues:
+            lines.append(f"  并行节点缺字段：❌ {parallel_issues}")
+        if condition_issues:
+            lines.append(f"  条件边缺 fallback：❌ {condition_issues}")
+        return "\n".join(lines)
 
     def _call_llm(self, prompt: str) -> str:
-        """统一 LLM 调用入口，返回纯文本响应字符串。"""
         from langchain_core.messages import HumanMessage
         response = self._llm.invoke([HumanMessage(content=prompt)])
         return response.content if hasattr(response, "content") else str(response)
 
     def _persist_config(self, plan: TaskPlan, nodes: List, edges: List) -> None:
-        """
-        将规划结果序列化到 config/dynamic_workflow.json（调试 / 文件路径复用）。
-        写入失败不影响主流程（异常静默处理）。
-        """
+        """将规划结果序列化到 config/dynamic_workflow.json（调试用）。"""
         import os
         from utils.logger import get_logger
         logger = get_logger(__name__)
 
         config_data: Dict = {
-            "plan_id":      plan.plan_id,
+            "plan_id": plan.plan_id,
             "original_task": plan.original_task,
-            "entry_node":   plan.assigned_agents.get("__entry__",
-                            plan.subtasks[0] if plan.subtasks else ""),
+            "entry_node": plan.assigned_agents.get(
+                "__entry__", plan.subtasks[0] if plan.subtasks else ""
+            ),
             "nodes": [
                 {
-                    "node_id":    n.node_id,
-                    "node_type":  n.node_type,
+                    "node_id": n.node_id,
+                    "node_type": n.node_type,
                     "agent_name": n.agent_name,
-                    "tool_name":  n.tool_name,
-                    "config":     n.config,
+                    "tool_name": n.tool_name,
+                    "config": n.config,
+                    "parallel_branches": n.parallel_branches,
+                    "join_policy": n.join_policy,
+                    "source_branches": n.source_branches,
                 }
                 for n in nodes
             ],
             "edges": [
-                {"from_node": e.from_node, "to_node": e.to_node, "condition": e.condition}
+                {
+                    "from_node": e.from_node,
+                    "to_node": e.to_node,
+                    "condition": e.condition.to_dict() if e.condition else None,
+                    "priority": e.priority,
+                }
                 for e in edges
             ],
         }

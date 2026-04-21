@@ -1,0 +1,41 @@
+{
+  "description": "file_loading 工具测试：加载并分析项目配置文件",
+  "test_question": "分析 workflow 配置文件的设计质量",
+  "nodes": [
+    {
+      "node_id": "file_loader",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "E:\\agent_ai\\main_work_version2\\Tex_Agent-main\\config\\workflow_parallel_conditional_demo.json",
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "structure_analyzer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位工作流架构分析专家，擅长评估 LangGraph 工作流配置的设计质量、节点逻辑和边路由的合理性。",
+        "subtask": "分析以下 workflow 配置文件，评估：\n1. 节点类型分布（agent/tool/user/parallel_fork/parallel_join 各多少个）\n2. 图拓扑结构（是否有并行分支、条件边）\n3. 节点依赖关系是否合理\n4. parallel_join 的 join_policy 设置是否恰当\n5. 条件边的 field/op/value 设计是否科学\n\n【输出格式 - 必须严格遵守，输出纯 JSON，不加任何其他文字】：\n{\"result\": \"详细分析（含各维度评分和说明）\", \"summary\": \"workflow 设计评分：X/10\", \"confidence\": 0.88}",
+        "depends_on": ["file_loader"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "improvement_suggester",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位 LangGraph 工作流优化专家，擅长识别工作流设计中的潜在问题并提出具体可操作的改进建议。",
+        "subtask": "基于以上结构分析，提出 workflow 的改进建议：\n1. 列出3-5个可以改进的具体方面（每条建议含：问题描述 + 改进方案 + 预期效果）\n2. 评估当前设计的最大优点（1-2个）\n3. 如果需要新增节点，说明新节点的类型和职责\n4. 对提示词（system_prompt/subtask）给出优化建议\n\n【输出格式 - 必须严格遵守，输出纯 JSON，不加任何其他文字】：\n{\"result\": \"改进建议详情（分条列举）\", \"summary\": \"提出X条改进建议，优先级最高的是Y\", \"confidence\": 0.90}",
+        "depends_on": ["structure_analyzer"],
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "file_loader",         "to_node": "structure_analyzer",    "condition": null},
+    {"from_node": "structure_analyzer",  "to_node": "improvement_suggester",  "condition": null}
+  ]
+}

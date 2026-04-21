@@ -1,0 +1,99 @@
+{
+  "nodes": [
+    {
+      "node_id": "prepare_context",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文检查任务入口节点。你的职责是从用户输入中抽取论文文档路径，并构造稳定、可执行的检查上下文。你不执行工具，只输出结构化准备结果。",
+        "subtask": "从用户输入中抽取待检查论文路径（优先识别 .pdf/.docx/.md/.txt 绝对或相对路径），并输出检查准备结果。若无法可靠识别路径，result 中明确说明“未识别到文档路径”，metadata.doc_path 置空字符串。metadata.checklist_path 固定为 thesis-checklists.md。",
+        "depends_on": [],
+        "temperature": 0.2,
+        "history_mode": "full"
+      }
+    },
+    {
+      "node_id": "parse_thesis_doc",
+      "node_type": "tool",
+      "tool_name": "docling_parse",
+      "config": {
+        "tool_input": "${metadata.prepare_context.metadata.doc_path}",
+        "depends_on": [
+          "prepare_context"
+        ],
+        "history_mode": "minimal",
+        "tool_trace_template": "[TOOL_NODE]\nnode={node_id}\ntool={tool_name}\ndoc_path={payload}"
+      }
+    },
+    {
+      "node_id": "load_checklist",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "${metadata.prepare_context.metadata.checklist_path}",
+        "depends_on": [
+          "prepare_context"
+        ],
+        "history_mode": "minimal",
+        "tool_trace_template": "[TOOL_NODE]\nnode={node_id}\ntool={tool_name}\nfile_path={payload}"
+      }
+    },
+    {
+      "node_id": "checklist_review",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文中期检查评审节点。请严格依据 checklist 逐项核验，结论必须有证据依据。若某项证据不足，要明确标注“证据不足”，不要臆断。",
+        "subtask": "读取上游两个工具节点结果：1) 文档解析输出（含 markdown/json 路径和摘要），2) thesis checklist 文本。按 checklist 一级主题进行核验，输出“通过/风险/证据不足”三类结论，并给出每类的证据片段或定位线索。若解析失败，先给出失败原因与修复建议，再给可继续执行的最小检查框架。",
+        "depends_on": [
+          "parse_thesis_doc",
+          "load_checklist"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_delivery",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。你的输出是给学生/导师看的中期检查报告，必须可执行、可追踪。",
+        "subtask": "将 checklist_review 的核验结果整理为最终报告，固定包含：A) 总体结论（高/中/低风险）；B) 逐项问题清单（问题、证据、影响、建议修复动作）；C) 优先级执行计划（P0/P1/P2）；D) 若文档解析失败，给出重跑步骤与替代方案。禁止只复述上游摘要。",
+        "depends_on": [
+          "checklist_review"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "prepare_context",
+      "to_node": "parse_thesis_doc",
+      "condition": null
+    },
+    {
+      "from_node": "prepare_context",
+      "to_node": "load_checklist",
+      "condition": null
+    },
+    {
+      "from_node": "parse_thesis_doc",
+      "to_node": "checklist_review",
+      "condition": null
+    },
+    {
+      "from_node": "load_checklist",
+      "to_node": "checklist_review",
+      "condition": null
+    },
+    {
+      "from_node": "checklist_review",
+      "to_node": "final_delivery",
+      "condition": null
+    }
+  ]
+}

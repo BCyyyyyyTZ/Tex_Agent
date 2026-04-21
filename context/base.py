@@ -6,7 +6,7 @@ BaseContext：上下文模块抽象基类。
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
-from core.message import AgentMessage
+from core.message import WorkflowMessage
 
 if TYPE_CHECKING:
     # 仅用于类型提示，避免循环导入
@@ -18,7 +18,7 @@ class BaseContext(ABC):
     上下文模块标准接口基类。
 
     定义了所有上下文实现必须支持的基础操作：
-    - save:   存储一条 AgentMessage 到上下文
+    - save:   存储一条 WorkflowMessage 到上下文
     - load:   检索消息历史
     - clear:  清空上下文
     - build:  (可选) GSSC 上下文构建流水线，用于聚合多源数据生成 LLM Prompt
@@ -30,12 +30,12 @@ class BaseContext(ABC):
     """
 
     @abstractmethod
-    def save(self, message: AgentMessage) -> None:
+    def save(self, message: WorkflowMessage) -> None:
         """
         存储一条消息到上下文。
 
         Args:
-            message: 需要存储的 AgentMessage 对象。
+            message: 需要存储的 WorkflowMessage 对象。
 
         Raises:
             TypeError: 传入对象类型不正确时抛出。
@@ -44,7 +44,7 @@ class BaseContext(ABC):
         pass
 
     @abstractmethod
-    def load(self, limit: Optional[int] = None) -> List[AgentMessage]:
+    def load(self, limit: Optional[int] = None) -> List[WorkflowMessage]:
         """
         检索消息历史。
 
@@ -52,7 +52,7 @@ class BaseContext(ABC):
             limit: 返回最近的 N 条消息（按时间正序返回）。None 表示返回全部。
 
         Returns:
-            AgentMessage 列表（按时间正序排列，最旧的在前）。
+            WorkflowMessage 列表（按时间正序排列，最旧的在前）。
         """
         pass
 
@@ -96,6 +96,7 @@ class BaseContext(ABC):
         parts = []
         for msg in messages:
             role = getattr(msg, "role", "unknown").upper()
-            agent = getattr(msg, "agent_name", "sys")
-            parts.append(f"[{role} | {agent}] {msg.content}")
+            source_type = getattr(msg, "source_type", "system")
+            source_id = getattr(msg, "source_id", "sys")
+            parts.append(f"[{role} | {source_type}:{source_id}] {msg.content}")
         return "\n".join(parts)

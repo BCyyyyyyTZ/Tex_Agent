@@ -1,0 +1,91 @@
+{
+  "description": "arXiv 研究助手：tool(arxiv_search) + user 节点综合测试",
+  "test_question": "大语言模型推理能力研究",
+  "nodes": [
+    {
+      "node_id": "topic_collector",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请输入您想研究的论文主题（中英文均可，例如：大语言模型推理、RAG检索增强生成）：",
+        "input_schema": {
+          "type": "text"
+        },
+        "validation": {
+          "required": true,
+          "min_length": 3
+        },
+        "default_value": "large language model reasoning",
+        "write_to": "user_input.topic",
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "query_refiner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一个 arXiv 文献检索专家，擅长将中文研究主题转化为精准的英文检索词组合，以获得最相关的学术论文。",
+        "subtask": "将用户输入的研究主题转化为适合 arXiv 检索的英文关键词组合。\n\n严格要求：\n1. 关键词必须是英文\n2. 关键词数量：恰好 3 个（不多不少），用空格分隔\n3. 选择 arXiv 学术领域的核心技术术语，避免过于宽泛的词\n4. result 字段只包含这 3 个英文关键词，不包含任何其他文字\n\n例：用户输入「大语言模型推理」→ result 应为 \"large language model reasoning\"\n例：用户输入「图神经网络」→ result 应为 \"graph neural network\"",
+        "depends_on": ["topic_collector"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "arxiv_search_node",
+      "node_type": "tool",
+      "tool_name": "arxiv_search",
+      "config": {
+        "tool_input": "${metadata.query_refiner.result}",
+        "depends_on": ["query_refiner"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "paper_analyzer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位资深学术分析专家，擅长快速筛选和分析 arXiv 论文，提炼每篇论文的核心创新点和学术价值。",
+        "subtask": "分析以下 arXiv 检索结果，完成：\n1. 从结果中筛选出最相关的3-5篇论文\n2. 总结每篇论文的：标题、核心贡献（1-2句话）、方法创新点\n3. 给出综合判断：该领域的研究热点和最新进展\n\n【输出格式 - 必须严格遵守，输出纯 JSON，不加任何其他文字】：\n{\"result\": \"详细分析内容（含论文列表+核心贡献+研究趋势）\", \"summary\": \"共筛选X篇论文，研究热点为Y\", \"confidence\": 0.9}",
+        "depends_on": ["arxiv_search_node"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "user_quality_gate",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "【论文分析结果】\n${metadata.paper_analyzer.result}\n\n---\n请评价以上分析结果的质量：",
+        "input_schema": {
+          "type": "single_choice",
+          "options": ["非常满意，直接生成报告", "基本满意，生成报告", "需要补充更多论文"]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "基本满意，生成报告",
+        "write_to": "user_feedback.quality_rating",
+        "depends_on": ["paper_analyzer"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_reporter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位顶级研究综述撰写专家，擅长将论文检索和分析结果整合成结构清晰、逻辑严密的学术研究报告。",
+        "subtask": "基于论文检索结果和分析，生成一份完整的研究综述报告。\n\n报告结构：\n1. **研究背景**（2-3句，说明该领域重要性）\n2. **检索方法**（使用的关键词，检索到的论文数）\n3. **主要论文介绍**（按重要性列出3-5篇，每篇含：标题、核心贡献、创新方法）\n4. **研究趋势**（3个最重要的技术趋势）\n5. **阅读建议**（推荐阅读顺序和理由）\n\n【输出格式 - 必须严格遵守，输出纯 JSON，不加任何其他文字】：\n{\"result\": \"完整报告正文（Markdown格式，含各章节标题）\", \"summary\": \"研究综述报告：覆盖X篇论文，聚焦Y个研究方向\", \"confidence\": 0.92}",
+        "depends_on": ["paper_analyzer", "user_quality_gate"],
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "topic_collector",   "to_node": "query_refiner",       "condition": null},
+    {"from_node": "query_refiner",     "to_node": "arxiv_search_node",   "condition": null},
+    {"from_node": "arxiv_search_node", "to_node": "paper_analyzer",      "condition": null},
+    {"from_node": "paper_analyzer",    "to_node": "user_quality_gate",   "condition": null},
+    {"from_node": "user_quality_gate", "to_node": "final_reporter",      "condition": null}
+  ]
+}

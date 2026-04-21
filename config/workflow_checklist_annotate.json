@@ -1,0 +1,152 @@
+{
+  "_comment": "论文 Checklist 检查 + PDF 自动注释 workflow (googlelenet.pdf 示例)\n流程：docling 解析 → 并行多维度检查 → 格式化注释列表 → pdf_comment 工具写入 → 最终报告",
+  "nodes": [
+    {
+      "node_id": "parse_paper",
+      "node_type": "tool",
+      "tool_name": "docling_parse",
+      "config": {
+        "tool_input": {
+          "doc_path": "doc/googlelenet.pdf",
+          "redo": false,
+          "md_preview_chars": 6000
+        },
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "load_checklist",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "doc/thesis-checklists.md",
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "fork_checkers",
+      "node_type": "parallel_fork",
+      "parallel_branches": ["abstract_checker", "structure_checker", "language_checker", "figure_checker"],
+      "config": {
+        "depends_on": ["parse_paper", "load_checklist"]
+      }
+    },
+    {
+      "node_id": "abstract_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文摘要质量检查专家。你的职责是依据 thesis checklist 中【摘要检查列表】对论文摘要进行逐项核验。",
+        "subtask": "请依据 load_checklist 输出的 checklist 中【摘要检查列表】部分，对 parse_paper 解析的论文摘要进行逐项核验。\n\n输出要求：\n- result 字段输出 JSON 数组，每项 {\"page_idx\": 1, \"text\": \"要高亮的原文片段（英文，来自论文）\", \"comment\": \"[摘要] 具体问题说明\"}\n- 只输出有问题的条目，最多 5 条，text 必须是论文中真实存在的英文片段\n- summary 字段用中文总结摘要检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "structure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文章节结构质量检查专家。你的职责是依据 thesis checklist 中【章节组织检查列表】和【绪论检查列表】对论文结构进行逐项核验。",
+        "subtask": "请依据 load_checklist 输出的 checklist 中【章节组织】和【绪论】部分，对 parse_paper 解析的论文结构进行逐项核验。\n\n输出要求：\n- result 字段输出 JSON 数组，每项 {\"page_idx\": <整数,从1开始>, \"text\": \"要高亮的原文片段\", \"comment\": \"[结构] 具体问题说明\"}\n- 只输出有问题的条目，最多 5 条，text 必须是论文中真实存在的片段\n- summary 字段用中文总结结构检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "language_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是学术论文语言规范检查专家。你的职责是依据 thesis checklist 中【通用规则】对论文语言表达进行逐项核验（术语一致性、标点规范、逻辑连贯等）。",
+        "subtask": "请依据 load_checklist 输出的 checklist 中【通用规则】部分，对 parse_paper 解析的论文语言规范进行核验。\n\n输出要求：\n- result 字段输出 JSON 数组，每项 {\"page_idx\": <整数,从1开始>, \"text\": \"要高亮的原文片段\", \"comment\": \"[语言] 具体问题说明\"}\n- 只输出有问题的条目，最多 5 条，text 必须是论文中真实存在的片段\n- summary 字段用中文总结语言规范检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "figure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文图表与参考文献质量检查专家。你的职责是依据 thesis checklist 中【图表与算法检查列表】和【参考文献检查列表】进行逐项核验。",
+        "subtask": "请依据 load_checklist 输出的 checklist 中【图表与算法】和【参考文献】部分，对 parse_paper 解析的论文进行核验。\n\n输出要求：\n- result 字段输出 JSON 数组，每项 {\"page_idx\": <整数,从1开始>, \"text\": \"要高亮的原文片段\", \"comment\": \"[图表/引用] 具体问题说明\"}\n- 只输出有问题的条目，最多 5 条，text 必须是论文中真实存在的片段\n- summary 字段用中文总结图表/引用检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "join_checkers",
+      "node_type": "parallel_join",
+      "source_branches": ["abstract_checker", "structure_checker", "language_checker", "figure_checker"],
+      "join_policy": "all_success",
+      "config": {
+        "depends_on": ["abstract_checker", "structure_checker", "language_checker", "figure_checker"]
+      }
+    },
+    {
+      "node_id": "annotation_formatter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 PDF 注释格式化专家。你的职责是将多个上游检查节点输出的 JSON 注释数组合并、去重，并确保每条注释的格式正确。",
+        "subtask": "将 abstract_checker、structure_checker、language_checker、figure_checker 四个节点输出的注释数组合并为一个完整的 JSON 数组。\n\n要求：\n1. result 字段必须是纯 JSON 数组（不含其他文字），格式：[{\"page_idx\": int, \"text\": str, \"comment\": str}, ...]\n2. 合并所有来源的注释，去除重复条目（page_idx 和 text 相同视为重复）\n3. 按 page_idx 升序排列\n4. 每条 comment 保留来源标签（如 [摘要]、[结构]、[语言]、[图表/引用]）\n5. 若某个上游节点的 result 无效（非 JSON 数组），跳过该来源并在 summary 中注明\n6. summary 字段用中文概述：共合并了多少条注释，来自哪些检查维度",
+        "depends_on": ["join_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "pdf_annotator",
+      "node_type": "tool",
+      "tool_name": "pdf_comment",
+      "config": {
+        "tool_input": {
+          "pdf_path": "doc/googlelenet.pdf",
+          "annotations": "${metadata.annotation_formatter.result}",
+          "output_path": "doc/googlelenet_checklist_annotated.pdf"
+        },
+        "depends_on": ["annotation_formatter"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_report",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终报告撰写节点。你的职责是将所有检查结论整合为一份面向作者的结构化检查报告，必须具有可执行性。",
+        "subtask": "根据 abstract_checker、structure_checker、language_checker、figure_checker 四个检查节点的输出以及 pdf_annotator 的执行结果，撰写最终检查报告。\n\n报告必须包含：\n## 一、总体结论\n- 风险等级：高/中/低，说明理由\n- 总问题数及分布（各维度问题数量）\n\n## 二、分维度问题清单\n每个维度（摘要/结构/语言/图表引用）：\n- 问题描述\n- 论文中的证据（原文片段或位置）\n- 影响程度：高/中/低\n- 建议修复动作（具体可执行步骤）\n\n## 三、优先级修复计划\n- P0（必须修复，影响论文通过）：...\n- P1（建议修复，影响质量）：...\n- P2（可选优化）：...\n\n## 四、注释文件信息\n- 注明 pdf_annotator 输出的注释 PDF 路径\n- 已成功注释的条目数量\n\n禁止只复述上游摘要，禁止以【该任务已完成】等敷衍语句结束。",
+        "depends_on": ["pdf_annotator", "abstract_checker", "structure_checker", "language_checker", "figure_checker"],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "parse_paper",       "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "load_checklist",    "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "fork_checkers",     "to_node": "abstract_checker",     "condition": null},
+    {"from_node": "fork_checkers",     "to_node": "structure_checker",    "condition": null},
+    {"from_node": "fork_checkers",     "to_node": "language_checker",     "condition": null},
+    {"from_node": "fork_checkers",     "to_node": "figure_checker",       "condition": null},
+    {"from_node": "abstract_checker",  "to_node": "join_checkers",        "condition": null},
+    {"from_node": "structure_checker", "to_node": "join_checkers",        "condition": null},
+    {"from_node": "language_checker",  "to_node": "join_checkers",        "condition": null},
+    {"from_node": "figure_checker",    "to_node": "join_checkers",        "condition": null},
+    {"from_node": "join_checkers",     "to_node": "annotation_formatter", "condition": null},
+    {"from_node": "annotation_formatter", "to_node": "pdf_annotator",     "condition": null},
+    {"from_node": "pdf_annotator",     "to_node": "final_report",         "condition": null},
+    {"from_node": "abstract_checker",  "to_node": "final_report",         "condition": null},
+    {"from_node": "structure_checker", "to_node": "final_report",         "condition": null},
+    {"from_node": "language_checker",  "to_node": "final_report",         "condition": null},
+    {"from_node": "figure_checker",    "to_node": "final_report",         "condition": null}
+  ]
+}

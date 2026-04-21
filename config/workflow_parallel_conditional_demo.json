@@ -1,0 +1,133 @@
+{
+  "description": "并行+条件边演示：task 链路验收用例",
+  "test_question": "请帮我分析一篇关于大语言模型的论文，并评估其学术质量和实用价值。",
+  "nodes": [
+    {
+      "node_id": "task_analyzer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是任务分析专家，负责理解用户请求并提炼核心分析维度。",
+        "subtask": "分析用户请求，明确需要从哪些维度评估论文（方法论、贡献度、实验严谨性、应用价值）。输出分析框架。",
+        "depends_on": [],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "parallel_analysis_fork",
+      "node_type": "parallel_fork",
+      "parallel_branches": ["academic_quality_reviewer", "practical_value_assessor"],
+      "config": {}
+    },
+    {
+      "node_id": "academic_quality_reviewer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是学术质量评审专家，专注于评估论文的方法论严谨性、实验设计和理论贡献。",
+        "subtask": "基于任务分析框架，从学术角度评估：1) 方法论是否严谨；2) 实验是否充分；3) 理论贡献是否清晰。给出 confidence 分数（0-1）。",
+        "depends_on": ["task_analyzer"],
+        "temperature": 0.4,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "practical_value_assessor",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是实用价值评估专家，专注于评估论文的应用潜力和工程落地可行性。",
+        "subtask": "基于任务分析框架，从应用角度评估：1) 方法是否可复现；2) 工程落地难度；3) 实际业务价值。给出 confidence 分数（0-1）。",
+        "depends_on": ["task_analyzer"],
+        "temperature": 0.4,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "synthesis_join",
+      "node_type": "parallel_join",
+      "agent_name": "SimpleAgent",
+      "join_policy": "all_success",
+      "source_branches": ["academic_quality_reviewer", "practical_value_assessor"],
+      "config": {
+        "system_prompt": "你是综合评估专家，负责整合学术质量评审和实用价值评估两个并行分支的结论。",
+        "subtask": "整合两个评审分支的结果，给出综合评分和统一结论。同时将综合 confidence 写入 metadata.confidence。",
+        "depends_on": ["academic_quality_reviewer", "practical_value_assessor"],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "deep_review_agent",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是深度审查专家，负责对评分偏低的论文进行细粒度问题排查。",
+        "subtask": "综合评分未达到高质量标准（confidence < 0.7），请对以下问题进行深度审查：1) 找出最关键的3个缺陷；2) 给出可改进的具体建议；3) 说明哪些结论仍然有效。",
+        "depends_on": ["synthesis_join"],
+        "temperature": 0.5,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_deliverer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付专家，负责整合所有分析结果，给用户一份清晰可执行的评估报告。",
+        "subtask": "整合全部分析，输出结构化评估报告：1) 总体评分（学术 + 实用）；2) 主要亮点（至少2条）；3) 主要不足（至少2条）；4) 建议（阅读/引用/改进方向）。",
+        "depends_on": ["synthesis_join", "deep_review_agent"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "task_analyzer",
+      "to_node": "parallel_analysis_fork",
+      "condition": null
+    },
+    {
+      "from_node": "parallel_analysis_fork",
+      "to_node": "academic_quality_reviewer",
+      "condition": null
+    },
+    {
+      "from_node": "parallel_analysis_fork",
+      "to_node": "practical_value_assessor",
+      "condition": null
+    },
+    {
+      "from_node": "academic_quality_reviewer",
+      "to_node": "synthesis_join",
+      "condition": null
+    },
+    {
+      "from_node": "practical_value_assessor",
+      "to_node": "synthesis_join",
+      "condition": null
+    },
+    {
+      "from_node": "synthesis_join",
+      "to_node": "deep_review_agent",
+      "condition": {
+        "field": "metadata.synthesis_join.confidence",
+        "op": "lt",
+        "value": 0.7
+      },
+      "priority": 1
+    },
+    {
+      "from_node": "synthesis_join",
+      "to_node": "final_deliverer",
+      "condition": null
+    },
+    {
+      "from_node": "deep_review_agent",
+      "to_node": "final_deliverer",
+      "condition": null
+    }
+  ]
+}

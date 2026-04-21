@@ -7,7 +7,7 @@ from typing import List, Optional, Union
 import asyncio
 import openai
 
-from core.message import AgentMessage, ToolResult
+from core.message import WorkflowMessage, MessageLike, ToolResult, ensure_message
 from tools.base_tool import BaseTool
 from utils.utils import set_nested_value
 
@@ -18,7 +18,7 @@ from google.genai import types
 
 class AgentMemoryItem:
     """
-    Agent 内存项，用于存储单条消息。
+    Agent 内存项，用于存储单条工作流消息。
     """
 
     def __init__(self, data: any, data_type: str):
@@ -186,7 +186,7 @@ class BaseAgent(ABC):
         工作流节点（workflow/nodes.py）仅依赖 BaseAgent 接口，不依赖具体实现。
         开发者可通过 Mock BaseAgent 独立测试工作流，无需真实 LLM 调用。
 
-    TODO: 未来在此处增加 emotion_hook(message: AgentMessage) 情感分析钩子接口
+    TODO: 未来在此处增加 emotion_hook(message: WorkflowMessage) 情感分析钩子接口
     TODO: 未来在此处增加 before_run / after_run 生命周期钩子，用于中间件拦截
     """
     def __init__(
@@ -230,55 +230,40 @@ class BaseAgent(ABC):
         tool_result = target_tool.run(**tool_args)
         return tool_result
 
-    def _normalize_message(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+    def _normalize_message(self, message: MessageLike) -> WorkflowMessage:
         """
-        将各种输入格式统一转换为 AgentMessage 对象。
+        将各种输入格式统一转换为 WorkflowMessage 对象。
         
         Args:
-            message: 可以是字符串、AgentMessage 对象或字典。
+            message: 可以是字符串、WorkflowMessage 对象或字典。
             
         Returns:
-            标准化的 AgentMessage 对象。
+            标准化的 WorkflowMessage 对象。
         """
-        if isinstance(message, AgentMessage):
-            return message
-        elif isinstance(message, str):
-            return AgentMessage(
-                role="user",
-                content=message,
-                agent_name="user"
-            )
-        elif isinstance(message, dict):
-            return AgentMessage(
-                role=message.get("role", "user"),
-                content=message.get("content", str(message)),
-                agent_name=message.get("agent_name", "unknown")
-            )
-        else:
-            # 兜底处理
-            return AgentMessage(
-                role="user",
-                content=str(message),
-                agent_name="unknown"
-            )
+        return ensure_message(
+            message,
+            default_role="user",
+            default_source_type="user",
+            default_source_id="agent_input",
+        )
 
     @abstractmethod
-    def run(self, message: AgentMessage) -> AgentMessage:
+    def run(self, message: MessageLike) -> WorkflowMessage:
         """
         同步执行推理，接收输入消息并返回 Agent 响应。
 
         Args:
-            message: 输入的 AgentMessage 对象（role 通常为 "user"）。
+            message: 输入消息（统一消息对象/字典/字符串）。
 
         Returns:
-            Agent 生成的响应 AgentMessage（role="assistant"，agent_name=self.name）。
+            Agent 生成的响应 WorkflowMessage（role="assistant"，source_id=self.name）。
 
         Raises:
             AgentError: 推理执行失败时抛出。
         """
         pass
 
-    async def ainvoke(self, message: AgentMessage) -> AgentMessage:
+    async def ainvoke(self, message: MessageLike) -> WorkflowMessage:
         """
         异步执行推理。
 
@@ -286,10 +271,10 @@ class BaseAgent(ABC):
         子类可重写此方法以实现真正的原生异步推理（如使用 httpx 的异步 LLM 调用）。
 
         Args:
-            message: 输入的 AgentMessage 对象。
+            message: 输入的 WorkflowMessage 对象。
 
         Returns:
-            Agent 生成的响应 AgentMessage。
+            Agent 生成的响应 WorkflowMessage。
         """
         pass
 
@@ -301,13 +286,13 @@ class BaseAgent(ABC):
         """
         self.memory.clear()
 
-    def get_history(self) -> List[AgentMessage]:
+    def get_history(self) -> List[WorkflowMessage]:
         """
         获取当前 Agent 的对话历史。
 
         BaseAgent 默认返回空列表，维护历史的子类应重写此方法。
 
         Returns:
-            AgentMessage 历史列表（按时间正序）。
+            WorkflowMessage 历史列表（按时间正序）。
         """
         return []

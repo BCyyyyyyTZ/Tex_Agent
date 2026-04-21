@@ -1,22 +1,26 @@
 """
-工作流节点定义（最终生产就绪版 v2）。
-核心修复：
-  ✅ 强制兼容 agent.run() 返回 str/dict/AgentMessage 的所有情况
-  ✅ 安全构建 state["messages"] 更新，避免 LangGraph 状态冲突或类型污染
-  ✅ 统一调用 ctx.build()，自动注入 RAG/Memory/History
-  ✅ 彻底移除对 .content 的直接裸露访问
+工作流节点工厂（v2 Breaking Change）。
+
+Breaking Change v2：
+  - _finalize_node_state 不再返回完整 messages/metadata，
+    只返回【增量 delta】，由 state reducer 负责合并（operator.add / _merge_metadata）
+  - 移除 _append_execution_order（由 state._merge_metadata reducer 接管）
+  - 新增 make_parallel_fork_node / make_parallel_join_node 工厂
+  - 三类节点（agent / tool / user）的写回协议统一，并发安全
 """
 import json
 import re
-from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, Union, List, Set
-from core.state import WorkflowState
-from core.message import AgentMessage
+from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, List, Literal
+
+from core.state import WorkflowState, normalize_messages_for_state, normalize_node_output
+from core.message import WorkflowMessage, NodeOutput, ensure_message
 from agents.base_agent import BaseAgent
 from context.base import BaseContext
 from tools.base_tool import BaseTool
 from utils.logger import get_logger
 from config.planner_config import (
     DEFAULT_HISTORY_MODE,
+    DEFAULT_SINGLE_TURN_CONTRACT_MODE,
     NODE_OUTPUT_FORMAT_INSTRUCTION,
     PERSONA_ENTRY_NODE_FORMAT_ADDON,
     SINGLE_TURN_NODE_CONTRACT,
@@ -34,39 +38,91 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# ================= 🔒 核心安全转换工具 =================
+# ================= 核心安全转换工具 =================
 
-def _ensure_agent_message(raw_resp: Any, role: str, agent_name: str) -> AgentMessage:
+def _ensure_agent_message(
+    raw_resp: Any,
+    *,
+    role: Literal["user", "assistant", "system", "tool"],
+    source_type: Literal["agent", "tool", "user", "system"],
+    source_id: str,
+) -> WorkflowMessage:
+    """将任意返回值收敛为统一消息协议。"""
+    return ensure_message(
+        raw_resp,
+        default_role=role,
+        default_source_type=source_type,
+        default_source_id=source_id,
+    )
+
+
+def _finalize_node_state(
+    *,
+    state: WorkflowState,
+    node_id: str,
+    node_output: Dict[str, Any],
+    output: str,
+    error: Optional[str],
+    new_messages: Optional[List[WorkflowMessage]] = None,
+    metadata_updates: Optional[Dict[str, Any]] = None,
+    is_terminal: bool = False,
+) -> Dict[str, Any]:
     """
-    绝对安全：将 Agent 返回值强制转为 AgentMessage。
-    兼容 LLM SDK 返回 str、dict、None 或已包装对象。
+    三类节点统一写回协议（v2 Breaking Change）。
+
+    返回增量 delta，不再返回完整 state：
+      - metadata: 仅含本节点贡献（reducer 深合并）
+      - messages: 仅含新增消息（reducer append）
+      - current_node: 始终写（reducer last-wins）
+      - output: 仅终端节点写入 state.output（避免并行中间节点互相覆盖最终输出）
+        中间节点的输出已存储在 metadata[node_id].result，无需再写 state.output
+      - error: 始终写（reducer first-error-wins）
+
+    并发安全性（所有字段现均有 reducer）：
+      - 并行节点各自写 metadata[node_id]，键不冲突
+      - current_node: last-write-wins
+      - output: last-nonempty-wins + 仅终端节点写
+      - error: first-error-wins
+      - messages: operator.add append
     """
-    if isinstance(raw_resp, AgentMessage):
-        return raw_resp
-    content = str(raw_resp) if raw_resp is not None else ""
-    if isinstance(raw_resp, dict):
-        return AgentMessage(
-            role=raw_resp.get("role", role),
-            content=str(raw_resp.get("content", content)),
-            agent_name=raw_resp.get("agent_name", agent_name)
+    # metadata 增量：只写本节点贡献
+    meta_delta: Dict[str, Any] = {
+        "__execution_order__": [node_id],   # reducer 负责 append+去重
+        node_id: normalize_node_output(node_output),
+    }
+    if metadata_updates:
+        meta_delta = _deep_merge_dict(meta_delta, metadata_updates)
+
+    out: Dict[str, Any] = {
+        "current_node": node_id,
+        "metadata": meta_delta,             # delta，reducer 深合并
+        "error": error,
+    }
+
+    # 只有终端节点才写 state.output，避免中间并行节点互相覆盖
+    if is_terminal:
+        out["output"] = str(output or "")
+    # 非终端节点结果已写入 metadata[node_id].result，不需要写 state.output
+
+    if new_messages is not None:
+        # 仅含新增消息，reducer 负责 append
+        out["messages"] = normalize_messages_for_state(
+            [m.to_dict() for m in new_messages]
         )
-    return AgentMessage(role=role, content=content, agent_name=agent_name)
+
+    return out
 
 
-def _safe_to_dict(msg: Union[AgentMessage, Dict[str, Any], str, Any]) -> Dict[str, Any]:
-    """
-    绝对安全：将任意消息转为标准 dict，供 LangGraph 状态合并使用。
-    """
-    if isinstance(msg, dict):
-        return msg
-    if isinstance(msg, AgentMessage):
-        return msg.to_dict() if hasattr(msg, "to_dict") else {
-            "role": msg.role, 
-            "content": msg.content, 
-            "agent_name": getattr(msg, "agent_name", "system")
-        }
-    # 兜底：如果是字符串或其他类型
-    return {"role": "assistant", "content": str(msg), "agent_name": "unknown"}
+def _deep_merge_dict(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+    """深合并两个字典（updates 优先）。"""
+    merged = dict(base)
+    for key, value in updates.items():
+        cur = merged.get(key)
+        if isinstance(cur, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dict(cur, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -77,38 +133,15 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return text[:max_chars] + f"\n...（已截断，共{len(text)}字符）"
 
 
-def _extract_metadata_chain_node_ids(built_context: str) -> Set[str]:
-    """
-    从 ctx.build() 产物中识别 metadata_chain 已覆盖的节点，便于 upstream 去重。
-    """
-    if "<context type='metadata_chain'>" not in built_context:
-        return set()
-    return set(re.findall(r"### \[([^\]]+)\]", built_context))
-
-
-def _is_tool_node_output(blob: Any) -> bool:
-    """
-    判断结构化节点产出是否来自 tool 节点。
-    """
-    if not isinstance(blob, dict):
-        return False
-    meta = blob.get("metadata", {})
-    return isinstance(meta, dict) and meta.get("node_type") == "tool"
-
-
 def _detect_terminal_delivery_risks(output_text: str) -> List[str]:
-    """
-    终节点轻量交付检查：仅产生日志告警，不中断流程。
-    """
+    """终节点轻量交付检查（仅日志告警，不中断流程）。"""
     text = (output_text or "").strip()
     if not text:
         return ["终节点输出为空"]
-
     lower_text = text.lower()
     risks: List[str] = []
     if any(kw.lower() in lower_text for kw in FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS):
         risks.append("疑似等待式反问用户")
-
     question_marks = text.count("?") + text.count("？")
     actionable_markers = ("步骤", "示例", "例如", "建议", "你可以", "请按", "操作")
     restate_hits = sum(1 for kw in FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS if kw in text)
@@ -121,11 +154,7 @@ def _detect_terminal_delivery_risks(output_text: str) -> List[str]:
 
 
 def _resolve_path_value(root: Any, path: str) -> Any:
-    """
-    通过点路径读取嵌套值；路径不存在时返回空字符串。
-    例：
-      path = "metadata.design.result"
-    """
+    """通过点路径读取嵌套值；路径不存在时返回空字符串。"""
     cur = root
     for part in [p for p in path.split(".") if p]:
         if isinstance(cur, dict):
@@ -141,12 +170,7 @@ def _resolve_path_value(root: Any, path: str) -> Any:
 
 
 def _render_template_string(template: str, state: WorkflowState) -> Any:
-    """
-    渲染节点配置中的模板字符串：
-      - ${input} / ${output} / ${current_node}
-      - ${metadata.xxx.yyy}
-    当模板串整体就是单个占位符时，返回原始类型值（dict/list/number 也可透传）。
-    """
+    """渲染节点配置中的 ${...} 模板字符串。"""
     pattern = re.compile(r"\$\{([^}]+)\}")
     matches = list(pattern.finditer(template))
     if not matches:
@@ -162,11 +186,7 @@ def _render_template_string(template: str, state: WorkflowState) -> Any:
             if not msgs:
                 return ""
             last = msgs[-1]
-            if isinstance(last, dict):
-                return str(last.get("content", ""))
-            if isinstance(last, AgentMessage):
-                return str(last.content)
-            return str(last)
+            return str(last.get("content", "")) if isinstance(last, dict) else str(last)
         if expr in ("input", "output", "current_node", "error", "retrieved_context"):
             return state.get(expr, "")
         if expr == "messages":
@@ -175,14 +195,11 @@ def _render_template_string(template: str, state: WorkflowState) -> Any:
             return _resolve_path_value(state, expr[len("state."):])
         if expr.startswith("metadata."):
             return _resolve_path_value(state.get("metadata", {}) or {}, expr[len("metadata."):])
-        # 回退：默认按 state 根路径读取，便于 `${messages.0.content}` 这类表达式
         return _resolve_path_value(state, expr)
 
-    # 整串占位符：返回真实类型，不强转字符串
     if len(matches) == 1 and matches[0].span() == (0, len(template)):
         return _resolve_key(matches[0].group(1))
 
-    # 混合字符串：一律转字符串拼接
     result = template
     for m in matches:
         value = _resolve_key(m.group(1))
@@ -191,12 +208,7 @@ def _render_template_string(template: str, state: WorkflowState) -> Any:
 
 
 def _resolve_tool_payload(payload: Any, state: WorkflowState) -> Any:
-    """
-    递归解析 tool_input：
-      - str 中可用 ${...} 模板
-      - dict/list 递归解析
-      - 其他类型原样返回
-    """
+    """递归解析 tool_input（支持 ${...} 模板）。"""
     if isinstance(payload, str):
         return _render_template_string(payload, state)
     if isinstance(payload, list):
@@ -211,21 +223,15 @@ def _is_blank_payload(payload: Any) -> bool:
         return True
     if isinstance(payload, str):
         return not payload.strip()
-    if isinstance(payload, list):
-        return len(payload) == 0
-    if isinstance(payload, dict):
+    if isinstance(payload, (list, dict)):
         return len(payload) == 0
     return False
 
 
 def _repair_tool_payload_if_needed(tool_name: str, payload: Any, state: WorkflowState) -> Any:
-    """
-    工具入参兜底：
-      - 防止出现空 payload 导致工具 400（尤其是 arxiv_search）
-    """
+    """工具入参兜底：防止空 payload。"""
     if not _is_blank_payload(payload):
         return payload
-
     fallback_query = str(state.get("input", "") or "").strip()
     if tool_name == "arxiv_search":
         if fallback_query:
@@ -236,9 +242,7 @@ def _repair_tool_payload_if_needed(tool_name: str, payload: Any, state: Workflow
 
 
 def _set_nested_path(root: Dict[str, Any], dotted_path: str, value: Any) -> None:
-    """
-    按点路径写入字典，如 "a.b.c"。
-    """
+    """按点路径写入字典，如 'a.b.c'。"""
     parts = [p for p in str(dotted_path).split(".") if p]
     if not parts:
         return
@@ -255,20 +259,38 @@ def _set_nested_path(root: Dict[str, Any], dotted_path: str, value: Any) -> None
 def _coerce_user_input(raw: str, schema: Dict[str, Any]) -> Any:
     """
     按 input_schema 将用户输入转为结构化值。
+    支持序号输入：single_choice/multi_choice 下若输入纯数字，则转换为对应选项。
     """
     schema_type = str(schema.get("type", "text")).strip().lower()
     text = (raw or "").strip()
     if schema_type == "json":
         return json.loads(text) if text else {}
+    if schema_type == "single_choice":
+        options = schema.get("options") or []
+        # 支持序号输入（"1" → options[0]）
+        if text.isdigit():
+            idx = int(text) - 1
+            if 0 <= idx < len(options):
+                return str(options[idx])
+        return text
     if schema_type == "multi_choice":
-        return [x.strip() for x in text.split(",") if x.strip()]
+        options = schema.get("options") or []
+        parts = []
+        for token in text.split(","):
+            token = token.strip()
+            if token.isdigit():
+                idx = int(token) - 1
+                if 0 <= idx < len(options):
+                    parts.append(str(options[idx]))
+                    continue
+            if token:
+                parts.append(token)
+        return parts
     return text
 
 
 def _validate_user_input(value: Any, schema: Dict[str, Any], rules: Dict[str, Any]) -> Optional[str]:
-    """
-    返回 None 表示校验通过；否则返回错误原因。
-    """
+    """返回 None 表示校验通过；否则返回错误原因。"""
     required = bool(rules.get("required", False))
     if required:
         if value is None:
@@ -277,7 +299,6 @@ def _validate_user_input(value: Any, schema: Dict[str, Any], rules: Dict[str, An
             return "输入不能为空"
         if isinstance(value, list) and not value:
             return "至少选择一项"
-
     schema_type = str(schema.get("type", "text")).strip().lower()
     if schema_type in ("single_choice", "multi_choice"):
         options = schema.get("options", []) or []
@@ -291,7 +312,6 @@ def _validate_user_input(value: Any, schema: Dict[str, Any], rules: Dict[str, An
                 for item in values:
                     if str(item) not in allowed:
                         return f"输入不在可选项中: {item}"
-
     if isinstance(value, str):
         min_len = rules.get("min_length")
         max_len = rules.get("max_length")
@@ -309,10 +329,7 @@ def _build_tool_structured_output(
     payload: Any,
     tool_resp: Any,
 ) -> Dict[str, Any]:
-    """
-    将工具返回统一为与 Agent 节点兼容的结构化输出。
-    保证下游 metadata_chain / depends_on 可以直接复用。
-    """
+    """将工具返回统一为与 Agent 节点兼容的结构化输出。"""
     success = True
     output = ""
     error = None
@@ -338,19 +355,15 @@ def _build_tool_structured_output(
         output = "" if tool_resp is None else str(tool_resp)
 
     summary_src = output.strip() if output else (error or "")
-    summary = summary_src[:80]
-    if not summary:
-        summary = f"{tool_name} 执行完成"
+    summary = summary_src[:80] or f"{tool_name} 执行完成"
+    status: Literal["pass", "fail"] = "pass" if success else "fail"
 
-    status = "pass" if success else "fail"
-    confidence = 1.0 if success else 0.0
-
-    return {
-        "result": output,
-        "summary": summary,
-        "confidence": confidence,
-        "status": status,
-        "metadata": {
+    return NodeOutput(
+        result=output,
+        summary=summary,
+        confidence=1.0 if success else 0.0,
+        status=status,
+        metadata={
             "node_type": "tool",
             "node_id": node_id,
             "tool_name": tool_name,
@@ -359,10 +372,57 @@ def _build_tool_structured_output(
             "tool_input": payload,
             "tool_metadata": extra_meta,
         },
-    }
+    ).to_dict()
 
 
-# ================= 🔧 动态节点工厂（供 build_dynamic_graph 使用） =================
+def _upstream_blocks(meta: dict, depends_on: list) -> str:
+    """
+    从 metadata 提取 depends_on 节点的完整产出注入上游上下文。
+
+    传递策略：
+    - result 字段：完整保留（最多 UPSTREAM_RESULT_MAX_CHARS 字符，由配置控制）
+    - summary / confidence / node_type：一并传递，帮助下游了解上游节点类型和置信度
+    - 节点原始 metadata（工具特定数据）：若存在则附加关键字段
+    """
+    lines: list = []
+    for dep_id in depends_on:
+        dep_result = meta.get(dep_id)
+        if not isinstance(dep_result, dict):
+            continue
+        summary = str(dep_result.get("summary", "")).strip()
+        result = str(dep_result.get("result", "")).strip()
+        node_type = str(dep_result.get("node_type", "")).strip()
+        confidence = dep_result.get("confidence")
+        status = dep_result.get("status", "")
+        if not summary and not result:
+            continue
+
+        type_label = f"[{node_type}]" if node_type else ""
+        conf_label = f" confidence={confidence:.2f}" if isinstance(confidence, (int, float)) else ""
+        status_label = f" status={status}" if status else ""
+        block_lines = [f"━━ 节点 [{dep_id}]{type_label}{conf_label}{status_label} ━━"]
+        if summary:
+            block_lines.append(f"摘要: {summary}")
+        if result:
+            # 完整传递上游 result（UPSTREAM_RESULT_MAX_CHARS 为上限，默认 8192 字符）
+            compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
+            block_lines.append(f"完整输出:\n{compact_result}")
+
+        # 附加工具节点的关键元数据字段（如文件路径、查询词等）
+        inner_meta = dep_result.get("metadata")
+        if isinstance(inner_meta, dict):
+            useful_keys = [k for k in inner_meta
+                           if k not in {"node_type", "node_id", "error"}
+                           and inner_meta[k] is not None]
+            if useful_keys:
+                kv = ", ".join(f"{k}={inner_meta[k]!r}" for k in useful_keys[:6])
+                block_lines.append(f"节点元数据: {{{kv}}}")
+
+        lines.append("\n".join(block_lines))
+    return "\n\n".join(lines) if lines else "（无上游节点输出）"
+
+
+# ================= 动态节点工厂 =================
 
 def make_agent_node(
     agent: BaseAgent,
@@ -376,38 +436,16 @@ def make_agent_node(
     is_entry_node: bool = False,
 ) -> Callable[[WorkflowState], dict]:
     """
-    通用 Agent 节点工厂，供 build_dynamic_graph() 按 NodeConfig 动态创建节点。
+    通用 Agent 节点工厂。
 
-    与固定节点（make_design_node 等）的区别：
-      - system_prompt / subtask / output_schema 均从 node_config 动态读取
-      - 统一在 system_prompt 末尾注入 NODE_OUTPUT_FORMAT_INSTRUCTION，
-        强制 LLM 输出结构化 JSON（result / summary / confidence / metadata）
-      - 解析 JSON 输出后存入 state["metadata"][node_id]，供下游节点精确读取
-      - 自动从 state["metadata"] 提取 depends_on 节点的完整产出（result + 摘要）注入上游上下文
-      - history_mode：节点 config.history_mode 优先，否则使用工厂参数 default_history_mode（full / minimal）
-
-    Args:
-        agent:       已实例化的 BaseAgent（SimpleAgent / ReActAgent 等）。
-        ctx:         共享 ContextManager 实例。
-        node_id:     节点唯一标识（对应 NodeConfig.node_id），用于日志和 metadata 键。
-        node_config: NodeConfig.config 字典，包含：
-                       system_prompt : 角色系统提示（不含输出格式约束）
-                       subtask       : 该节点具体子任务描述
-                       output_schema : 输出字段描述（仅用于注释说明，不影响解析）
-                       depends_on    : 上游节点 node_id 列表
-                       temperature   : （由 build_dynamic_graph 在实例化 agent 时使用）
-                       history_mode  : 可选 "full" | "minimal"，覆盖构图时的 default_history_mode
-        persona_memory: 全局用户画像（单文件）；在 system 段头部注入，仅入口节点可写回。
-        default_history_mode: 当 node_config 未指定 history_mode 时使用（由 build_dynamic_graph 注入）。
-        is_terminal: 是否为汇节点（无出边）；minimal 模式下仅终端节点 ctx.save。
-        is_entry_node: 是否为工作流入口节点；负责在 JSON 中输出 persona_memory_update。
-
-    Returns:
-        符合 LangGraph 规范的节点函数 WorkflowState -> dict。
+    写回协议（Breaking Change v2）：
+      - 返回 {"messages": [new_msgs_only], "metadata": {node_id: output, ...}}
+      - 不再返回完整 messages 列表或完整 metadata 字典
+      - 由 state reducer 负责并发安全合并
     """
     system_prompt: str = node_config.get("system_prompt", f"你是 {node_id} 专家。")
-    subtask: str       = node_config.get("subtask", "")
-    depends_on: list   = node_config.get("depends_on", [])
+    subtask: str = node_config.get("subtask", "")
+    depends_on: list = node_config.get("depends_on", [])
 
     raw_mode = node_config.get("history_mode")
     if raw_mode is None or (isinstance(raw_mode, str) and not raw_mode.strip()):
@@ -416,58 +454,43 @@ def make_agent_node(
         raw_mode = str(default_history_mode)
     mode_norm = raw_mode.strip().lower()
     if mode_norm not in ("full", "minimal"):
-        logger.warning(
-            f"[{node_id}] 非法 history_mode={raw_mode!r}，回退为 {default_history_mode!r}"
-        )
+        logger.warning(f"[{node_id}] 非法 history_mode={raw_mode!r}，回退为 {default_history_mode!r}")
         mode_norm = str(default_history_mode).strip().lower()
         if mode_norm not in ("full", "minimal"):
             mode_norm = "minimal"
 
-    def _upstream_blocks(meta: dict, covered_by_history: Set[str]) -> str:
-        lines: list = []
-        for dep_id in depends_on:
-            dep_result = meta.get(dep_id)
-            if not isinstance(dep_result, dict):
-                continue
-            summary = str(dep_result.get("summary", "")).strip()
-            result = str(dep_result.get("result", "")).strip()
-            if not summary and not result:
-                continue
-            block_lines = [f"[{dep_id}]"]
-            if summary:
-                block_lines.append(f"摘要: {summary}")
-            # 若 history(metadata_chain) 已覆盖该节点，则 upstream 只保留摘要，避免重复灌入
-            if result and dep_id not in covered_by_history:
-                if _is_tool_node_output(dep_result):
-                    # 工具节点结果保留全量，避免检索结果被截断
-                    block_lines.append(f"补充产出(完整):\n{result}")
-                else:
-                    compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
-                    block_lines.append(f"补充产出(截断):\n{compact_result}")
-            lines.append("\n".join(block_lines))
-        return "\n\n".join(lines) if lines else "（无上游节点输出）"
+    raw_contract_mode = node_config.get("single_turn_contract_mode", DEFAULT_SINGLE_TURN_CONTRACT_MODE)
+    if isinstance(raw_contract_mode, bool):
+        contract_mode = "always" if raw_contract_mode else "never"
+    else:
+        contract_mode = str(raw_contract_mode).strip().lower()
+    if contract_mode not in ("always", "terminal_only", "never"):
+        contract_mode = DEFAULT_SINGLE_TURN_CONTRACT_MODE
+    enable_single_turn_contract = (
+        contract_mode == "always" or (contract_mode == "terminal_only" and is_terminal)
+    )
 
     def agent_node(state: WorkflowState) -> dict:
         logger.info(
-            f"[{node_id} 节点] 开始执行... "
+            f"[{node_id}] 开始执行 "
             f"(history_mode={mode_norm}, terminal={is_terminal}, entry={is_entry_node})"
         )
-
         meta = state.get("metadata", {}) or {}
 
         persona_head = persona_memory.format_for_prompt() if persona_memory else ""
         entry_addon = PERSONA_ENTRY_NODE_FORMAT_ADDON if is_entry_node else ""
         terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
-        full_system_prompt = (
+
+        # system_prompt 已由 _build_agent_instance 注入 SYSTEM 角色，此处不再重复，
+        # 避免在 USER 侧出现两份相同角色描述占用 token 并干扰格式指令。
+        inline_contracts = (
             persona_head
-            + system_prompt
-            + SINGLE_TURN_NODE_CONTRACT
+            + (SINGLE_TURN_NODE_CONTRACT if enable_single_turn_contract else "")
             + terminal_addon
             + NODE_OUTPUT_FORMAT_INSTRUCTION
             + entry_addon
         )
 
-        # 1. 构建上下文（历史消息 + RAG；minimal 时用 metadata 链合成；画像不走 memory.search）
         built_context = ctx.build(
             state,
             memory=None,
@@ -476,49 +499,65 @@ def make_agent_node(
                 "mem_limit": int(node_config.get("mem_limit", 5)),
                 "max_tokens": int(node_config.get("max_tokens", 8000)),
                 "format": node_config.get("format", "plain"),
-                "synthetic_metadata_history": mode_norm == "minimal",
+                "history_mode": mode_norm,
             },
         )
-        # 2. 基于 history 是否已包含 metadata_chain 做 upstream 去重
-        covered_node_ids = _extract_metadata_chain_node_ids(built_context)
-        upstream_ctx = _upstream_blocks(meta, covered_node_ids)
+        upstream_ctx = _upstream_blocks(meta, depends_on)
 
-        # 3. 构建 prompt（system + 历史上下文 + 上游结果 + 原始任务 + 具体子任务）
+        # 提示词顺序：任务 → 上游结果（最相关） → 原始背景 → 历史 → 格式约束（放最后方便 LLM 直接按格式生成）
         prompt = (
-            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}"
-            f"{full_system_prompt}\n\n"
-            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
-            f"[原始任务]\n{state.get('input', '')}\n\n"
+            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}\n\n"
             f"[上游节点输出]\n{upstream_ctx}\n\n"
+            f"[原始任务背景]\n{state.get('input', '')}\n\n"
+            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
+            f"{inline_contracts}\n\n"
         )
 
-        user_msg = AgentMessage(role="user", content=prompt, agent_name="system")
+        user_msg = WorkflowMessage(
+            role="user",
+            source_type="system",
+            source_id=f"{node_id}_prompt_builder",
+            content=prompt,
+            metadata={"node_id": node_id, "node_type": "agent"},
+        )
         if mode_norm == "full":
             ctx.save(user_msg)
 
         run_dir = meta.get("__run_output_dir__")
 
-        # 4. 调用 Agent
         try:
             raw_resp = agent.run(prompt)
-            resp = _ensure_agent_message(raw_resp, "assistant", node_id)
+            resp = _ensure_agent_message(
+                raw_resp,
+                role="assistant",
+                source_type="agent",
+                source_id=node_id,
+            )
         except Exception as e:
-            logger.error(f"[{node_id} 节点] 执行失败: {e}")
+            logger.error(f"[{node_id}] 执行失败: {e}")
             write_node_trace(run_dir, node_id, prompt, error=str(e))
-            err: Dict[str, Any] = {
-                "current_node": node_id,
-                "error": str(e),
-            }
-            if mode_norm == "full":
-                err["messages"] = state["messages"] + [_safe_to_dict(user_msg)]
-            return err
+            fail_structured = NodeOutput(
+                result="",
+                summary=f"{node_id} 执行失败",
+                confidence=0.0,
+                status="fail",
+                metadata={"node_type": "agent", "node_id": node_id, "error": str(e)},
+            ).to_dict()
+            return _finalize_node_state(
+                state=state,
+                node_id=node_id,
+                node_output=fail_structured,
+                output="",
+                error=str(e),
+                new_messages=[user_msg],
+                is_terminal=is_terminal,
+            )
 
         if mode_norm == "full":
             ctx.save(resp)
         elif mode_norm == "minimal" and is_terminal:
             ctx.save(resp)
 
-        # 5. 解析结构化输出（三级容错）
         fb = {
             "result": resp.content,
             "summary": resp.content[:80],
@@ -527,48 +566,36 @@ def make_agent_node(
         }
         if is_entry_node:
             fb["persona_memory_update"] = {"action": "none", "delta": {}}
-        structured: dict = parse_llm_json(resp.content, context=node_id, fallback=fb)
-
-        structured = dict(structured)
-        pm_update = structured.pop("persona_memory_update", None)
+        structured_raw: dict = parse_llm_json(resp.content, context=node_id, fallback=fb)
+        structured_payload = dict(structured_raw)
+        pm_update = structured_payload.pop("persona_memory_update", None)
+        structured = normalize_node_output(structured_payload)
         if persona_memory:
             if is_entry_node:
                 persona_memory.apply_persona_memory_update(pm_update)
             elif pm_update is not None:
                 logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
 
-        # 6. 更新 state：metadata + 执行顺序（供 ctx.build 合成历史）
-        current_metadata: dict = dict(state.get("metadata", {}))
-        exec_order = list(current_metadata.get("__execution_order__", []))
-        if node_id not in exec_order:
-            exec_order.append(node_id)
-        current_metadata["__execution_order__"] = exec_order
-        current_metadata[node_id] = structured
-
         if is_terminal:
             delivery_risks = _detect_terminal_delivery_risks(structured.get("result", ""))
             if delivery_risks:
-                logger.warning(
-                    f"[{node_id} 节点] 终节点交付告警: {'; '.join(delivery_risks)}"
-                )
+                logger.warning(f"[{node_id}] 终节点交付告警: {'; '.join(delivery_risks)}")
 
         logger.info(
-            f"[{node_id} 节点] 完成，"
+            f"[{node_id}] 完成，"
             f"confidence={structured.get('confidence', '?')}, "
             f"输出 {len(structured.get('result', ''))} 字符"
         )
 
-        out: Dict[str, Any] = {
-            "current_node": node_id,
-            "output": structured.get("result", resp.content),
-            "metadata": current_metadata,
-            "error": None,
-        }
-        if mode_norm == "full":
-            out["messages"] = state["messages"] + [
-                _safe_to_dict(user_msg),
-                _safe_to_dict(resp),
-            ]
+        out = _finalize_node_state(
+            state=state,
+            node_id=node_id,
+            node_output=structured,
+            output=structured.get("result", resp.content),
+            error=None,
+            new_messages=[user_msg, resp],
+            is_terminal=is_terminal,
+        )
         write_node_trace(
             run_dir,
             node_id,
@@ -591,10 +618,9 @@ def make_tool_node(
     is_terminal: bool = False,
 ) -> Callable[[WorkflowState], dict]:
     """
-    工具节点工厂：
-      - 解析 tool_input 模板（支持 ${input} / ${metadata.xxx}）
-      - 执行 tool.run(...)
-      - 输出统一结构化 metadata（result/summary/confidence/...）
+    工具节点工厂（v2 Breaking Change）。
+
+    写回协议同 make_agent_node：只返回增量 delta。
     """
     raw_mode = node_config.get("history_mode")
     if raw_mode is None or (isinstance(raw_mode, str) and not raw_mode.strip()):
@@ -612,11 +638,13 @@ def make_tool_node(
         depends_on = []
 
     raw_tool_input = node_config.get("tool_input")
+    tool_trace_template = str(
+        node_config.get(
+            "tool_trace_template",
+            "[TOOL_NODE]\ntool_name={tool_name}\npayload={payload}",
+        )
+    )
 
-    # 工具节点默认入参策略（可扩展）：
-    # 1) 显式配置 tool_input：使用用户配置
-    # 2) 未配置且存在 depends_on：自动读取第一个上游节点 result
-    # 3) 仍无上游：回退为原始用户输入
     if raw_tool_input is not None:
         default_payload = raw_tool_input
     elif depends_on:
@@ -624,11 +652,12 @@ def make_tool_node(
         default_payload = f"${{metadata.{first_dep}.result}}" if first_dep else "${input}"
     else:
         default_payload = "${input}"
+
     emit_messages = bool(node_config.get("emit_messages", False))
 
     def tool_node(state: WorkflowState) -> dict:
         logger.info(
-            f"[{node_id} 节点] 开始执行工具 {tool.name} "
+            f"[{node_id}] 开始执行工具 {tool.name} "
             f"(history_mode={mode_norm}, terminal={is_terminal})"
         )
         meta = state.get("metadata", {}) or {}
@@ -636,16 +665,21 @@ def make_tool_node(
 
         payload = _resolve_tool_payload(default_payload, state)
         payload = _repair_tool_payload_if_needed(tool.name, payload, state)
-        prompt_for_trace = (
-            f"[TOOL_NODE]\n"
-            f"tool_name={tool.name}\n"
-            f"payload={payload}"
-        )
 
-        user_msg = AgentMessage(
+        try:
+            prompt_for_trace = tool_trace_template.format(
+                node_id=node_id,
+                tool_name=tool.name,
+                payload=payload,
+            )
+        except Exception:
+            prompt_for_trace = f"[TOOL_NODE]\ntool_name={tool.name}\npayload={payload}"
+
+        user_msg = WorkflowMessage(
             role="user",
+            source_type="system",
+            source_id=f"{node_id}_tool_request",
             content=prompt_for_trace,
-            agent_name="system",
             metadata={"node_type": "tool", "tool_name": tool.name},
         )
         should_emit_messages = (mode_norm == "full") or emit_messages
@@ -656,20 +690,34 @@ def make_tool_node(
             if isinstance(payload, dict):
                 tool_resp = tool.run(**payload)
             elif isinstance(payload, list):
-                # 约定：列表参数默认作为单个 input 传入
                 tool_resp = tool.run(payload)
             else:
                 tool_resp = tool.run(payload)
         except Exception as e:
-            logger.error(f"[{node_id} 节点] 工具执行失败: {e}")
+            logger.error(f"[{node_id}] 工具执行失败: {e}")
             write_node_trace(run_dir, node_id, prompt_for_trace, error=str(e))
-            err_out: Dict[str, Any] = {
-                "current_node": node_id,
-                "error": str(e),
-            }
-            if should_emit_messages:
-                err_out["messages"] = state["messages"] + [_safe_to_dict(user_msg)]
-            return err_out
+            fail_structured = NodeOutput(
+                result="",
+                summary=f"{tool.name} 执行失败",
+                confidence=0.0,
+                status="fail",
+                metadata={
+                    "node_type": "tool",
+                    "node_id": node_id,
+                    "tool_name": tool.name,
+                    "error": str(e),
+                    "tool_input": payload,
+                },
+            ).to_dict()
+            return _finalize_node_state(
+                state=state,
+                node_id=node_id,
+                node_output=fail_structured,
+                output="",
+                error=str(e),
+                new_messages=[user_msg],
+                is_terminal=is_terminal,
+            )
 
         structured = _build_tool_structured_output(
             tool_name=tool.name,
@@ -678,24 +726,17 @@ def make_tool_node(
             tool_resp=tool_resp,
         )
 
-        tool_msg = AgentMessage(
+        tool_msg = WorkflowMessage(
             role="tool",
+            source_type="tool",
+            source_id=tool.name,
             content=structured.get("result", ""),
-            agent_name=node_id,
-            tool_name=tool.name,
             metadata=structured.get("metadata", {}),
         )
         if should_emit_messages:
             ctx.save(tool_msg)
         elif mode_norm == "minimal" and is_terminal:
             ctx.save(tool_msg)
-
-        current_metadata: dict = dict(meta)
-        exec_order = list(current_metadata.get("__execution_order__", []))
-        if node_id not in exec_order:
-            exec_order.append(node_id)
-        current_metadata["__execution_order__"] = exec_order
-        current_metadata[node_id] = structured
 
         write_node_trace(
             run_dir,
@@ -704,19 +745,15 @@ def make_tool_node(
             raw_response=structured.get("result", ""),
             structured=structured,
         )
-
-        out: Dict[str, Any] = {
-            "current_node": node_id,
-            "output": structured.get("result", ""),
-            "metadata": current_metadata,
-            "error": None,
-        }
-        if should_emit_messages:
-            out["messages"] = state["messages"] + [
-                _safe_to_dict(user_msg),
-                _safe_to_dict(tool_msg),
-            ]
-        return out
+        return _finalize_node_state(
+            state=state,
+            node_id=node_id,
+            node_output=structured,
+            output=structured.get("result", ""),
+            error=None,
+            new_messages=[user_msg, tool_msg],
+            is_terminal=is_terminal,
+        )
 
     return tool_node
 
@@ -728,11 +765,9 @@ def make_user_node(
     human_input_provider: Optional[Callable[[str, Dict[str, Any], Dict[str, Any]], Any]] = None,
 ) -> Callable[[WorkflowState], dict]:
     """
-    人机反馈节点工厂（HITL）：
-      - 渲染 prompt_template
-      - 读取用户输入（通过可注入 provider）
-      - 做 schema 与 validation 校验
-      - 统一写回 metadata（可配置 write_to）
+    人机反馈节点工厂（HITL）。
+
+    写回协议同 make_agent_node：只返回增量 delta。
     """
     prompt_template = str(node_config.get("prompt_template", "请提供反馈：")).strip()
     input_schema = node_config.get("input_schema", {"type": "text"})
@@ -742,6 +777,9 @@ def make_user_node(
     if not isinstance(validation, dict):
         validation = {}
     default_value = node_config.get("default_value", "")
+    result_summary_template = str(
+        node_config.get("result_summary_template", "用户输入节点 {node_id} 已完成")
+    ).strip()
     write_to = str(node_config.get("write_to", f"user_feedback.{node_id}")).strip()
     max_attempts = int(node_config.get("max_attempts", 2))
     if max_attempts <= 0:
@@ -749,19 +787,92 @@ def make_user_node(
 
     def _default_provider(prompt: str, schema: Dict[str, Any], rules: Dict[str, Any]) -> Any:
         _ = rules
-        print(f"\n[USER_NODE:{node_id}] {prompt}")
+        input_type = schema.get("type", "text")
         options = schema.get("options")
-        if isinstance(options, list) and options:
-            print(f"[可选项] {options}")
-        return input("请输入反馈> ")
+        min_len = rules.get("min_length", 0)
+        max_len = rules.get("max_length")
+        required = rules.get("required", False)
+
+        width = 70
+        print(f"\n{'─' * width}")
+        print(f"  [用户输入] 节点: {node_id}")
+        print(f"{'─' * width}")
+
+        # 将 prompt 按行打印，超过 width 自动折行
+        for line in prompt.splitlines():
+            if len(line) <= width - 2:
+                print(f"  {line}")
+            else:
+                # 简单折行
+                while line:
+                    print(f"  {line[:width - 2]}")
+                    line = line[width - 2:]
+
+        if input_type in ("single_choice", "multi_choice") and isinstance(options, list) and options:
+            print(f"\n  可选项：")
+            for i, opt in enumerate(options, 1):
+                print(f"    [{i}] {opt}")
+            print(f"\n  输入说明：", end="")
+            if input_type == "single_choice":
+                print("请输入序号（如 1）或直接输入选项文本")
+            else:
+                print("多选请用逗号分隔序号（如 1,3）或直接输入选项文本")
+        elif input_type == "json":
+            print("\n  输入说明：请输入合法 JSON 对象")
+        else:
+            hints = []
+            if required:
+                hints.append("必填")
+            if min_len:
+                hints.append(f"最少 {min_len} 字符")
+            if max_len:
+                hints.append(f"最多 {max_len} 字符")
+            if hints:
+                print(f"\n  输入要求：{'，'.join(hints)}")
+
+        print(f"{'─' * width}")
+
+        # 对 single_choice 支持序号输入
+        raw = input("  >>> ").strip()
+
+        if input_type in ("single_choice", "multi_choice") and isinstance(options, list) and options:
+            # 支持序号输入
+            if input_type == "single_choice":
+                if raw.isdigit():
+                    idx = int(raw) - 1
+                    if 0 <= idx < len(options):
+                        raw = options[idx]
+            else:
+                parts = []
+                for token in raw.split(","):
+                    token = token.strip()
+                    if token.isdigit():
+                        idx = int(token) - 1
+                        if 0 <= idx < len(options):
+                            parts.append(options[idx])
+                        else:
+                            parts.append(token)
+                    else:
+                        parts.append(token)
+                raw = ",".join(parts)
+
+        print(f"  已接收: {raw!r}")
+        print(f"{'─' * width}\n")
+        return raw
 
     provider = human_input_provider or _default_provider
 
     def user_node(state: WorkflowState) -> dict:
-        logger.info(f"[{node_id} 节点] 等待用户反馈输入...")
-        meta = state.get("metadata", {}) or {}
+        logger.info(f"[{node_id}] 等待用户反馈输入...")
         rendered_prompt = _resolve_tool_payload(prompt_template, state)
         prompt_text = str(rendered_prompt)
+        prompt_msg = WorkflowMessage(
+            role="system",
+            source_type="system",
+            source_id=f"{node_id}_prompt",
+            content=prompt_text,
+            metadata={"node_type": "user", "node_id": node_id},
+        )
 
         value: Any = None
         status = "needs_user"
@@ -792,9 +903,16 @@ def make_user_node(
                 status = "needs_user"
 
         result_str = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        try:
+            result_summary = result_summary_template.format(
+                node_id=node_id, status=status, value=value,
+            )
+        except Exception:
+            result_summary = f"用户输入节点 {node_id} 已完成"
+
         structured = {
             "result": result_str,
-            "summary": f"用户输入节点 {node_id} 已完成",
+            "summary": result_summary,
             "confidence": 1.0 if status == "pass" else 0.5,
             "status": status,
             "metadata": {
@@ -807,21 +925,178 @@ def make_user_node(
                 "raw_value": value,
             },
         }
+        user_msg = WorkflowMessage(
+            role="user",
+            source_type="user",
+            source_id=node_id,
+            content=result_str,
+            metadata={"node_type": "user", "status": status},
+            payload={"raw_value": value},
+        )
 
-        current_metadata: dict = dict(meta)
-        exec_order = list(current_metadata.get("__execution_order__", []))
-        if node_id not in exec_order:
-            exec_order.append(node_id)
-        current_metadata["__execution_order__"] = exec_order
-        current_metadata[node_id] = structured
+        metadata_updates: Dict[str, Any] = {}
         if write_to:
-            _set_nested_path(current_metadata, write_to, value)
+            _set_nested_path(metadata_updates, write_to, value)
 
-        return {
-            "current_node": node_id,
-            "output": structured["result"],
-            "metadata": current_metadata,
-            "error": None if status == "pass" else error,
-        }
+        return _finalize_node_state(
+            state=state,
+            node_id=node_id,
+            node_output=structured,
+            output=structured["result"],
+            error=None if status == "pass" else error,
+            new_messages=[prompt_msg, user_msg],
+            metadata_updates=metadata_updates if metadata_updates else None,
+            is_terminal=False,
+        )
 
     return user_node
+
+
+def make_parallel_fork_node(
+    node_id: str,
+    parallel_branches: List[str],
+) -> Callable[[WorkflowState], dict]:
+    """
+    并行分叉节点工厂。
+
+    该节点本身无业务逻辑，仅标记并行组的起始点，
+    并将分支列表写入 metadata 供调试追踪。
+    真正的分叉由 graph_builder 通过多条 add_edge 实现。
+    """
+    def parallel_fork_node(state: WorkflowState) -> dict:
+        logger.info(f"[{node_id}] 并行分叉启动: branches={parallel_branches}")
+        fork_output = NodeOutput(
+            result=f"并行分叉: {parallel_branches}",
+            summary=f"启动 {len(parallel_branches)} 个并行分支",
+            confidence=1.0,
+            status="pass",
+            metadata={
+                "node_type": "parallel_fork",
+                "node_id": node_id,
+                "branches": parallel_branches,
+            },
+        ).to_dict()
+        return _finalize_node_state(
+            state=state,
+            node_id=node_id,
+            node_output=fork_output,
+            output=f"并行分叉: {parallel_branches}",
+            error=None,
+        )
+
+    return parallel_fork_node
+
+
+def make_parallel_join_node(
+    agent: BaseAgent,
+    ctx: BaseContext,
+    node_id: str,
+    node_config: dict,
+    source_branches: List[str],
+    join_policy_str: str = "all_success",
+    persona_memory: Optional["UserPersonaMemory"] = None,
+    *,
+    default_history_mode: str = DEFAULT_HISTORY_MODE,
+    is_terminal: bool = False,
+) -> Callable[[WorkflowState], dict]:
+    """
+    并行汇聚节点工厂。
+
+    执行步骤：
+      1. 从 state.metadata 读取所有 source_branches 的结果
+      2. 按 join_policy 验证整体成功/失败
+      3. 将合并后的分支内容注入 agent context，执行 agent 整合
+      4. 返回 agent 整合结果（增量 delta）
+
+    Args:
+        source_branches:   被汇聚的分支节点 ID 列表
+        join_policy_str:   汇聚策略字符串（"all_success" / "partial" / "first_success"）
+    """
+    from workflow.parallel_merger import JoinPolicy, merge_parallel_results
+
+    try:
+        join_policy = JoinPolicy(join_policy_str)
+    except ValueError:
+        logger.warning(
+            f"[{node_id}] 非法 join_policy={join_policy_str!r}，回退为 all_success"
+        )
+        join_policy = JoinPolicy.ALL_SUCCESS
+
+    # join 节点的 agent 配置：depends_on 设为所有源分支，使 _upstream_blocks 自动填充上下文
+    join_node_config = dict(node_config)
+    join_node_config.setdefault("depends_on", source_branches)
+    if not join_node_config.get("system_prompt"):
+        join_node_config["system_prompt"] = (
+            f"你是并行结果整合专家，负责整合来自 {source_branches} 的并行分支输出，"
+            f"给出综合结论。"
+        )
+    if not join_node_config.get("subtask"):
+        join_node_config["subtask"] = (
+            "整合所有并行分支的输出，给出统一的结构化结论。若某分支失败，"
+            "在结论中说明影响并尽量基于成功分支给出完整答案。"
+        )
+
+    base_agent_node = make_agent_node(
+        agent=agent,
+        ctx=ctx,
+        node_id=node_id,
+        node_config=join_node_config,
+        persona_memory=persona_memory,
+        default_history_mode=default_history_mode,
+        is_terminal=is_terminal,
+        is_entry_node=False,
+    )
+
+    def parallel_join_node(state: WorkflowState) -> dict:
+        logger.info(
+            f"[{node_id}] 并行汇聚: sources={source_branches}, policy={join_policy.value}"
+        )
+        merged = merge_parallel_results(state, source_branches, join_policy)
+
+        if not merged.success:
+            error_msg = (
+                f"[{node_id}] 并行汇聚失败 (policy={join_policy.value}): "
+                f"{merged.failed_branch_ids} 分支失败。{merged.error_summary}"
+            )
+            logger.error(error_msg)
+            fail_output = NodeOutput(
+                result=merged.combined_result,
+                summary=f"并行汇聚失败: {merged.failed_branch_ids}",
+                confidence=0.0,
+                status="fail",
+                metadata={
+                    "node_type": "parallel_join",
+                    "node_id": node_id,
+                    "join_policy": join_policy.value,
+                    "total_branches": merged.total_branches,
+                    "succeeded_branches": merged.succeeded_branches,
+                    "failed_branch_ids": merged.failed_branch_ids,
+                    "error": error_msg,
+                    "branch_outputs": merged.branch_outputs,
+                },
+            ).to_dict()
+            return _finalize_node_state(
+                state=state,
+                node_id=node_id,
+                node_output=fail_output,
+                output="",
+                error=error_msg,
+            )
+
+        logger.info(
+            f"[{node_id}] 汇聚成功: {merged.succeeded_branches}/{merged.total_branches} 分支通过"
+        )
+        result = base_agent_node(state)
+
+        # 追加并行汇聚元信息到 metadata delta
+        existing_meta = result.get("metadata", {})
+        if isinstance(existing_meta, dict) and node_id in existing_meta:
+            existing_meta[node_id].setdefault("metadata", {}).update({
+                "node_type": "parallel_join",
+                "join_policy": join_policy.value,
+                "total_branches": merged.total_branches,
+                "succeeded_branches": merged.succeeded_branches,
+            })
+        return result
+
+    return parallel_join_node

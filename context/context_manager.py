@@ -2,12 +2,12 @@
 from collections import deque
 from typing import List, Optional, Dict, Any, Union
 from context.base import BaseContext
-from core.message import AgentMessage
+from core.message import WorkflowMessage, ensure_message
 from utils.logger import get_logger
 from config.planner_config import METADATA_CHAIN_RESULT_MAX_CHARS
 
 logger = get_logger(__name__)
-MsgType = Union[Dict[str, Any], AgentMessage, str]
+MsgType = Union[Dict[str, Any], WorkflowMessage]
 
 # metadata 中保留的系统键，不参与「节点产出」合成
 _METADATA_RESERVED_KEYS = frozenset({
@@ -21,13 +21,6 @@ _METADATA_RESERVED_KEYS = frozenset({
 
 def _is_structured_node_output(value: Any) -> bool:
     return isinstance(value, dict) and ("result" in value or "summary" in value)
-
-
-def _is_tool_node_output(value: Any) -> bool:
-    if not isinstance(value, dict):
-        return False
-    meta = value.get("metadata", {})
-    return isinstance(meta, dict) and meta.get("node_type") == "tool"
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
@@ -63,25 +56,12 @@ def format_metadata_chain_for_prompt(state: Dict[str, Any]) -> str:
         if summary:
             parts.append(f"摘要: {summary}")
         if result:
-            if _is_tool_node_output(blob):
-                # 工具输出保留全量，确保后续节点拿到完整检索结果
-                if result != summary:
-                    parts.append(f"补充产出(完整):\n{result}")
-            else:
-                # metadata_chain 优先给摘要，普通节点 result 使用截断版降低噪声
-                compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
-                if compact_result and compact_result != summary:
-                    parts.append(f"补充产出(截断):\n{compact_result}")
+            compact_result = _truncate_text(result, METADATA_CHAIN_RESULT_MAX_CHARS)
+            if compact_result and compact_result != summary:
+                parts.append(f"补充产出:\n{compact_result}")
         if len(parts) > 1:
             blocks.append("\n".join(parts))
     return "\n\n".join(blocks)
-
-
-def _safe_get(msg: Any, key: str, default: str = "") -> str:
-    """兼容 dict / AgentMessage / str 的安全取值"""
-    if isinstance(msg, dict): return str(msg.get(key, default))
-    if isinstance(msg, str): return default  # 纯字符串无属性，跳过
-    return str(getattr(msg, key, default))
 
 
 class ContextManager(BaseContext):
@@ -98,13 +78,13 @@ class ContextManager(BaseContext):
         # deque 的 maxlen 仅由 max_messages 控制
         self._messages: deque = deque(maxlen=max_messages)
 
-    def save(self, message: AgentMessage) -> None:
-        if not isinstance(message, AgentMessage):
-            raise TypeError(f"save() 仅接受 AgentMessage，收到 {type(message).__name__}")
+    def save(self, message: WorkflowMessage) -> None:
+        if not isinstance(message, WorkflowMessage):
+            raise TypeError(f"save() 仅接受 WorkflowMessage，收到 {type(message).__name__}")
         if self.max_messages == 0: return
         self._messages.append(message)
 
-    def load(self, limit: Optional[int] = None) -> List[AgentMessage]:
+    def load(self, limit: Optional[int] = None) -> List[WorkflowMessage]:
         if limit is None: return list(self._messages)
         return list(self._messages)[-limit:]
 
@@ -118,13 +98,11 @@ class ContextManager(BaseContext):
         if not messages: return ""
         lines = []
         for m in messages:
-            if isinstance(m, str):
-                lines.append(f"[SYSTEM] {m}")
-                continue
-            role = _safe_get(m, "role", "unknown").upper()
-            agent = _safe_get(m, "agent_name", "sys")
-            content = _safe_get(m, "content", "")
-            lines.append(f"[{role} | {agent}] {content}")
+            msg = ensure_message(m, default_role="assistant", default_source_type="system", default_source_id="history")
+            role = str(msg.role).upper()
+            source = f"{msg.source_type}:{msg.source_id}"
+            content = str(msg.content)
+            lines.append(f"[{role} | {source}] {content}")
         return "\n".join(lines)
 
     def compress(self, text: str, max_tokens: Optional[int] = None) -> str:
@@ -136,36 +114,42 @@ class ContextManager(BaseContext):
         """GSSC 主入口：Gather → Select → Structure → Compress"""
         cfg = config or {}
         parts = []
-        msgs = state.get("messages", [])
+        msgs_raw = state.get("messages", []) or []
+        msgs = [
+            ensure_message(m, default_role="assistant", default_source_type="system", default_source_id="state")
+            for m in msgs_raw
+        ]
         retrieved = state.get("retrieved_context", "")
+        history_mode = str(cfg.get("history_mode") or "").strip().lower()
+        if history_mode not in ("full", "minimal"):
+            # 兼容旧参数：synthetic_metadata_history=True 等价于 minimal
+            history_mode = "minimal" if cfg.get("synthetic_metadata_history") else "full"
         
         # Query 提取
         query = state.get("input", "")
         if not query and msgs:
-            last = msgs[-1]
-            query = _safe_get(last, "content", "")
+            query = str(msgs[-1].content)
             
         # Memory 检索
         mem_items = []
         if memory and query:
             mem_items = memory.search(query=query, limit=cfg.get("mem_limit", 3))
             
-        # Window 筛选
-        limit = cfg.get("conv_limit", self.max_messages or 20)
-        window = msgs[-limit:] if limit else msgs
-        
         # 组装
         if retrieved and retrieved.strip():
             parts.append(f"<context type='retrieved'>\n{retrieved}\n</context>")
         if mem_items:
             mem_str = "\n".join(f"- {str(it)}" for it in mem_items)
             parts.append(f"<context type='memory'>\n{mem_str}\n</context>")
-        if window:
-            parts.append(f"<context type='history'>\n{self.structure(window, cfg.get('format', 'plain'))}\n</context>")
-        elif cfg.get("synthetic_metadata_history"):
+        if history_mode == "minimal":
             chain = format_metadata_chain_for_prompt(state)
             if chain.strip():
                 parts.append(f"<context type='metadata_chain'>\n{chain}\n</context>")
+        else:
+            limit = cfg.get("conv_limit", self.max_messages or 20)
+            window = msgs[-limit:] if limit else msgs
+            if window:
+                parts.append(f"<context type='history'>\n{self.structure(window, cfg.get('format', 'plain'))}\n</context>")
 
         structured = "\n\n".join(parts)
         return self.compress(structured, cfg.get("max_tokens"))

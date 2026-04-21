@@ -27,6 +27,38 @@
     "challenge_double_user": {
       "type": "file",
       "path": "config/workflow_challenge_double_user.json"
+    },
+    "thesis_checklist_task": {
+      "type": "file",
+      "path": "config/workflow_thesis_checklist_task.json"
+    },
+    "parallel_conditional_demo": {
+      "type": "file",
+      "path": "config/workflow_parallel_conditional_demo.json"
+    },
+    "arxiv_research_user": {
+      "type": "file",
+      "path": "config/workflow_arxiv_research_user.json"
+    },
+    "file_analysis": {
+      "type": "file",
+      "path": "config/workflow_file_analysis.json"
+    },
+    "docling_user_test": {
+      "type": "file",
+      "path": "config/workflow_docling_user_test.json"
+    },
+    "checklist_annotate": {
+      "type": "file",
+      "path": "config/workflow_checklist_annotate.json"
+    },
+    "checklist_annotate_v2": {
+      "type": "file",
+      "path": "config/workflow_checklist_annotate_v2.json"
+    },
+    "checklist_annotate_v3": {
+      "type": "file",
+      "path": "config/workflow_checklist_annotate_v3.json"
     }
   }
 }

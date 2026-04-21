@@ -8,11 +8,44 @@ from tools.base_tool import BaseTool
 from core.message import ToolResult
 from utils.logger import get_logger
 
-import PyPDF2
-import docx
-
-
 logger = get_logger(__name__)
+
+
+def _load_pdf_text(file_path: str) -> str:
+    """按需导入 PyPDF2，避免未安装时阻塞整个 tools 包（如 plan 构图阶段）。"""
+    try:
+        import PyPDF2  # type: ignore
+    except ImportError as e:
+        raise ImportError(
+            "需要安装 PyPDF2 库来读取 PDF 文件: pip install PyPDF2"
+        ) from e
+    content: list[str] = []
+    with open(file_path, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        for page_num in range(len(reader.pages)):
+            page = reader.pages[page_num]
+            text = page.extract_text()
+            if isinstance(text, str):
+                content.append(text)
+            else:
+                content.append(str(text))
+    return "\n".join(content)
+
+
+def _load_docx_text(file_path: str) -> str:
+    """按需导入 python-docx，避免未安装时阻塞整个 tools 包。"""
+    try:
+        import docx  # type: ignore
+    except ImportError as e:
+        raise ImportError(
+            "需要安装 python-docx 库来读取 Word 文件: pip install python-docx"
+        ) from e
+    doc = docx.Document(file_path)
+    lines: list[str] = []
+    for para in doc.paragraphs:
+        text = para.text
+        lines.append(text if isinstance(text, str) else str(text))
+    return "\n".join(lines)
 
 
 class FileLoadingTool(BaseTool):
@@ -79,38 +112,18 @@ class FileLoadingTool(BaseTool):
                         except Exception:
                             raise ValueError(f"无法读取文件，编码格式不支持: {file_path}")
             elif ext == '.pdf':
-                # PDF 文件
+                # PDF 文件（PyPDF2 仅在需要时导入）
                 try:
-                    content = []
-                    with open(file_path, 'rb') as f:
-                        reader = PyPDF2.PdfReader(f)
-                        for page_num in range(len(reader.pages)):
-                            page = reader.pages[page_num]
-                            text = page.extract_text()
-                            # 确保文本编码正确
-                            if isinstance(text, str):
-                                content.append(text)
-                            else:
-                                content.append(str(text))
-                    content = '\n'.join(content)
+                    content = _load_pdf_text(file_path)
                 except ImportError:
-                    raise ImportError("需要安装 PyPDF2 库来读取 PDF 文件: pip install PyPDF2")
+                    raise
                 except Exception as e:
-                    raise Exception(f"读取 PDF 文件失败: {e}")
+                    raise Exception(f"读取 PDF 文件失败: {e}") from e
             elif ext in ['.docx']:
                 # Word 文件
                 try:
                     try:
-                        doc = docx.Document(file_path)
-                        content = []
-                        for para in doc.paragraphs:
-                            text = para.text
-                            # 确保文本编码正确
-                            if isinstance(text, str):
-                                content.append(text)
-                            else:
-                                content.append(str(text))
-                        content = '\n'.join(content)
+                        content = _load_docx_text(file_path)
                     except KeyError as e:
                         # 处理书签相关的错误
                         if "There is no item named" in str(e):

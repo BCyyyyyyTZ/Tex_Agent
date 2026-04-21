@@ -53,25 +53,51 @@ def _find_existing_parse(root: Path, source_stem: str) -> Optional[Path]:
     return candidates[0]
 
 
+_DEFAULT_MD_PREVIEW_CHARS = 4000   # 默认在 output 中附带的 Markdown 预览字符数
+
+
 class DoclingParseTool(BaseTool):
     """
     Docling 文档解析工具。
 
     将 PDF、DOCX、MD 等文档解析为结构化 Markdown 和 JSON。
     支持缓存机制（默认开启），避免重复解析相同文档。
+
+    output 格式：
+      - 文件路径信息（output_dir / markdown_path / json_path）
+      - Markdown 正文预览（前 md_preview_chars 字符），供下游 agent 节点直接消费
     """
 
     def __init__(self):
         super().__init__(
             name="docling_parse",
-            description="使用 Docling 解析文档（PDF/DOCX/MD 等），返回解析后的 Markdown 和 JSON 文件路径。支持缓存复用已解析结果（默认开启）。",
+            description=(
+                "使用 Docling 解析文档（PDF/DOCX/MD 等），返回解析后的 Markdown 正文预览（前4000字）"
+                "和文件路径。支持缓存复用已解析结果（默认开启）。"
+                "下游节点可直接从 result 字段获取文档内容，也可通过 markdown_path 配合 file_loading 工具获取完整内容。"
+            ),
             input_schema={
                 "doc_path": "必填，要解析的文档绝对或相对路径（支持 PDF、DOCX、MD、TXT 等）",
-                "redo": "可选，是否强制重新解析（true/false，默认为 false）。若为 false 则优先复用缓存结果。"
+                "redo": "可选，是否强制重新解析（true/false，默认为 false）。若为 false 则优先复用缓存结果。",
+                "md_preview_chars": "可选，在 output 中附带的 Markdown 预览字符数，默认 4000，0 表示不附带正文。"
             }
         )
 
-    def run(self, doc_path: str, redo: bool = False) -> ToolResult:
+    def _read_md_preview(self, md_path: Path, max_chars: int) -> str:
+        """读取 Markdown 文件的前 max_chars 字符作为预览。"""
+        if max_chars <= 0 or not md_path.exists():
+            return ""
+        try:
+            with md_path.open("r", encoding="utf-8") as f:
+                content = f.read(max_chars)
+            if md_path.stat().st_size > max_chars:
+                content += f"\n\n...[内容已截断，完整文件见: {md_path}]"
+            return content
+        except Exception as e:
+            logger.warning(f"读取 Markdown 预览失败: {e}")
+            return ""
+
+    def run(self, doc_path: str, redo: bool = False, md_preview_chars: int = _DEFAULT_MD_PREVIEW_CHARS) -> ToolResult:
         """
         执行文档解析。
 
@@ -97,20 +123,21 @@ class DoclingParseTool(BaseTool):
                     md_path = existing_dir / "document.md"
                     json_path = existing_dir / "document.json"
                     artifacts_dir = existing_dir / "artifacts"
+                    md_size = md_path.stat().st_size if md_path.exists() else 0
 
-                    logger.info(f"找到缓存解析结果: {existing_dir.name}")
+                    md_preview = self._read_md_preview(md_path, md_preview_chars)
+                    logger.info(f"找到缓存解析结果: {existing_dir.name} (md={md_size}B)")
+                    output_text = (
+                        f"[缓存复用] 文档: {doc_path}\n"
+                        f"输出目录: {existing_dir}\n"
+                        f"Markdown: {md_path}  ({md_size:,} 字节)\n"
+                        f"JSON: {json_path}\n"
+                    )
+                    if md_preview:
+                        output_text += f"\n--- Markdown 内容预览（前 {md_preview_chars} 字符） ---\n{md_preview}"
                     return ToolResult(
                         success=True,
-                        output=f"""已从缓存加载解析结果（无需重新解析）：
-
-文档: {doc_path}
-输出目录: {existing_dir}
-Markdown: {md_path}
-JSON: {json_path}
-Artifacts: {artifacts_dir}
-
-提示：如需强制重新解析，请设置 redo=true。
-""",
+                        output=output_text,
                         metadata={
                             "success": True,
                             "source_path": str(source_path),
@@ -118,6 +145,7 @@ Artifacts: {artifacts_dir}
                             "markdown_path": str(md_path),
                             "json_path": str(json_path),
                             "artifacts_dir": str(artifacts_dir),
+                            "md_size_bytes": md_size,
                             "from_cache": True,
                             "redo": redo,
                         }
@@ -138,19 +166,21 @@ Artifacts: {artifacts_dir}
                     metadata={"source_path": str(source_path), "from_cache": False}
                 )
 
-            output_msg = f"""文档解析成功！
+            md_path_new = Path(result.markdown_path) if result.markdown_path else None
+            md_size_new = md_path_new.stat().st_size if (md_path_new and md_path_new.exists()) else 0
+            md_preview = self._read_md_preview(md_path_new, md_preview_chars) if md_path_new else ""
 
-源文件: {result.source_path}
-输出目录: {result.output_dir}
-Markdown 文件: {result.markdown_path}
-JSON 文件: {result.json_path}
-资源目录: {result.artifacts_dir}
-解析路由: {result.route}
-页数: {result.page_count or 'N/A'}
-"""
-
+            output_msg = (
+                f"[解析成功] 文档: {result.source_path}\n"
+                f"输出目录: {result.output_dir}\n"
+                f"Markdown: {result.markdown_path}  ({md_size_new:,} 字节)\n"
+                f"JSON: {result.json_path}\n"
+                f"解析路由: {result.route}  页数: {result.page_count or 'N/A'}\n"
+            )
             if result.bypass_stage:
                 output_msg += f"旁路阶段: {result.bypass_stage}\n"
+            if md_preview:
+                output_msg += f"\n--- Markdown 内容预览（前 {md_preview_chars} 字符） ---\n{md_preview}"
 
             return ToolResult(
                 success=True,
@@ -162,6 +192,7 @@ JSON 文件: {result.json_path}
                     "markdown_path": result.markdown_path,
                     "json_path": result.json_path,
                     "artifacts_dir": result.artifacts_dir,
+                    "md_size_bytes": md_size_new,
                     "page_count": result.page_count,
                     "route": result.route,
                     "from_cache": False,

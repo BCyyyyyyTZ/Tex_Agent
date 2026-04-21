@@ -1,7 +1,7 @@
 from typing import List, Optional, Union
 from agents.base_agent import BaseAgent
 from agents.simple_agent import SimpleAgent
-from core.message import AgentMessage
+from core.message import WorkflowMessage
 from core.exceptions import AgentError
 from tools.base_tool import BaseTool
 from config.settings import settings
@@ -75,7 +75,7 @@ class PaperCheckAgent(SimpleAgent):
             max_history = max_history
         )
 
-    def paper_check(self, message: AgentMessage) -> AgentMessage:
+    def paper_check(self, message: WorkflowMessage) -> WorkflowMessage:
         llm_content = self.run(message).content
         begin_index = llm_content.find("BEGIN")
         end_idx = llm_content.find("END")
@@ -89,8 +89,10 @@ class PaperCheckAgent(SimpleAgent):
         question_list = json.loads(question_list_str)
         tool_result = self.call_tool("pdf_comment", {"question_list": question_list})
 
-        return AgentMessage(
+        return WorkflowMessage(
             role="assistant",
+            source_type="agent",
+            source_id=self.name,
             content=tool_result.output,
         )
 
@@ -99,8 +101,10 @@ if __name__ == "__main__":
     paper_check_agent = PaperCheckAgent(name="paper_check_agent", rules_path=rules_path)
     pdf_path = r"C:\Users\86138\Downloads\AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework.pdf"
     output_path = r"C:\Users\86138\Downloads\AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework0.pdf"
-    msg = AgentMessage(
+    msg = WorkflowMessage(
         role="user",
+        source_type="user",
+        source_id="manual_test",
         content="",
         metadata={"attachment": [pdf_path], "tool_args": {"pdf_comment": {"pdf_path": pdf_path, "output_path": output_path}}},
     )

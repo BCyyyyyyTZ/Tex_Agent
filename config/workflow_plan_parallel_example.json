@@ -1,0 +1,169 @@
+{
+  "_description": "Plan 链路生成图的示例输出（供 LLM planner 参考格式，非可直接运行的 workflow）",
+  "_note": "此文件展示 planner 可产出含并行+条件边的 graph_config 格式，由 _translate_plan_to_graph_config 解析",
+  "plan_id": "plan_example_parallel",
+  "original_task": "分析大语言模型论文的学术质量与应用潜力",
+  "entry_node": "task_analyzer",
+  "nodes": [
+    {
+      "node_id": "task_analyzer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是任务分析专家。",
+        "subtask": "提炼分析维度与评估框架",
+        "depends_on": [],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": []
+    },
+    {
+      "node_id": "parallel_analysis_fork",
+      "node_type": "parallel_fork",
+      "agent_name": "",
+      "tool_name": "",
+      "config": {},
+      "parallel_branches": ["academic_reviewer", "value_assessor"],
+      "join_policy": "all_success",
+      "source_branches": []
+    },
+    {
+      "node_id": "academic_reviewer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是学术质量评审专家。",
+        "subtask": "评估方法论严谨性和理论贡献，confidence 反映学术质量",
+        "depends_on": ["task_analyzer"],
+        "temperature": 0.4,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": []
+    },
+    {
+      "node_id": "value_assessor",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是实用价值评估专家。",
+        "subtask": "评估应用潜力和工程落地可行性，confidence 反映实用价值",
+        "depends_on": ["task_analyzer"],
+        "temperature": 0.4,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": []
+    },
+    {
+      "node_id": "synthesis_join",
+      "node_type": "parallel_join",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是综合评估专家，整合并行分支结论。",
+        "subtask": "整合学术和价值评审，输出综合 confidence 和结论",
+        "depends_on": ["academic_reviewer", "value_assessor"],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": ["academic_reviewer", "value_assessor"]
+    },
+    {
+      "node_id": "deep_reviewer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是深度审查专家，处理低质量论文的详细问题排查。",
+        "subtask": "排查综合评分偏低的具体原因，给出改进建议",
+        "depends_on": ["synthesis_join"],
+        "temperature": 0.5,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": []
+    },
+    {
+      "node_id": "final_deliverer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "tool_name": "",
+      "config": {
+        "system_prompt": "你是最终交付专家，输出完整评估报告。",
+        "subtask": "整合所有分析，给出结构化评估报告（总分、亮点、不足、建议）",
+        "depends_on": ["synthesis_join"],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      },
+      "parallel_branches": [],
+      "join_policy": "all_success",
+      "source_branches": []
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "task_analyzer",
+      "to_node": "parallel_analysis_fork",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "parallel_analysis_fork",
+      "to_node": "academic_reviewer",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "parallel_analysis_fork",
+      "to_node": "value_assessor",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "academic_reviewer",
+      "to_node": "synthesis_join",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "value_assessor",
+      "to_node": "synthesis_join",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "synthesis_join",
+      "to_node": "deep_reviewer",
+      "condition": {
+        "field": "metadata.synthesis_join.confidence",
+        "op": "lt",
+        "value": 0.7
+      },
+      "priority": 1
+    },
+    {
+      "from_node": "synthesis_join",
+      "to_node": "final_deliverer",
+      "condition": null,
+      "priority": 0
+    },
+    {
+      "from_node": "deep_reviewer",
+      "to_node": "final_deliverer",
+      "condition": null,
+      "priority": 0
+    }
+  ]
+}
