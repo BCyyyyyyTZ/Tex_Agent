@@ -1,0 +1,289 @@
+{
+  "_comment": "论文 Checklist 检查 v2 - 精准定位版\n改进：1) 各检查节点按章节切片 context  2) 检查节点只输出 text_quote+comment（不猜页码）  3) DoclingSearchTool 本地定位页码  4) 新增实验/公式/排版检查器",
+  "nodes": [
+    {
+      "node_id": "parse_paper",
+      "node_type": "tool",
+      "tool_name": "docling_parse",
+      "config": {
+        "tool_input": {
+          "doc_path": "doc/googlelenet.pdf",
+          "redo": false,
+          "md_preview_chars": 500
+        },
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "load_checklist",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "doc/thesis-checklists.md",
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "get_outline",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "mode": "outline"
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_abstract",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["abstract", "摘要", "introduction", "绪论"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_experiment",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["experiment", "evaluation", "result", "实验", "结果", "dataset", "training"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_refs",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["reference", "conclusion", "参考文献", "结论"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "fork_checkers",
+      "node_type": "parallel_fork",
+      "parallel_branches": [
+        "abstract_checker",
+        "structure_checker",
+        "language_checker",
+        "figure_checker",
+        "experiment_checker",
+        "layout_checker"
+      ],
+      "config": {
+        "depends_on": ["slice_abstract", "slice_experiment", "slice_refs", "get_outline", "load_checklist"]
+      }
+    },
+    {
+      "node_id": "abstract_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文摘要与绪论质量检查专家。只依据提供的摘要/绪论原文和 checklist 进行核验，不得捏造。",
+        "subtask": "依据 load_checklist 中【摘要检查列表】和【绪论检查列表】，对 slice_abstract 提取的摘要+绪论内容逐项核验。\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的英文/中文短句（15-50字）\", \"comment\": \"[摘要/绪论] 具体问题\"}\n- 只包含有问题的条目，最多 6 条\n- text_quote 必须是论文原文中可以用 Ctrl+F 找到的片段\n- summary 字段用中文总结摘要/绪论检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "structure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文章节结构检查专家。只依据文档大纲和 checklist 进行核验，不得捏造。",
+        "subtask": "依据 load_checklist 中【章节组织检查列表】，对 get_outline 提供的文档大纲逐项核验。\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的章节标题或短句（可以是标题文字）\", \"comment\": \"[结构] 具体问题\"}\n- 只包含有问题的条目，最多 6 条\n- summary 字段用中文总结章节结构检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "language_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是学术论文语言规范检查专家。只对提供的摘要+绪论内容进行语言核验，不得捏造。",
+        "subtask": "依据 load_checklist 中【通用规则】，对 slice_abstract 提取的论文语言表达进行核验（术语一致性、标点、语法等）。\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的英文/中文短句\", \"comment\": \"[语言] 具体问题\"}\n- 只包含有问题的条目，最多 5 条\n- summary 字段用中文总结语言规范检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "figure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文图表与参考文献检查专家。只依据提供的参考文献+结论章节进行核验，不得捏造。",
+        "subtask": "依据 load_checklist 中【图表与算法检查列表】和【参考文献检查列表】，对 slice_refs 提取的内容逐项核验。\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的短句\", \"comment\": \"[图表/引用] 具体问题\"}\n- 只包含有问题的条目，最多 5 条\n- summary 字段用中文总结图表/引用检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "experiment_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文实验章节检查专家。只依据提供的实验章节内容和 checklist 进行核验，不得捏造。",
+        "subtask": "依据 load_checklist 中【实验章节检查列表】，对 slice_experiment 提取的实验章节内容逐项核验。\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的短句（20-60字）\", \"comment\": \"[实验] 具体问题，如：实验环境未说明、指标定义模糊、对比基线选择未说明理由\"}\n- 只包含有问题的条目，最多 6 条\n- summary 字段用中文总结实验章节检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "layout_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文排版与公式规范检查专家。通过文档结构和大纲来检查排版问题，不需要看原始 PDF。",
+        "subtask": "依据 load_checklist 中【模板与排版检查列表】和【公式、定义与算法环境检查列表】，结合 get_outline 大纲和 slice_abstract 内容进行核验。\n\n重点检查：\n1) 标题层级是否合理（有无单节/单子节问题）\n2) 公式引用是否规范（看文中是否有公式编号引用形式如 (1)、式1 等）\n3) 章节数量和深度是否适当\n\n输出要求（JSON 格式严格遵守）：\n- result 字段必须是纯 JSON 数组，每项：{\"text_quote\": \"原文中真实存在的短句或标题文字\", \"comment\": \"[排版/公式] 具体问题\"}\n- 只包含有问题的条目，最多 5 条\n- summary 字段用中文总结排版/公式检查结论（1-2句）",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.15,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "join_checkers",
+      "node_type": "parallel_join",
+      "source_branches": [
+        "abstract_checker",
+        "structure_checker",
+        "language_checker",
+        "figure_checker",
+        "experiment_checker",
+        "layout_checker"
+      ],
+      "join_policy": "all_success",
+      "config": {
+        "depends_on": [
+          "abstract_checker",
+          "structure_checker",
+          "language_checker",
+          "figure_checker",
+          "experiment_checker",
+          "layout_checker"
+        ]
+      }
+    },
+    {
+      "node_id": "annotation_formatter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 PDF 注释格式化专家。将多路检查结果合并为统一的 text_quote+comment 列表，页码由后续工具负责定位。",
+        "subtask": "将 abstract_checker、structure_checker、language_checker、figure_checker、experiment_checker、layout_checker 六个节点输出的注释数组合并为一个完整列表。\n\n要求：\n1. result 字段必须是纯 JSON 数组（不含其他文字），每项格式：{\"text_quote\": \"...\", \"comment\": \"...\"}\n2. 合并所有来源，去除重复（text_quote 高度相似视为重复）\n3. 保留来源标签（comment 中含 [摘要]、[结构]、[语言]、[图表/引用]、[实验]、[排版/公式]）\n4. 若某节点 result 无法解析为数组，在 summary 中注明并跳过\n5. summary 字段：共合并了多少条注释，来自哪些维度",
+        "depends_on": ["join_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "location_resolver",
+      "node_type": "tool",
+      "tool_name": "docling_search",
+      "config": {
+        "tool_input": {
+          "json_path": "${metadata.parse_paper.metadata.tool_metadata.json_path}",
+          "candidates": "${metadata.annotation_formatter.result}",
+          "min_score": 0.2
+        },
+        "depends_on": ["annotation_formatter"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "pdf_annotator",
+      "node_type": "tool",
+      "tool_name": "pdf_comment",
+      "config": {
+        "tool_input": {
+          "pdf_path": "doc/googlelenet.pdf",
+          "annotations": "${metadata.location_resolver.result}",
+          "output_path": "doc/googlelenet_checklist_v2.pdf"
+        },
+        "depends_on": ["location_resolver"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_report",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终报告撰写节点。输出面向作者的结构化检查报告，必须具有可执行性和完整性。",
+        "subtask": "根据六个检查节点（abstract/structure/language/figure/experiment/layout）的输出、location_resolver 定位结果以及 pdf_annotator 执行结果，撰写最终检查报告。\n\n报告必须包含：\n## 一、总体结论\n- 风险等级：高/中/低，说明理由\n- 各维度问题数量统计（6个维度：摘要/绪论、章节结构、语言规范、图表引用、实验设计、排版公式）\n\n## 二、分维度问题清单\n每个维度列出：\n- 具体问题描述\n- 论文中的位置/证据（页码或原文片段）\n- 影响程度（高/中/低）\n- 建议修复动作\n\n## 三、优先级修复计划\n- P0（必须修复）\n- P1（建议修复）\n- P2（可选优化）\n\n## 四、注释文件信息\n- 注释 PDF 路径\n- 成功注释条目数\n\n禁止只复述上游摘要，内容不少于 400 字。",
+        "depends_on": [
+          "pdf_annotator",
+          "abstract_checker", "structure_checker", "language_checker",
+          "figure_checker", "experiment_checker", "layout_checker",
+          "location_resolver"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "parse_paper",          "to_node": "get_outline",          "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_abstract",       "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_experiment",     "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_refs",           "condition": null},
+    {"from_node": "load_checklist",       "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "get_outline",          "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_abstract",       "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_experiment",     "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_refs",           "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "abstract_checker",     "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "structure_checker",    "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "language_checker",     "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "figure_checker",       "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "experiment_checker",   "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "layout_checker",       "condition": null},
+    {"from_node": "abstract_checker",     "to_node": "join_checkers",        "condition": null},
+    {"from_node": "structure_checker",    "to_node": "join_checkers",        "condition": null},
+    {"from_node": "language_checker",     "to_node": "join_checkers",        "condition": null},
+    {"from_node": "figure_checker",       "to_node": "join_checkers",        "condition": null},
+    {"from_node": "experiment_checker",   "to_node": "join_checkers",        "condition": null},
+    {"from_node": "layout_checker",       "to_node": "join_checkers",        "condition": null},
+    {"from_node": "join_checkers",        "to_node": "annotation_formatter", "condition": null},
+    {"from_node": "annotation_formatter", "to_node": "location_resolver",    "condition": null},
+    {"from_node": "location_resolver",    "to_node": "pdf_annotator",        "condition": null},
+    {"from_node": "pdf_annotator",        "to_node": "final_report",         "condition": null},
+    {"from_node": "abstract_checker",     "to_node": "final_report",         "condition": null},
+    {"from_node": "structure_checker",    "to_node": "final_report",         "condition": null},
+    {"from_node": "language_checker",     "to_node": "final_report",         "condition": null},
+    {"from_node": "figure_checker",       "to_node": "final_report",         "condition": null},
+    {"from_node": "experiment_checker",   "to_node": "final_report",         "condition": null},
+    {"from_node": "layout_checker",       "to_node": "final_report",         "condition": null},
+    {"from_node": "location_resolver",    "to_node": "final_report",         "condition": null}
+  ]
+}

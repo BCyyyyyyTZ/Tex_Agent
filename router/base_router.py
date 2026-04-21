@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
-from core.message import AgentMessage
+from core.message import WorkflowMessage
 
 if TYPE_CHECKING:
     from agents.base_agent import BaseAgent
@@ -63,7 +63,7 @@ class BaseRouter(ABC):
     @abstractmethod
     def route(
         self,
-        message: AgentMessage,
+        message: WorkflowMessage,
         context: Optional[Dict[str, Any]] = None,
     ) -> RouteDecision:
         """
@@ -83,7 +83,7 @@ class BaseRouter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def evaluate_complexity(self, message: AgentMessage) -> str:
+    def evaluate_complexity(self, message: WorkflowMessage) -> str:
         """
         评估任务复杂度级别。
 

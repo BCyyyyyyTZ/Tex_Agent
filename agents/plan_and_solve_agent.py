@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from agents.base_agent import BaseAgent
-from core.message import AgentMessage
+from core.message import WorkflowMessage, MessageLike
 
 
 @dataclass
@@ -59,12 +59,12 @@ class PlanAndSolveAgent(BaseAgent):
         return self._name
 
     @abstractmethod
-    def plan(self, message: AgentMessage) -> List[SubTask]:
+    def plan(self, message: MessageLike) -> List[SubTask]:
         """
         规划阶段：将输入任务分解为有序的子任务列表。
 
         Args:
-            message: 原始任务描述 AgentMessage。
+            message: 原始任务描述 WorkflowMessage / MessageLike。
 
         Returns:
             有序的 SubTask 列表（考虑 depends_on 依赖关系）。
@@ -107,7 +107,7 @@ class PlanAndSolveAgent(BaseAgent):
         """
         raise NotImplementedError
 
-    def run(self, message: AgentMessage) -> AgentMessage:
+    def run(self, message: MessageLike) -> WorkflowMessage:
         """
         Plan-and-Solve 主流程（占位实现）。
 
@@ -118,7 +118,7 @@ class PlanAndSolveAgent(BaseAgent):
                      task.result = solve(task, context)
                      task.completed = True
               3. final = aggregate(subtasks)
-              4. 返回 AgentMessage(role="assistant", content=final, ...)
+              4. 返回 WorkflowMessage(role="assistant", content=final, ...)
         """
         raise NotImplementedError(
             "PlanAndSolveAgent.run() 尚未实现。"

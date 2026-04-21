@@ -11,6 +11,8 @@ from utils.display import display
 from workflow.graph_builder import build_app_from_workflow
 from workflow.run_dump import create_run_output_dir
 from context.context_manager import ContextManager
+from core.message import ensure_message
+from core.state import normalize_messages_for_state
 from memory.factory import MemoryFactory
 from memory.persona_memory import UserPersonaMemory
 from cli.commands import CommandRegistry
@@ -116,15 +118,18 @@ class TeXAgentCLI:
                 if hasattr(msg, "to_dict"):
                     history_messages.append(msg.to_dict())
                 else:
-                    history_messages.append({
-                        "role": getattr(msg, "role", "assistant"),
-                        "content": getattr(msg, "content", ""),
-                        "agent_name": getattr(msg, "agent_name", "system")
-                    })
+                    history_messages.append(
+                        ensure_message(
+                            msg,
+                            default_role="assistant",
+                            default_source_type="system",
+                            default_source_id="context",
+                        ).to_dict()
+                    )
 
         run_output_dir = create_run_output_dir()
         initial_state = {
-            "messages": history_messages,
+            "messages": normalize_messages_for_state(history_messages),
             "current_node": "",
             "input": user_input,
             "output": "",
@@ -146,14 +151,14 @@ class TeXAgentCLI:
 
         # 执行后回写消息到 Context（仅追加本轮新增消息，避免重复写入历史）
         if result and "messages" in result:
-            from core.message import AgentMessage
             existed_count = len(history_messages)
             new_messages = result["messages"][existed_count:]
             for msg_dict in new_messages:
-                msg = AgentMessage(
-                    role=msg_dict.get("role", "assistant"),
-                    content=msg_dict.get("content", ""),
-                    agent_name=msg_dict.get("agent_name", "system")
+                msg = ensure_message(
+                    msg_dict,
+                    default_role="assistant",
+                    default_source_type="system",
+                    default_source_id="workflow",
                 )
                 self.context.save(msg)
 

@@ -9,7 +9,7 @@ from abc import abstractmethod
 from typing import List, Tuple, Optional
 
 from agents.base_agent import BaseAgent
-from core.message import AgentMessage
+from core.message import WorkflowMessage, MessageLike
 from tools.base_tool import BaseTool
 
 
@@ -99,7 +99,7 @@ class ReActAgent(BaseAgent):
         """
         raise NotImplementedError
 
-    def run(self, message: AgentMessage) -> AgentMessage:
+    def run(self, message: MessageLike) -> WorkflowMessage:
         """
         ReAct 循环主流程（占位实现）。
 
@@ -107,7 +107,7 @@ class ReActAgent(BaseAgent):
               1. 初始化 observation = message.content，history = []
               2. 循环调用 reason() → act() → 执行工具 → 更新 observation
               3. 调用 is_done() 判断是否终止
-              4. 构造并返回 AgentMessage(role="assistant", ...)
+              4. 构造并返回 WorkflowMessage(role="assistant", ...)
         """
         raise NotImplementedError(
             "ReActAgent.run() 尚未实现。"

@@ -2,14 +2,14 @@
 SimpleAgent：纯 LLM 节点实现（不执行工具）。
 职责：接收输入消息 -> 调用 LLM -> 返回 assistant 文本结果。
 """
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 import asyncio
 import os
 from datetime import datetime
 from pathlib import Path
 
 from agents.base_agent import BaseAgent
-from core.message import AgentMessage
+from core.message import WorkflowMessage, MessageLike
 from core.exceptions import AgentError
 from tools.base_tool import BaseTool
 from config.settings import settings
@@ -60,7 +60,7 @@ class SimpleAgent(BaseAgent):
         )
 
         self.backend = self._init_backend()
-        self.history: List[AgentMessage] = []
+        self.history: List[WorkflowMessage] = []
         self.max_history = max_history
 
     def _init_backend(self) -> str:
@@ -140,7 +140,7 @@ class SimpleAgent(BaseAgent):
             logger.warning(f"[{self.name}] OpenAI 兼容通道暂不支持本地附件，已忽略 attachment")
         return None
 
-    def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+    def run(self, message: MessageLike) -> WorkflowMessage:
         self.reset()
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)
@@ -157,10 +157,11 @@ class SimpleAgent(BaseAgent):
             llm_content = self.llms["llm"].response(prompt, attachment).strip()
             self._append_llm_trace(history_messages, llm_content)
 
-            result = AgentMessage(
+            result = WorkflowMessage(
                 role="assistant",
+                source_type="agent",
+                source_id=self.name,
                 content=llm_content,
-                agent_name=self.name,
             )
             self.history.append(result)
             self._trim_history()
@@ -171,12 +172,12 @@ class SimpleAgent(BaseAgent):
             logger.error(f"[{self.name}] 执行失败: {e}")
             raise AgentError(f"{self.name} 执行失败: {e}") from e
 
-    async def ainvoke(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+    async def ainvoke(self, message: MessageLike) -> WorkflowMessage:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.run, message)
 
     def reset(self) -> None:
         self.history.clear()
 
-    def get_history(self) -> List[AgentMessage]:
+    def get_history(self) -> List[WorkflowMessage]:
         return list(self.history)

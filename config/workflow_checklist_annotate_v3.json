@@ -1,0 +1,303 @@
+{
+  "_comment": "通用学术文档 Checklist 检查 v3 - EEG_Image_补充.pdf\n改进：1) 针对技术型文档的检查项  2) 更短的 text_quote 要求（8-20字）提升命中率  3) 输出 severity 分级  4) 颜色自动推断",
+  "nodes": [
+    {
+      "node_id": "parse_paper",
+      "node_type": "tool",
+      "tool_name": "docling_parse",
+      "config": {
+        "tool_input": {
+          "doc_path": "doc/EEG_Image_补充.pdf",
+          "redo": false,
+          "md_preview_chars": 500
+        },
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "load_checklist",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "doc/thesis-checklists.md",
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "get_outline",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "mode": "outline"
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_intro",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["摘要", "abstract", "目录", "本文档", "介绍", "introduction"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_method",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["预处理", "实验", "范式", "方法", "采集", "硬件", "被试"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "slice_analysis",
+      "node_type": "tool",
+      "tool_name": "markdown_section",
+      "config": {
+        "tool_input": {
+          "md_path": "${metadata.parse_paper.metadata.tool_metadata.markdown_path}",
+          "section_keywords": ["分析", "结果", "讨论", "数据", "比较", "结论", "发布"],
+          "mode": "content",
+          "max_chars": 4000
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "export_texts",
+      "node_type": "tool",
+      "tool_name": "docling_search",
+      "config": {
+        "tool_input": {
+          "json_path": "${metadata.parse_paper.metadata.tool_metadata.json_path}",
+          "mode": "export",
+          "max_chars": 180
+        },
+        "depends_on": ["parse_paper"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "fork_checkers",
+      "node_type": "parallel_fork",
+      "parallel_branches": [
+        "abstract_checker",
+        "structure_checker",
+        "language_checker",
+        "content_checker",
+        "figure_checker",
+        "layout_checker"
+      ],
+      "config": {
+        "depends_on": ["slice_intro", "slice_method", "slice_analysis", "get_outline", "load_checklist", "export_texts"]
+      }
+    },
+    {
+      "node_id": "abstract_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是学术文档导言/摘要质量检查专家。\n\n【重要背景】本文档是一份「读书笔记/数据集补充说明」，用于帮助读者理解一篇已发表的 EEG 数据集论文（AllJoined1），不是正式投稿论文。请按照「技术解说文档」的标准而非「SCI 论文投稿」标准来判断。\n\n【不属于问题的情形】\n- 文档介绍部分信息不如原论文完整（读书笔记本就是摘要性的）\n- 使用约/大约等模糊量词（解说文档风格）\n- 正文中出现技术参数（这不是摘要的责任）",
+        "subtask": "核验 slice_intro 的导言/摘要部分，参考 load_checklist 的【摘要检查列表】。\n\n只检查真正影响读者理解的问题：\n1. 导言/摘要是否说明了文档的目的（它要解释什么论文/数据集）\n2. 关键术语首次出现是否有中文说明或英文缩写解释\n3. 是否存在明显的事实错误（错误引用数字等）\n\n【禁止报告的情形】\n- 不要因为「摘要不完整」就将正文内容高亮为摘要问题\n- 不要报告「缺少对比实验」「缺少排除标准」等论文要求\n- text_quote 必须来自 slice_intro，不能引用正文其他位置的内容\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"slice_intro中的原文8-20字片段\", \"comment\": \"[摘要] 具体问题说明\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结导言/摘要质量\"\n}\n```\n- text_quote 必须从 export_texts 文本块中原样复制，8-20字\n- 如果文档没有对应文本（内容缺失），text_quote 置为 \"\"\n- 没有真正问题则 result 返回 []\n- 最多 3 条",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "structure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是文档章节结构检查专家。\n\n【重要背景】本文档是一份「读书笔记/数据集补充说明」，不是正式论文。读书笔记可以没有严格的章节编号，用问题式标题是正常风格。\n\n【OCR 噪音说明】文档由 Docling OCR 解析，以下是 OCR 产物而非作者问题：\n- 标题中出现的 ⼈、⼿、⽂、⽬、⼦ 等字符（Kangxi 部首）\n- 中文字符之间莫名的空格\n- 标题中出现的 、 等孤立标点（OCR 解析图表或特殊格式残留）",
+        "subtask": "对 get_outline 提供的文档大纲进行结构合理性检查，参考 load_checklist 的【章节组织检查列表】。\n\n只检查真正影响导航和理解的结构问题：\n1. 层级跳跃：从一级直接跳到三级，没有二级过渡\n2. 内容重复：两个章节名高度相似或涵盖内容重叠\n3. 孤立子节：某个大章节只有一个子节，且子节标题和父级没有区分度\n\n【不属于问题的情形】\n- 问句式标题（「为什么X」「如何Y」）是读书笔记的正常风格\n- 没有数字编号的标题（读书笔记不强制）\n- 标题中有 OCR 噪音字符（不是作者问题）\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"真实标题文字8-20字（去除##）\", \"comment\": \"[结构] 问题说明\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结结构问题\"\n}\n```\n- text_quote 从 export_texts 文本块中原样复制，必须是真实存在的标题文字（去除 ## 前缀）\n- 如果问题涉及整体结构（无具体对应文本），text_quote 置为 \"\"\n- 最多 3 条，没有真正问题则返回 []",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "language_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是学术写作语言规范检查专家。\n\n【重要背景】本文档是「读书笔记/数据集补充说明」，部分口语化表达是刻意为之以便读者理解，不应过度苛责文风。\n\n【OCR 噪音——不得标注为作者错误】\nDocling OCR 解析过程会引入以下伪影，它们不是作者写作问题：\n- 中文标点前后莫名空格（如「300ms ，随后」中间的空格是 OCR 产物）\n- Kangxi 部首字符（⼿ ⼈ ⽂ ⽬ ⼦ 等）替代普通汉字\n- 英文字母后紧跟中文字符之间的额外空格\n- 「 ，」「 。」等标点前有空格（OCR 常见问题）\n\n【真正需要检查的语言问题】\n1. 技术术语使用不一致（同一概念时而中文时而英文且无说明）\n2. 句子表意模糊，读者无法确定指代\n3. 明显的口语化且影响专业性（如「抖」「跑」用于描述学术现象）\n4. 前后矛盾的数字或事实陈述",
+        "subtask": "对 slice_intro 和 slice_method 的文字进行语言规范检查，参考 load_checklist 的【通用规则】。\n\n【严格禁止报告以下内容】\n- 「300ms ，随后」这类空格是 OCR 噪音，不是作者排版错误\n- 「约 22 岁」这类模糊量词在读书笔记中完全合理\n- 任何中英文之间的空格，因为 OCR 会自动插入\n- 「中英文标点混用」——若是 OCR 引入的，不报\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"原文8-20字真实片段\", \"comment\": \"[语言] 具体问题（说明为何影响理解）\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结真正的语言问题\"\n}\n```\n- text_quote 从 export_texts 文本块中原样复制，不超过20字\n- 最多 4 条真正有价值的语言问题，宁可少报也不误报\n- 没有真正问题则返回 []",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "content_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是技术文档内容完整性检查专家。\n\n【重要背景】本文档是「读书笔记/数据集补充说明」，目的是帮读者理解一篇已发表 EEG 数据集论文（AllJoined1）。它不需要包含原论文的所有技术细节，但需要：\n- 解释关键实验设计（刺激呈现、采集参数）\n- 说明数据获取方式\n- 解释重要概念（如 shared1000、NSD）\n\n【不属于此文档问题的事项】\n- 要求提供被试纳入/排除标准（原论文有，读书笔记无需重复）\n- 要求有「对比实验」设计（这是读书笔记，不是实验报告）\n- 要求提供与采样率一致的额外技术规格（超出笔记范围）\n- linktr.ee/alljoined1 是合法的 Linktree 聚合链接，提供了数据访问入口",
+        "subtask": "对 slice_method 中的技术描述内容进行完整性核验，参考 load_checklist 的【实验章节检查列表】。\n\n只检查读书笔记语境下真正缺失的内容：\n1. 实验范式描述：刺激类型、呈现时长是否提及（基本参数）\n2. 采集设备：设备名称/通道数/采样率是否说明\n3. 关键概念（shared1000, NSD）是否有解释，还是仅当术语使用\n4. 预处理流程：至少应说明主要步骤，哪怕简略\n5. 技术参数前后是否矛盾（如采样率前后不一致）\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"原文8-20字真实片段\", \"comment\": \"[内容] 具体缺失内容说明\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结内容完整性\"\n}\n```\n- text_quote 从 export_texts 文本块中原样复制，不超过20字\n- 如果问题是「缺少某内容」（原文中不存在），text_quote 置为 \"\"\n- 最多 4 条真正有价值的内容问题\n- 没有真正问题则返回 []",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "figure_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是图表与引用规范检查专家。\n\n【重要背景】本文档是「读书笔记/数据集补充说明」，可能没有原创图表，这不是问题。\n\n【不属于问题的情形】\n- 实验范式描述（如「图呈现 300ms，随后黑屏」）不需要对比实验支撑，这是事实陈述\n- 读书笔记中对原论文的总结性引用，无需二次引用格式\n- 对已知公开数据集的描述（shared1000, NSD）不需要额外参考文献",
+        "subtask": "对 slice_analysis 中的分析/结论性内容进行图表与引用规范检查，参考 load_checklist 的【图表与算法检查列表】。\n\n只检查以下真正的问题：\n1. 文档中声称有图表（如「见图X」「如表1所示」），但实际图表不存在或编号错误\n2. 给出具体数值作为结论（如「准确率提升20%」），但没有说明数据来源\n3. 引用了特定论文结果，但没有注明是哪篇论文\n4. 分析结论与前文数据明显矛盾\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"原文8-20字真实片段\", \"comment\": \"[图表/引用] 具体问题说明\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结图表引用问题\"\n}\n```\n- text_quote 从 export_texts 文本块中原样复制，不超过20字\n- 宁可少报也不误报，如果没有真正问题则返回 []\n- 最多 3 条",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "layout_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是文档排版规范检查专家。\n\n【OCR 噪音——绝对不得标注为排版问题】\n以下均是 Docling OCR 解析引入的伪影，不是作者的排版错误：\n- 中文字符之间、标点前后的空格（如「论⽂ 写出」中的空格）\n- Kangxi 部首字符：⼈、⼿、⽂、⽬、⼦、⼀ 等\n- 标题文字中出现的 、（顿号）孤立存在（OCR 解析图片标注残留）\n- OCR 乱码字符 ￿（已知问题，注释说明即可，无需作为排版错误处理）\n\n【真正的排版问题】\n1. 同一文档中标题格式明显不一致（部分用中文全角标点，部分用英文半角，且有规律性差异）\n2. 正文中使用了 ## 这类 Markdown 语法标记（说明文档格式转换不完整）\n3. 文档整体视觉层级混乱（看不出哪是一级标题哪是正文）",
+        "subtask": "对 get_outline 大纲进行排版规范检查，参考 load_checklist 的【模板与排版检查列表】。\n\n【严格禁止报告以下内容】\n- 任何中文字符间距问题（OCR 产物）\n- Kangxi 部首替换字符问题（OCR 产物，已有工具处理）\n- 标题缺少数字编号（读书笔记不强制）\n- OCR 字符 ￿ 或类似乱码（已知 OCR 限制，注明一次即可）\n\n输出格式（严格 JSON）：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"原文8-20字真实片段\", \"comment\": \"[排版] 具体问题说明\", \"severity\": \"high/medium/low\"}\n  ],\n  \"summary\": \"一句话总结排版问题\"\n}\n```\n- text_quote 从 export_texts 文本块中原样复制，不超过20字\n- 排版问题若涉及整体（无具体片段），text_quote 置为 \"\"\n- 最多 3 条真正的排版问题，没有则返回 []",
+        "depends_on": ["fork_checkers"],
+        "temperature": 0.1,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "join_checkers",
+      "node_type": "parallel_join",
+      "source_branches": [
+        "abstract_checker",
+        "structure_checker",
+        "language_checker",
+        "content_checker",
+        "figure_checker",
+        "layout_checker"
+      ],
+      "join_policy": "all_success",
+      "config": {
+        "depends_on": [
+          "abstract_checker",
+          "structure_checker",
+          "language_checker",
+          "content_checker",
+          "figure_checker",
+          "layout_checker"
+        ]
+      }
+    },
+    {
+      "node_id": "annotation_formatter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 PDF 注释格式化专家。严格输出 JSON，不添加任何说明文字在 result 字段之外。",
+        "subtask": "将 abstract_checker、structure_checker、language_checker、content_checker、figure_checker、layout_checker 六个节点的 result 数组合并，并过滤误报。\n\n【过滤规则——以下类型必须删除】\n1. comment 提到「OCR」「乱码」「间距」「空格规范」但 text_quote 中的空格是 docling 解析产物（⼈ ⼦ ⽂ 等 Kangxi 字符旁边的空格）\n2. comment 说「缺少对比实验」或「需要统计支撑」，但 text_quote 是实验范式的客观描述\n3. comment 说「摘要对…描述不足」，但 text_quote 不在摘要/Abstract 章节\n4. comment 提到 linktr.ee 链接不完整（这是合法 Linktree 链接）\n5. text_quote 和 comment 描述的问题所指位置明显不符\n\n【保留规则】\n- 保留所有有充分理由的实质性问题\n- 去除重复（text_quote 相似度超过 80% 的只保留 severity 最高的一条）\n- 按 severity 排序：high > medium > low\n\n严格要求：\n1. result 字段只能是纯 JSON 数组，不含任何其他文字\n2. 每项格式：{\"text_quote\": \"...\", \"comment\": \"...\"}\n   comment 中保留 [摘要]/[结构]/[语言]/[内容]/[图表/引用]/[排版] 标签（颜色将自动推断）\n3. summary 字段：总条数 + 各维度分布\n\n示例输出：\n```json\n{\n  \"result\": [\n    {\"text_quote\": \"视觉成分会抖\", \"comment\": \"[语言] 口语化表达，建议改为'视觉成分存在漂移'\"},\n    {\"text_quote\": \"预处理步骤如下\", \"comment\": \"[内容] 缺少伪迹处理方法说明\"}\n  ],\n  \"summary\": \"共 X 条，内容X条/语言X条/排版X条/结构X条\"\n}\n```",
+        "depends_on": ["join_checkers"],
+        "temperature": 0.05,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "location_resolver",
+      "node_type": "tool",
+      "tool_name": "docling_search",
+      "config": {
+        "tool_input": {
+          "json_path": "${metadata.parse_paper.metadata.tool_metadata.json_path}",
+          "candidates": "${metadata.annotation_formatter.result}",
+          "min_score": 0.18
+        },
+        "depends_on": ["annotation_formatter"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "pdf_annotator",
+      "node_type": "tool",
+      "tool_name": "pdf_comment",
+      "config": {
+        "tool_input": {
+          "pdf_path": "doc/EEG_Image_补充.pdf",
+          "annotations": "${metadata.location_resolver.result}",
+          "output_path": "doc/EEG_Image_补充_annotated.pdf"
+        },
+        "depends_on": ["location_resolver"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_report",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是技术文档审稿报告撰写专家。输出面向作者的结构化审稿报告，必须直接、具体、可执行。",
+        "subtask": "根据六个检查节点和 location_resolver、pdf_annotator 的结果，撰写审稿报告。\n\n【文档背景】这是一份「EEG 数据集读书笔记/补充说明」，为帮助读者理解 AllJoined1 数据集论文而写。请用「读书笔记审阅」而非「论文投稿审查」的视角来描述问题。\n\n## 一、总体评价\n- 明确说明：这是读书笔记/数据集补充说明，不是正式论文\n- 整体质量：优/良/中/差，1-2句理由\n- 问题总数及按维度分布\n- 哪些问题是真正需要修改的，哪些只是 OCR 解析限制\n\n## 二、主要问题（按严重性排列）\n每条问题包含：\n- 位置（页码或章节名）\n- 问题描述（具体、可执行，避免笼统）\n- 严重度：high/medium/low + 理由\n- 修改建议（作者可执行的1句话）\n\n【特别说明】若有注释标注了「OCR 噪音」问题，请在报告中说明这是解析工具的局限，作者无法直接修改，建议忽略。\n\n## 三、颜色图例说明\n| 颜色 | 问题类型 |\n|------|----------|\n| 亮黄 | 摘要/绪论问题 |\n| 天蓝 | 章节结构问题 |\n| 草绿 | 语言规范问题 |\n| 橙色 | 图表/引用问题 |\n| 浅红 | 内容完整性问题 |\n| 紫色 | 排版/公式问题 |\n\n## 四、优先修改建议（P0/P1/P2）\n- P0（必须）：影响读者理解或存在事实错误\n- P1（建议）：影响专业性但不影响理解\n- P2（可选）：细节改进\n\n## 五、注释文件\n- 输出路径：doc/EEG_Image_补充_annotated.pdf\n- 注释条数及命中情况\n\n内容不少于 400 字，禁止只复述上游摘要，每条修改建议必须具体到操作层面。",
+        "depends_on": [
+          "pdf_annotator",
+          "abstract_checker", "structure_checker", "language_checker",
+          "content_checker", "figure_checker", "layout_checker",
+          "location_resolver"
+        ],
+        "temperature": 0.15,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "parse_paper",          "to_node": "get_outline",          "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_intro",          "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_method",         "condition": null},
+    {"from_node": "parse_paper",          "to_node": "slice_analysis",       "condition": null},
+    {"from_node": "load_checklist",       "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "get_outline",          "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_intro",          "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_method",         "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "slice_analysis",       "to_node": "fork_checkers",        "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "abstract_checker",     "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "structure_checker",    "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "language_checker",     "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "content_checker",      "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "figure_checker",       "condition": null},
+    {"from_node": "fork_checkers",        "to_node": "layout_checker",       "condition": null},
+    {"from_node": "abstract_checker",     "to_node": "join_checkers",        "condition": null},
+    {"from_node": "structure_checker",    "to_node": "join_checkers",        "condition": null},
+    {"from_node": "language_checker",     "to_node": "join_checkers",        "condition": null},
+    {"from_node": "content_checker",      "to_node": "join_checkers",        "condition": null},
+    {"from_node": "figure_checker",       "to_node": "join_checkers",        "condition": null},
+    {"from_node": "layout_checker",       "to_node": "join_checkers",        "condition": null},
+    {"from_node": "join_checkers",        "to_node": "annotation_formatter", "condition": null},
+    {"from_node": "annotation_formatter", "to_node": "location_resolver",    "condition": null},
+    {"from_node": "location_resolver",    "to_node": "pdf_annotator",        "condition": null},
+    {"from_node": "pdf_annotator",        "to_node": "final_report",         "condition": null},
+    {"from_node": "abstract_checker",     "to_node": "final_report",         "condition": null},
+    {"from_node": "structure_checker",    "to_node": "final_report",         "condition": null},
+    {"from_node": "language_checker",     "to_node": "final_report",         "condition": null},
+    {"from_node": "content_checker",      "to_node": "final_report",         "condition": null},
+    {"from_node": "figure_checker",       "to_node": "final_report",         "condition": null},
+    {"from_node": "layout_checker",       "to_node": "final_report",         "condition": null},
+    {"from_node": "location_resolver",    "to_node": "final_report",         "condition": null}
+  ]
+}

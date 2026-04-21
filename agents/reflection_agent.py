@@ -10,7 +10,7 @@ from typing import List, Optional, Union
 
 from agents.base_agent import BaseAgent
 from agents.simple_agent import SimpleAgent
-from core.message import AgentMessage
+from core.message import WorkflowMessage, MessageLike
 from tools.base_tool import BaseTool
 from tools.tool_list import tool_list
 
@@ -101,7 +101,7 @@ class ReflectionAgent(BaseAgent):
 
     
 
-    def _build_history_messages(self, history: List[AgentMessage]) -> list:
+    def _build_history_messages(self, history: List[WorkflowMessage]) -> list:
         """构建对话历史消息列表"""
         history_messages = [f"SYSTEM\n{self.system_prompt}"]
         for hist in history:
@@ -131,7 +131,7 @@ class ReflectionAgent(BaseAgent):
         prompt = "\n\n".join(messages)
         return prompt
 
-    def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+    def run(self, message: MessageLike) -> WorkflowMessage:
         self.reset()
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)
@@ -164,7 +164,7 @@ class ReflectionAgent(BaseAgent):
             if result_index1 != -1:
                 # 直接回答，提取结果
                 result_content = llm_content[result_index1 + len("FINISHED"):].strip().strip('[]')
-                result = AgentMessage(
+                result = WorkflowMessage(
                     role="assistant",
                     content=result_content,
                     agent_name=self.name,
@@ -176,7 +176,7 @@ class ReflectionAgent(BaseAgent):
             elif result_index2 != -1:
                 # 提取反思结果
                 reflection_content = llm_content[result_index2 + len("MODIFICATION"):].strip().strip('[]')
-                reflection_message = AgentMessage(
+                reflection_message = WorkflowMessage(
                     role="assistant",
                     content=reflection_content,
                     agent_name=self.name,
@@ -192,7 +192,7 @@ class ReflectionAgent(BaseAgent):
             else:
                 raise RuntimeError("LLM 输出中未包含预期的 FINISHED 或 MODIFICATION 标签")
 
-        result = AgentMessage(
+        result = WorkflowMessage(
             role="assistant",
             content=self.history[-1].content,
             agent_name=self.name,

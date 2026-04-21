@@ -1,0 +1,77 @@
+{
+  "description": "docling 解析 + user 节点综合测试：解析已有 PDF 论文并让用户选择分析维度",
+  "test_question": "解析并分析项目中已有的论文",
+  "nodes": [
+    {
+      "node_id": "doc_parser",
+      "node_type": "tool",
+      "tool_name": "docling_parse",
+      "config": {
+        "tool_input": "E:\\agent_ai\\main_work_version2\\Tex_Agent-main\\doc\\parsed_doc\\Efficient_Video_Analytics_1776358495\\document.md",
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "paper_overview",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位学术论文分析专家，擅长快速提炼学术论文的核心贡献和技术要点。",
+        "subtask": "根据上游 docling_parse 节点解析的论文内容，完成以下分析：\n1. 论文标题和研究领域\n2. 核心问题（该论文试图解决什么问题）\n3. 主要技术方案（2-3个关键技术点）\n4. 实验结果（关键指标和对比结果）\n5. 局限性（论文承认的限制）\n\n请尽量从文档内容中提取原文信息，不要凭空推断。",
+        "depends_on": ["doc_parser"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "user_focus_selector",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "【论文概览】\n${metadata.paper_overview.result}\n\n---\n请选择您希望深入分析的维度：",
+        "input_schema": {
+          "type": "single_choice",
+          "options": [
+            "技术实现细节（系统架构和算法）",
+            "实验设计与结果分析",
+            "与现有工作对比（相关工作）",
+            "潜在应用场景与局限性"
+          ]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "技术实现细节（系统架构和算法）",
+        "write_to": "user_input.focus",
+        "depends_on": ["paper_overview"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "deep_analyzer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位深度技术分析专家，擅长针对用户指定方向进行学术论文的深度解析。",
+        "subtask": "根据用户选择的分析维度（${metadata.user_focus_selector.result}），对论文进行深度分析。\n\n要求：\n1. 聚焦用户选择的维度，深入挖掘相关内容\n2. 引用论文中的具体数据和描述（从 doc_parser 的完整内容中提取）\n3. 给出你的专业评价（优点/不足）\n4. 推荐进一步阅读的相关内容或方向",
+        "depends_on": ["doc_parser", "paper_overview", "user_focus_selector"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "report_generator",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是一位学术报告撰写专家，擅长将多层次分析结果整合成清晰、完整的论文阅读报告。",
+        "subtask": "整合以下所有分析结果，生成一份完整的论文阅读报告：\n\n报告结构：\n## 1. 论文基本信息（标题、领域、发表场合）\n## 2. 核心贡献摘要（3-5条）\n## 3. 深度分析：${metadata.user_focus_selector.result}\n   （整合 deep_analyzer 的完整分析）\n## 4. 综合评价（优点 + 不足各2-3条）\n## 5. 阅读建议（适合人群 + 阅读顺序）\n\n要求：报告内容必须充实，result 字段至少包含 500 字，每个章节都要有实质性内容。",
+        "depends_on": ["paper_overview", "user_focus_selector", "deep_analyzer"],
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "doc_parser",          "to_node": "paper_overview",       "condition": null},
+    {"from_node": "paper_overview",      "to_node": "user_focus_selector",  "condition": null},
+    {"from_node": "user_focus_selector", "to_node": "deep_analyzer",        "condition": null},
+    {"from_node": "deep_analyzer",       "to_node": "report_generator",     "condition": null}
+  ]
+}

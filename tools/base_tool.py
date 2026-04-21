@@ -30,6 +30,7 @@ class BaseTool(ABC):
         self.input_schema = input_schema
 
 
+    @abstractmethod
     def run(self, input: str) -> ToolResult:
         """
         同步执行工具。
@@ -43,7 +44,7 @@ class BaseTool(ABC):
         Raises:
             ToolError: 工具执行失败时抛出（内部应 catch 后封装为 ToolResult 返回）。
         """
-        pass
+        raise NotImplementedError("Tool must implement run()")
 
     async def arun(self, input: str) -> ToolResult:
         """
