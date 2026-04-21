@@ -340,6 +340,21 @@ RAG_PERSIST_DIR -- rag_persist_directory
 
 在`settings.py`中添加了对路径转化为绝对路径的解析函数，相对路径可以转化成绝对路径而直接使用
 
+### RAG检索 tool
+
+> 实现：`tools/rag_retrieve_tool.py`；注册：`tools/tool_list.py`；返回类型：`core/message.py` 的 `ToolResult`。
+
+#### 设计思路
+1. **复用管道，不重复检索逻辑**：工具持有一个 **`BaseRAGPipeline` / `RAGPipeline`** 实例；默认构造与业务侧相同的 **`RAGPipeline()`**（持久化目录读 `settings`），保证与索引 CLI、workflow retrieve 节点共用同一向量库抽象。
+2. **两种消费形态合一**：LLM 友好段落走已有的 **`retrieve()`** 格式化字符串；需要结构化结果时走 **`retrieve_documents()`**，在 Tool 内序列化为 JSON 字符串写入 **`ToolResult.output`**，避免在消息层引入第二种返回类型。
+3. **空库与无命中可观测、可继续跑**：空库仍 **`success=True`**，用自然语言说明原因并在 **`metadata`** 中标记（如 `empty_kb`），避免把「未建库」当成工具异常打断流程；参数校验错误与运行期异常则 **`success=False`** 区分。
+4. **与编排层契约对齐**：workflow 工具节点对 **`dict` payload 使用 `**` 展开**（`nodes.py`），因此本工具的 `run(self, query, k=None, output_format="text")` 可直接由 JSON 式 `tool_input` 驱动，无需单独适配器。
+
+#### 输出格式选择
+
++ text：与 RAGPipeline.retrieve() 相同的中文分段串（【相关片段 n】（来源：…，相关度：…） + --- 分隔），可以直接拼进 Prompt
++ json：json.dumps 的 UTF-8 文本，根对象含 query、k、count、hits；hits 为列表，元素含 content / source / score / metadata	
+
 ### Docling 文档解析
 
 > 目录：rag/docling_parse.py 与 tools/docling_tool.py
@@ -426,6 +441,28 @@ python rag/rag_delete_cli.py --source <文件名或字符串>
 python rag/rag_delete_cli.py --clear-all --yes
 ```
 
+### RAG查询tool
+
+> 目录：`tools/rag_retrieve_tool.py`；已注册于 `tools/tool_list.py`（默认工具列表中的 `RAGRetrieveTool()`）
+
+#### 工具标识与入参
+
+- 工具名：`rag_retrieve`
+- **入参**（与 `RAGRetrieveTool.run(...)` 一致）：
+  - `query`（**必填**）：自然语言检索句；会去空白，空串则 `success=False`，`error="query 不能为空"`。
+  - `k`（可选）：返回条数上限；缺省为 **`config/settings.py` 中的 `rag_top_k`**。
+  - `output_format`（可选）：**`"text"`**（默认）或 **`"json"`**；其它取值 → `success=False`，`error` 提示仅支持上述两种。
+
+#### Python 直接调用
+
+```python
+from tools.rag_retrieve_tool import RAGRetrieveTool
+from rag.rag_pipeline import RAGPipeline
+
+# 默认：内部 new RAGPipeline()，持久化目录等与全局 settings 一致
+result = RAGRetrieveTool().run(query="你的问题", k=5, output_format="text")
+```
+
 ### Docling 解析
 
 > 目录：rag/docling_parse.py
@@ -468,7 +505,7 @@ python rag/rag_delete_cli.py --clear-all --yes
 
 - [ ] docling解析工具对大pdf的支持（目前思路是分块解析+拼接）
 - [ ] RAG库封装入tool
-- [ ] RAG库的删除单项操作
+- [X] RAG库的删除单项操作
 - [ ] RAG库方法优化：支持markdown文件按标题和段落chunk，而非纯字符数
 - [ ] RAG库方法优化：支持tex文件按标题和段落chunk，而非纯字符数（可能考虑解析tex的方法？）
 - [ ] RAG库多层次设计
