@@ -99,7 +99,7 @@ class Settings:
         default_factory=lambda: _resolve_parsed_doc_dir(os.getenv("PARSED_DOC_DIR", ""))
     )
 
-    # ---- Docling 大 PDF 旁路（页数阈值与分块参数，见 rag/docling_parse.py）----
+    # ---- Docling 大 PDF 旁路（页数阈值与分块参数，见 rag/document_parse.py）----
     # PAGE_THRESHOLD：页数 >= 该值走旁路；目前仅统计 PDF。
     docling_page_threshold: int = field(
         default_factory=lambda: max(1, _env_int("PAGE_THRESHOLD", 30))
@@ -111,6 +111,13 @@ class Settings:
     docling_chunk_overlap: int = field(
         default_factory=lambda: max(0, _env_int("CHUNK_OVERLAP", 1))
     )
+    chunk_parsed_doc_dir: str = field(
+        default_factory=lambda: _resolve_parsed_doc_dir(
+            os.getenv("CHUNK_PARSED_DOC_DIR", "doc/chunk_parsed_doc")
+        )
+    )
+    docling_merge_similarity_threshold: float = 0.85  # 用于文本去重
+
     # DOCLING_PDF_DEVICE：PDF 管线加速器。auto=有 CUDA 则用 GPU 线程化管线，否则默认 CPU。
     # 取值：auto | cpu | cuda（大小写不敏感）。
     docling_pdf_device: str = field(

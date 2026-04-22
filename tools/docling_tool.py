@@ -12,7 +12,7 @@ from typing import Optional
 
 from tools.base_tool import BaseTool
 from core.message import ToolResult
-from rag.docling_parse import parse_document_to_dir, DoclingParseResult
+from rag.document_parse import parse_document_to_dir, DoclingParseResult
 from config.settings import settings
 from utils.logger import get_logger
 
