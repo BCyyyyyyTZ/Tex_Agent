@@ -9,6 +9,7 @@ from tools.pymupdf_parse_tool import PyMuPDFParseTool
 from tools.chapter_index_tool import ChapterIndexTool
 from tools.ref_checker_tool import RefCheckerTool
 from tools.figure_ref_checker_tool import FigureRefCheckerTool
+from tools.rag_retrieve_tool import RAGRetrieveTool
 
 tool_list = [
     ArxivSearchTool(),
@@ -22,4 +23,5 @@ tool_list = [
     ChapterIndexTool(),
     RefCheckerTool(),
     FigureRefCheckerTool(),
+    RAGRetrieveTool(),
 ]
