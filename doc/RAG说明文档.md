@@ -357,10 +357,10 @@ RAG_PERSIST_DIR -- rag_persist_directory
 
 ### Docling 文档解析
 
-> 目录：rag/docling_parse.py 与 tools/docling_tool.py
+> 目录：rag/document_parse.py 与 tools/docling_tool.py
 
 #### 定位与分工
-- **`docling_parse.py`**：底层「单次解析」——把本地文档交给 Docling，写出 `document.md`、`document.json` 及资源目录；不关心是否曾被解析过。
+- **`document_parse.py`**：底层「单次解析」——把本地文档交给 Docling，写出 `document.md`、`document.json` 及资源目录；不关心是否曾被解析过。
 - **`docling_tool.py`**：对外 **Tool**——在相同落盘规则下，增加 **按文件名复用已有输出** 的策略，减少重复跑 Docling。
 
 #### 设计思路
@@ -465,12 +465,12 @@ result = RAGRetrieveTool().run(query="你的问题", k=5, output_format="text")
 
 ### Docling 解析
 
-> 目录：rag/docling_parse.py
+> 目录：rag/document_parse.py
 
 + 命令行直接调用文档解析工具：
 
   ```bash
-    python rag/docling_parse.py <源文件路径> [-o 输出根目录]
+    python rag/document_parse.py <源文件路径> [-o 输出根目录]
   ```
 
   > 不传 `-o` 时使用配置中的解析根目录，目前是`Tex_Agent\doc\parsed_doc`
@@ -479,7 +479,7 @@ result = RAGRetrieveTool().run(query="你的问题", k=5, output_format="text")
 + 代码调用：
 
   ```python
-  from rag.docling_parse import parse_document_to_dir
+  from rag.document_parse import parse_document_to_dir
   
   parse_document_to_dir(source, [output_root])
 
@@ -487,7 +487,7 @@ result = RAGRetrieveTool().run(query="你的问题", k=5, output_format="text")
 
 > 目录：tools/docling_tool.py
 
-- **工具名**：`docling_parse`（已加入 `tools/tool_list.py`）。
+- **工具名**：`document_parse`（已加入 `tools/tool_list.py`）。
 - **参数**：  
   - `doc_path`（必填）：待解析文件路径。  
   - `redo`（可选，默认 `False`）：`True` 强制重新解析；`False` 时优先命中缓存。
@@ -503,8 +503,8 @@ result = RAGRetrieveTool().run(query="你的问题", k=5, output_format="text")
 
 ### 近期优化目标
 
-- [ ] docling解析工具对大pdf的支持（目前思路是分块解析+拼接）
-- [ ] RAG库封装入tool
+- [X] docling解析工具对大pdf的支持（目前思路是分块解析+拼接）
+- [X] RAG库封装入tool
 - [X] RAG库的删除单项操作
 - [ ] RAG库方法优化：支持markdown文件按标题和段落chunk，而非纯字符数
 - [ ] RAG库方法优化：支持tex文件按标题和段落chunk，而非纯字符数（可能考虑解析tex的方法？）

@@ -13,7 +13,7 @@ RAG（检索增强生成）模块。
     BaseRAGPipeline  - 检索管道抽象基类
 """
 from rag.base_retriever import BaseRetriever, BaseRAGPipeline, RetrievedDocument
-from rag.docling_parse import DoclingParseResult, parse_document_to_dir, resolve_source_path
+from rag.document_parse import DoclingParseResult, parse_document_to_dir, resolve_source_path
 from rag.rag_pipeline import RAGPipeline
 
 __all__ = [
