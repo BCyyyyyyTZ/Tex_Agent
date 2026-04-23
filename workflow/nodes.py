@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Callable, Dict, Any, Optional, List, Literal
 from core.state import WorkflowState, normalize_messages_for_state, normalize_node_output
 from core.message import WorkflowMessage, NodeOutput, ensure_message
 from agents.base_agent import BaseAgent
+from agents.simple_agent_new import SimpleAgent_new
 from context.base import BaseContext
 from tools.base_tool import BaseTool
 from utils.logger import get_logger
@@ -22,13 +23,16 @@ from config.planner_config import (
     DEFAULT_HISTORY_MODE,
     DEFAULT_SINGLE_TURN_CONTRACT_MODE,
     NODE_OUTPUT_FORMAT_INSTRUCTION,
-    PERSONA_ENTRY_NODE_FORMAT_ADDON,
     SINGLE_TURN_NODE_CONTRACT,
     FINAL_DELIVERY_SYSTEM_ADDON,
     UPSTREAM_RESULT_MAX_CHARS,
     FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS,
     FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS,
     parse_llm_json,
+)
+from tools.user_persona_tools import (
+    entry_node_persona_simple_agent_addon,
+    entry_node_persona_system_addon,
 )
 from workflow.run_dump import write_node_trace
 
@@ -430,6 +434,7 @@ def make_agent_node(
     node_id: str,
     node_config: dict,
     persona_memory: Optional["UserPersonaMemory"] = None,
+    runtime_memory: Optional[Any] = None,
     *,
     default_history_mode: str = DEFAULT_HISTORY_MODE,
     is_terminal: bool = False,
@@ -478,7 +483,13 @@ def make_agent_node(
         meta = state.get("metadata", {}) or {}
 
         persona_head = persona_memory.format_for_prompt() if persona_memory else ""
-        entry_addon = PERSONA_ENTRY_NODE_FORMAT_ADDON if is_entry_node else ""
+        if is_entry_node:
+            if isinstance(agent, SimpleAgent_new):
+                entry_addon = entry_node_persona_system_addon()
+            else:
+                entry_addon = entry_node_persona_simple_agent_addon()
+        else:
+            entry_addon = ""
         terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
 
         # system_prompt 已由 _build_agent_instance 注入 SYSTEM 角色，此处不再重复，
@@ -490,10 +501,9 @@ def make_agent_node(
             + NODE_OUTPUT_FORMAT_INSTRUCTION
             + entry_addon
         )
-
         built_context = ctx.build(
             state,
-            memory=None,
+            memory=runtime_memory,
             config={
                 "conv_limit": int(node_config.get("conv_limit", 12)),
                 "mem_limit": int(node_config.get("mem_limit", 5)),
@@ -995,6 +1005,7 @@ def make_parallel_join_node(
     source_branches: List[str],
     join_policy_str: str = "all_success",
     persona_memory: Optional["UserPersonaMemory"] = None,
+    runtime_memory: Optional[Any] = None,
     *,
     default_history_mode: str = DEFAULT_HISTORY_MODE,
     is_terminal: bool = False,
@@ -1042,6 +1053,7 @@ def make_parallel_join_node(
         node_id=node_id,
         node_config=join_node_config,
         persona_memory=persona_memory,
+        runtime_memory=runtime_memory,
         default_history_mode=default_history_mode,
         is_terminal=is_terminal,
         is_entry_node=False,

@@ -109,6 +109,9 @@ class WorkflowMessage(BaseModel):
 
 MessageLike = Union[str, Dict[str, Any], WorkflowMessage]
 
+# 向后兼容：旧代码仍引用 AgentMessage
+AgentMessage = WorkflowMessage
+
 
 def ensure_message(
     raw: MessageLike,

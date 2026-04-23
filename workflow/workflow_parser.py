@@ -112,6 +112,7 @@ class WorkflowParser(ABC):
         context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
+        runtime_memory: Optional[Any] = None,
         human_input_provider: Optional[Any] = None,
     ) -> Any:
         raise NotImplementedError
@@ -368,7 +369,7 @@ class YAMLWorkflowParser(WorkflowParser):
         parsed: List[NodeConfig] = []
 
         for raw in raw_nodes:
-            node_id = str(raw.get("node_id", "unknown"))
+            node_id = str(raw.get("node_id", "unknown"))    
             node_type = str(raw.get("node_type", "agent")).strip().lower()
             agent_name = str(raw.get("agent_name", "SimpleAgent"))
             tool_name = str(raw.get("tool_name", ""))
@@ -490,6 +491,7 @@ class YAMLWorkflowParser(WorkflowParser):
         context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
+        runtime_memory: Optional[Any] = None,
         human_input_provider: Optional[Any] = None,
     ) -> Any:
         """调用 build_dynamic_graph() 编译 LangGraph 图。"""
@@ -500,6 +502,7 @@ class YAMLWorkflowParser(WorkflowParser):
             context_manager=context_manager,
             default_history_mode=default_history_mode,
             persona_memory=persona_memory,
+            runtime_memory=runtime_memory,
             human_input_provider=human_input_provider,
         )
 

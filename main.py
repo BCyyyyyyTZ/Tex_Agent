@@ -1,5 +1,10 @@
 """
 TeX_Agent 程序主入口
+
+任务执行路径（task / 裸输入 / plan）：
+  main → TeXAgentCLI.run_task / run_plan_task → LangGraph app.invoke
+  → workflow.graph_builder 为每个 agent 节点实例化
+     agents.simple_agent.SimpleAgent（按 config.settings 选择 OpenAI 兼容或 Gemini，避免无 API key 时强绑 Google Genai）。
 """
 import sys
 import shlex

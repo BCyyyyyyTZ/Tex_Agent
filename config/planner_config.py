@@ -44,13 +44,14 @@ NODE_OUTPUT_FORMAT_INSTRUCTION: str = """
 绝对禁止输出 Markdown 代码块标记（例如 ```json 或 ```）。
 输出首字符必须是 {，末字符必须是 }。
 
-必须包含以下字段（键名不可改）：
+```json
 {
   "result": "你的完整主要输出内容（字符串，可换行）",
   "summary": "不超过200字的核心摘要",
   "confidence": 0.00-1.00,
   "metadata": {}
 }
+```
 ---"""
 
 SINGLE_TURN_NODE_CONTRACT: str = """
@@ -149,7 +150,7 @@ COMPLEXITY_COMPLEX_KEYWORDS: List[str] = [
 COMPLEXITY_MEDIUM_KEYWORDS: List[str] = [
     "分析", "比较", "评估", "检索", "推理", "多步", "综合", "归纳",
 ]
-AGENT_TYPE_NAMES: List[str] = ["SimpleAgent", "ReActAgent", "PlanAndSolveAgent"]
+AGENT_TYPE_NAMES: List[str] = ["SimpleAgent", "SimpleAgent_new", "ReActAgent", "PlanAndSolveAgent"]
 
 
 # ------------------------------------------------------------------

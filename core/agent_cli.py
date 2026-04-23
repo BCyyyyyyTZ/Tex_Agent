@@ -2,7 +2,8 @@
 """
 TeX Agent CLI 核心类
 """
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 from utils.logger import get_logger
@@ -14,7 +15,7 @@ from context.context_manager import ContextManager
 from core.message import ensure_message
 from core.state import normalize_messages_for_state
 from memory.factory import MemoryFactory
-from memory.persona_memory import UserPersonaMemory
+from memory.persona_memory import get_shared_user_persona_memory
 from cli.commands import CommandRegistry
 from cli.branch_commands import BRANCH_COMMANDS
 from cli.task_commands import get_task_commands
@@ -34,7 +35,7 @@ class TeXAgentCLI:
         self.contexts: Dict[str, ContextManager] = {}
         self.memory_system = self._init_memory_system()
         # 全局用户画像：与对话分支、工作流节点解耦；持久化见 memory_store/user_persona.json
-        self.persona_memory = UserPersonaMemory()
+        self.persona_memory = get_shared_user_persona_memory()
         self.context = None
         
         # 命令注册表
@@ -58,7 +59,8 @@ class TeXAgentCLI:
                 "design": MemoryFactory.create_memory("private", "design"),
                 "think": MemoryFactory.create_memory("private", "think"),
                 "execute": MemoryFactory.create_memory("private", "execute"),
-                "shared": MemoryFactory.create_memory("shared"),
+                # 会话落盘仍走 shared.jsonl；与 use_branch=True 时一致使用 BranchMemory
+                "shared": MemoryFactory.create_shared_memory(branch_enabled=False),
             }
     
     def _register_commands(self):
@@ -89,10 +91,12 @@ class TeXAgentCLI:
         统一通过 build_graph 构建工作流（默认/自定义共一路径）。
         """
         target_name = workflow_name or self.DEFAULT_WORKFLOW
+        # 与 messages 同生命周期：ctx.build 的 memory 检索走当前分支会话，不用持久化 shared jsonl
         return build_app_from_workflow(
             workflow_name=target_name,
             context_manager=self.context,
             persona_memory=self.persona_memory,
+            runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
         )
 
@@ -106,6 +110,45 @@ class TeXAgentCLI:
         if isinstance(options, list) and options:
             print(f"   可选项: {options}")
         return input("   请输入反馈: ")
+
+    def _persist_new_messages_to_shared_memory_store(
+        self, new_messages_raw: List[Any], workflow_label: str
+    ) -> None:
+        """
+        将本轮追加到会话的消息同步写入 shared BranchMemory（memory_store/*.jsonl）。
+
+        说明：ctx.build 的检索仍走 ContextManager + state.messages（会话级）；
+        此处仅做与对话同语义的持久化，便于跨重启检索与 show_status 统计。
+        """
+        shared = self.memory_system.get("shared")
+        if shared is None or not hasattr(shared, "save"):
+            return
+        for raw in new_messages_raw:
+            msg = ensure_message(
+                raw,
+                default_role="assistant",
+                default_source_type="system",
+                default_source_id="workflow",
+            )
+            body = str(msg.content or "").strip()
+            if not body:
+                continue
+            key = f"session:{self.current_branch}:{uuid.uuid4().hex}"
+            meta: Dict[str, Any] = {
+                "role": msg.role,
+                "source_type": msg.source_type,
+                "source_id": msg.source_id,
+                "workflow": workflow_label,
+                "branch": self.current_branch,
+            }
+            if isinstance(msg.metadata, dict):
+                for k in ("node_id", "node_type"):
+                    if k in msg.metadata:
+                        meta[k] = msg.metadata[k]
+            try:
+                shared.save(key, body, metadata=meta)
+            except Exception as e:
+                logger.warning("会话记忆落盘失败: %s", e)
 
     def _execute_with_app(self, user_input: str, app: Any, workflow_label: str) -> dict:
         """
@@ -161,6 +204,7 @@ class TeXAgentCLI:
                     default_source_id="workflow",
                 )
                 self.context.save(msg)
+            self._persist_new_messages_to_shared_memory_store(new_messages, workflow_label)
 
         return result
     
@@ -228,6 +272,7 @@ class TeXAgentCLI:
             edges,
             context_manager=self.context,
             persona_memory=self.persona_memory,
+            runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
         )
         result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
@@ -247,8 +292,16 @@ class TeXAgentCLI:
         
         old_branch = self.current_branch
         self.current_branch = branch_name
+        for memory in self.memory_system.values():
+            if getattr(memory, "branch_enabled", False) and hasattr(memory, "switch_branch"):
+                ok = memory.switch_branch(branch_name)
+                if not ok:
+                    logger.warning(
+                        "记忆系统未能切换到分支 %r（若为新分支请先创建）",
+                        branch_name,
+                    )
         self._rebuild_workflow()
-        
+
         print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
         print(f"   📝 对话历史: {len(self.context)} 条")
     

@@ -54,7 +54,7 @@ SYSTEM_PROMPT = """你是一个专业的助手，你的任务是根据用户的�
 不要给出除以上两种定义的格式外其他任何格式的回复。"""
 
 
-class SimpleAgent(BaseAgent):
+class SimpleAgent_new(BaseAgent):
     """
     基础 Agent 实现，封装 LangChain ChatOpenAI 调用。
 
@@ -305,7 +305,7 @@ class SimpleAgent(BaseAgent):
         return list(self._history)
 
 if __name__ == "__main__":
-    agent = SimpleAgent("TestAgent")
+    agent = SimpleAgent_new("TestAgent")
     pdf_path = r""
     msg = AgentMessage(
         role="user",

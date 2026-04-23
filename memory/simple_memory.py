@@ -1,6 +1,9 @@
 #memory/simple_memory.py
 
-from typing import List,Any, Dict
+import json
+import math
+import re
+from typing import List, Any, Dict, Tuple
 from memory.base_memory import BaseMemory,MemoryType
 from datetime import datetime  # 正确
 
@@ -58,14 +61,112 @@ class SimpleMemory(BaseMemory):
         return [item["value"] for item in items]
     
     def search(self, query: str, limit: int = 10) -> List[Any]:
-        """简单搜索（子串匹配）"""
-        results = []
-        for item in reversed(self._storage):  # 最新的优先
-            if query.lower() in str(item["value"]).lower():
-                results.append(item["value"])
-                if len(results) >= limit:
-                    break
+        """
+        混合检索（关键词 + 重叠度 + 新近性）：
+        - 子串精确匹配（query in doc）给予高权重
+        - token 覆盖率 / Jaccard 相似度
+        - 较新的记忆有轻微加权（避免旧内容长期压制）
+        """
+        lim = max(1, int(limit or 10))
+        q = (query or "").strip()
+        if not q:
+            return [item["value"] for item in self._storage[-lim:]][::-1]
+
+        q_tokens = self._tokenize(q)
+        scored: List[Tuple[float, datetime, Any]] = []
+
+        for idx, item in enumerate(self._storage):
+            doc = self._build_search_document(item)
+            if not doc:
+                continue
+            score = self._score_query_doc(q, q_tokens, doc, idx)
+            if score <= 0:
+                continue
+            ts = item.get("timestamp")
+            if not isinstance(ts, datetime):
+                ts = datetime.min
+            scored.append((score, ts, item["value"]))
+
+        # 分数优先，其次按时间新到旧
+        scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        results: List[Any] = []
+        seen = set()
+        for _, _, value in scored:
+            key = json.dumps(value, ensure_ascii=False, default=str) if not isinstance(value, str) else value
+            if key in seen:
+                continue
+            seen.add(key)
+            results.append(value)
+            if len(results) >= lim:
+                break
         return results
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        """
+        轻量 tokenizer：
+        - 英文/数字按词
+        - 中文按连续汉字块 + 二元切片（提升短语召回）
+        """
+        t = (text or "").lower().strip()
+        if not t:
+            return []
+        en_tokens = re.findall(r"[a-z0-9_]+", t)
+        zh_chunks = re.findall(r"[\u4e00-\u9fff]+", t)
+        zh_tokens: List[str] = []
+        for chunk in zh_chunks:
+            zh_tokens.append(chunk)
+            if len(chunk) >= 2:
+                zh_tokens.extend(chunk[i:i + 2] for i in range(len(chunk) - 1))
+        # 去重并保序
+        out: List[str] = []
+        seen = set()
+        for tok in en_tokens + zh_tokens:
+            if tok and tok not in seen:
+                seen.add(tok)
+                out.append(tok)
+        return out
+
+    @staticmethod
+    def _build_search_document(item: Dict[str, Any]) -> str:
+        key = str(item.get("key", "") or "")
+        value = item.get("value", "")
+        metadata = item.get("metadata", {}) or {}
+        parts = [key]
+        if isinstance(value, str):
+            parts.append(value)
+        else:
+            parts.append(json.dumps(value, ensure_ascii=False, default=str))
+        if isinstance(metadata, dict) and metadata:
+            parts.append(json.dumps(metadata, ensure_ascii=False, default=str))
+        return "\n".join(parts).lower()
+
+    def _score_query_doc(self, query: str, q_tokens: List[str], doc: str, idx: int) -> float:
+        if not doc:
+            return 0.0
+        doc_tokens = set(self._tokenize(doc))
+        if not doc_tokens:
+            return 0.0
+
+        q_token_set = set(q_tokens)
+        overlap = q_token_set & doc_tokens
+        overlap_ratio = len(overlap) / max(1, len(q_token_set))
+        jaccard = len(overlap) / max(1, len(q_token_set | doc_tokens))
+
+        contains_exact = 1.0 if query.lower() in doc else 0.0
+        key_boost = 0.6 if str(self._storage[idx].get("key", "")).lower().find(query.lower()) >= 0 else 0.0
+        # 越新 idx 越大，log 缓和，防止时间项过强
+        recency = math.log1p(idx + 1) / max(1.0, math.log1p(len(self._storage)))
+
+        score = (
+            2.2 * contains_exact
+            + 1.8 * overlap_ratio
+            + 0.8 * jaccard
+            + key_boost
+            + 0.35 * recency
+        )
+        return score
     
     def clear(self) -> None:
         """清空记忆"""

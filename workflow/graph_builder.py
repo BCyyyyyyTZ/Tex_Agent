@@ -62,15 +62,17 @@ def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     system_prompt = node_config.get("system_prompt", f"你是 {node_id} 专家。")
     temperature = float(node_config.get("temperature", NODE_DEFAULT_TEMPERATURE))
 
-    if agent_type not in AGENT_TYPE_NAMES:
-        logger.warning(f"[DynamicGraph] 未知 Agent 类型 '{agent_type}'，降级为 SimpleAgent")
-    elif agent_type != "SimpleAgent":
-        logger.warning(f"[DynamicGraph] '{agent_type}' 尚未实现，降级为 SimpleAgent")
+    alias = str(agent_type or "").strip() or "SimpleAgent"
+    if alias not in AGENT_TYPE_NAMES:
+        logger.warning(f"[DynamicGraph] 未知 Agent 类型 '{alias}'，降级为 SimpleAgent")
+    elif alias not in ("SimpleAgent", "SimpleAgent_new"):
+        logger.warning(f"[DynamicGraph] '{alias}' 尚未实现，降级为 SimpleAgent")
 
     return _SimpleAgent(
         name=node_id,
         system_prompt=system_prompt,
         temperature=temperature,
+        tools=[],
     )
 
 
@@ -145,6 +147,7 @@ def build_dynamic_graph(
     edges: List[EdgeConfig],
     context_manager: Optional[ContextManager] = None,
     persona_memory: Optional[Any] = None,
+    runtime_memory: Optional[Any] = None,
     default_workflow_name: str = "default",
     default_history_mode: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
@@ -264,6 +267,7 @@ def build_dynamic_graph(
                 source_branches=src_branches,
                 join_policy_str=node_cfg.join_policy,
                 persona_memory=persona_memory,
+                runtime_memory=runtime_memory,
                 default_history_mode=eff_history_mode,
                 is_terminal=nid in terminal_nodes,
             )
@@ -286,6 +290,7 @@ def build_dynamic_graph(
             node_id=nid,
             node_config=node_cfg.config,
             persona_memory=persona_memory,
+            runtime_memory=runtime_memory,
             default_history_mode=eff_history_mode,
             is_terminal=nid in terminal_nodes,
             is_entry_node=nid == entry_node,
@@ -353,6 +358,7 @@ def build_app_from_workflow(
     workflow_name: str = "default",
     context_manager: Optional[ContextManager] = None,
     persona_memory: Optional[Any] = None,
+    runtime_memory: Optional[Any] = None,
     default_history_mode: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
 ) -> Any:
@@ -365,6 +371,7 @@ def build_app_from_workflow(
         edges=edges,
         context_manager=context_manager,
         persona_memory=persona_memory,
+        runtime_memory=runtime_memory,
         default_workflow_name=workflow_name,
         default_history_mode=default_history_mode,
         human_input_provider=human_input_provider,

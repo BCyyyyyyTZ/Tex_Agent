@@ -3,6 +3,8 @@ from collections import deque
 from typing import List, Optional, Dict, Any, Union
 from context.base import BaseContext
 from core.message import WorkflowMessage, ensure_message
+from memory.simple_memory import SimpleMemory
+from memory.base_memory import MemoryType
 from utils.logger import get_logger
 from config.planner_config import METADATA_CHAIN_RESULT_MAX_CHARS
 
@@ -110,6 +112,43 @@ class ContextManager(BaseContext):
             return text[-max_tokens:]
         return text
 
+    def search(self, query: str, limit: int = 10, state: Optional[Dict[str, Any]] = None) -> List[Any]:
+        """
+        在「会话消息」中检索，不读写图内 metadata。
+
+        优先使用本轮 LangGraph state.messages（已包含 invoke 前从本 Context 注入的历史）；
+        若未提供 state 或 messages 为空，则回退到当前 Context 队列。
+        """
+        lim = max(1, int(limit or 10))
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        msgs_raw: List[Any]
+        if state is not None:
+            msgs_raw = state.get("messages", []) or []
+        else:
+            msgs_raw = list(self._messages)
+
+        if not msgs_raw:
+            return []
+
+        mem = SimpleMemory(MemoryType.SHARED, max_size=max(len(msgs_raw), 16))
+        for i, raw in enumerate(msgs_raw):
+            msg = ensure_message(
+                raw,
+                default_role="assistant",
+                default_source_type="system",
+                default_source_id="session",
+            )
+            meta = dict(msg.metadata or {})
+            meta.setdefault("role", msg.role)
+            meta.setdefault("source_type", msg.source_type)
+            meta.setdefault("source_id", msg.source_id)
+            mem.save(f"session:{i}", str(msg.content or ""), metadata=meta)
+
+        return mem.search(q, lim)
+
     def build(self, state: Dict[str, Any], memory: Any = None, config: Optional[Dict[str, Any]] = None) -> str:
         """GSSC 主入口：Gather → Select → Structure → Compress"""
         cfg = config or {}
@@ -131,9 +170,13 @@ class ContextManager(BaseContext):
             query = str(msgs[-1].content)
             
         # Memory 检索
-        mem_items = []
+        mem_items: List[Any] = []
         if memory and query:
-            mem_items = memory.search(query=query, limit=cfg.get("mem_limit", 3))
+            mem_limit = int(cfg.get("mem_limit", 3) or 3)
+            try:
+                mem_items = memory.search(query=query, limit=mem_limit, state=state)
+            except TypeError:
+                mem_items = memory.search(query=query, limit=mem_limit)
             
         # 组装
         if retrieved and retrieved.strip():

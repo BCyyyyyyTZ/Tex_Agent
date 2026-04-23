@@ -2,8 +2,9 @@
 全局用户画像记忆（User Persona Memory）。
 
 - 单文件 JSON，与分支、具体工作流节点解耦；多次启动 main.py 共用同一画像。
-- 由工作流「入口节点」在输出 JSON 中的 persona_memory_update 字段驱动合并写入。
+- 由工作流「入口节点」通过已注册的用户画像工具（见 tools/user_persona_tools.py）驱动写盘。
 - 各节点在构造 prompt 时在 system 段头部注入 format_for_prompt() 文本。
+- 除内置字段外，允许任意顶层扩展键（如 agent_tags）；load/merge/set 会保留或写入，clear 对扩展键为删除该键。
 """
 from __future__ import annotations
 
@@ -38,6 +39,9 @@ _STRING_KEYS = frozenset({
     "other_notes",
 })
 
+# merge/set 中禁止由 delta/fields 隐式改写的系统键（扩展字段勿占用）
+_MERGE_SKIP_KEYS = frozenset({"version"})
+
 
 class UserPersonaMemory:
     """线程安全的文件持久化用户画像。"""
@@ -65,6 +69,7 @@ class UserPersonaMemory:
             merged = deepcopy(DEFAULT_USER_PERSONA)
             for k, v in obj.items():
                 if k not in DEFAULT_USER_PERSONA:
+                    merged[k] = deepcopy(v)
                     continue
                 if k == "extra":
                     if isinstance(v, dict):
@@ -112,6 +117,21 @@ class UserPersonaMemory:
         ]
         return "\n".join(lines)
 
+    def _merge_extension(self, key: str, val: Any) -> None:
+        """
+        顶层扩展键：新键直接写入；若新旧均为 dict 则浅合并（便于在扩展对象里「加 key」）。
+        其它类型则整值覆盖。
+        """
+        if key in _MERGE_SKIP_KEYS:
+            return
+        cur = self._data.get(key)
+        if isinstance(cur, dict) and isinstance(val, dict):
+            merged = dict(cur)
+            merged.update(val)
+            self._data[key] = merged
+            return
+        self._data[key] = deepcopy(val)
+
     def _merge_delta(self, delta: Dict[str, Any]) -> None:
         if not isinstance(delta, dict):
             return
@@ -140,6 +160,9 @@ class UserPersonaMemory:
                 continue
             if key in DEFAULT_USER_PERSONA and key not in ("version", "extra"):
                 self._data[key] = val
+                continue
+            # 内置键已处理；其余为扩展顶层键
+            self._merge_extension(key, val)
 
     def _remove_from_lists(self, remove: Dict[str, Any]) -> None:
         """从列表型字段中删除与给定条目完全相同的项（去首尾空白后比较）。"""
@@ -190,26 +213,31 @@ class UserPersonaMemory:
                 continue
             if key in DEFAULT_USER_PERSONA and key != "extra":
                 self._data[key] = deepcopy(val)
+                continue
+            self._data[key] = deepcopy(val)
 
     def _clear_keys(self, keys: List[Any]) -> None:
-        """将指定顶层字段恢复为默认值（等同删除该字段上的用户内容）。"""
+        """内置字段恢复为默认值；扩展顶层键则从对象中删除。"""
         if not isinstance(keys, list):
             return
         for raw in keys:
             k = str(raw).strip() if raw is not None else ""
-            if not k or k not in DEFAULT_USER_PERSONA:
+            if not k:
                 continue
-            self._data[k] = deepcopy(DEFAULT_USER_PERSONA[k])
+            if k in DEFAULT_USER_PERSONA:
+                self._data[k] = deepcopy(DEFAULT_USER_PERSONA[k])
+            elif k in self._data:
+                del self._data[k]
 
     def apply_persona_memory_update(self, update: Any) -> None:
         """
-        解析入口节点 JSON 中的 persona_memory_update。
+        应用一次画像更新（通常由入口节点的用户画像工具调用）。
 
         支持 action:
         - none: 不写盘
-        - merge: delta 合并；可选 remove 从列表字段按精确项删除
-        - set: fields 整字段覆盖（字符串可改为空串以清空；列表整表替换）
-        - clear: clear_keys 将若干字段恢复为默认空值
+        - merge: delta 合并；可选 remove 从列表字段按精确项删除；delta 可含顶层扩展键（dict 与已有 dict 浅合并）
+        - set: fields 整字段覆盖（字符串可改为空串以清空；列表整表替换）；可含扩展顶层键
+        - clear: clear_keys 内置字段恢复默认；扩展键则删除该顶层键
         """
         if not isinstance(update, dict):
             return
@@ -246,3 +274,17 @@ class UserPersonaMemory:
                 self._atomic_write()
             except OSError as e:
                 logger.warning(f"用户画像写盘失败: {e}")
+
+
+_shared_user_persona: Optional[UserPersonaMemory] = None
+
+
+def get_shared_user_persona_memory(file_path: Optional[Path] = None) -> UserPersonaMemory:
+    """
+    进程内单例：CLI、工作流节点注入与工具层共用同一 UserPersonaMemory，
+    避免多实例内存与磁盘不一致。
+    """
+    global _shared_user_persona
+    if _shared_user_persona is None:
+        _shared_user_persona = UserPersonaMemory(file_path=file_path)
+    return _shared_user_persona

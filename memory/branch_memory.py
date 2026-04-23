@@ -252,17 +252,8 @@ class BranchMixin:
         return [item["value"] for item in items]
     
     def search(self, query: str, limit: int = 10) -> List[Any]:
-        """搜索记忆（支持分支）"""
-        if not self.branch_enabled:
-            return super().search(query, limit)
-        
-        results = []
-        for item in reversed(self._storage):  # 最新的优先
-            if query.lower() in str(item["value"]).lower():
-                results.append(item["value"])
-                if len(results) >= limit:
-                    break
-        return results
+        """搜索记忆（支持分支）：复用 SimpleMemory 的混合检索算法。"""
+        return super().search(query, limit)
     
     def clear(self) -> None:
         """清空记忆（支持分支）"""
