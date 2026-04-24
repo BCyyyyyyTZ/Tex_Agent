@@ -146,6 +146,7 @@ class WorkflowParser(ABC):
         context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
+        human_input_provider: Optional[Any] = None,
     ) -> Any:
         """
         根据节点和边配置动态构建并编译 LangGraph 图。
@@ -248,22 +249,54 @@ def _translate_plan_to_graph_config(
     nodes: List[NodeConfig] = []
     for node_id in plan.subtasks:
         spec = plan.assigned_agents.get(node_id, {})
-        node = NodeConfig(
-            node_id=node_id,
-            node_type="agent",
-            # agent_name 存 Agent 类型名，build_dynamic_graph 据此实例化对应 Agent
-            agent_name=spec.get("agent_type", "SimpleAgent"),
-            config={
-                "system_prompt": spec.get(
-                    "system_prompt", f"你是{spec.get('role', node_id)}专家。"
-                ),
-                "subtask":       spec.get("subtask", ""),
-                "output_schema": spec.get("output_schema", {}),
-                "role":          spec.get("role", node_id),
-                "depends_on":    spec.get("depends_on", []),
-                "temperature":   NODE_DEFAULT_TEMPERATURE,
-            },
-        )
+        node_type = str(spec.get("node_type", "agent")).strip().lower()
+
+        if node_type == "tool":
+            node = NodeConfig(
+                node_id=node_id,
+                node_type="tool",
+                agent_name="",
+                tool_name=str(spec.get("tool_name", "arxiv_search")),
+                config={
+                    "tool_input": spec.get("tool_input", "${input}"),
+                    "depends_on": spec.get("depends_on", []),
+                    "history_mode": spec.get("history_mode", "minimal"),
+                },
+            )
+        elif node_type == "user":
+            node = NodeConfig(
+                node_id=node_id,
+                node_type="user",
+                agent_name="",
+                tool_name="",
+                config={
+                    "prompt_template": spec.get("prompt_template", "请根据当前上下文提供反馈。"),
+                    "input_schema": spec.get("input_schema", {"type": "text"}),
+                    "validation": spec.get("validation", {"required": True}),
+                    "default_value": spec.get("default_value", ""),
+                    "write_to": spec.get("write_to", f"user_feedback.{node_id}"),
+                    "depends_on": spec.get("depends_on", []),
+                    "history_mode": spec.get("history_mode", "minimal"),
+                },
+            )
+        else:
+            node = NodeConfig(
+                node_id=node_id,
+                node_type="agent",
+                # agent_name 存 Agent 类型名，build_dynamic_graph 据此实例化对应 Agent
+                agent_name=spec.get("agent_type", "SimpleAgent"),
+                config={
+                    "system_prompt": spec.get(
+                        "system_prompt", f"你是{spec.get('role', node_id)}专家。"
+                    ),
+                    "subtask":       spec.get("subtask", ""),
+                    "output_schema": spec.get("output_schema", {}),
+                    "role":          spec.get("role", node_id),
+                    "depends_on":    spec.get("depends_on", []),
+                    "temperature":   NODE_DEFAULT_TEMPERATURE,
+                    "history_mode":  spec.get("history_mode", "minimal"),
+                },
+            )
         nodes.append(node)
 
     # 构建边：优先读 __edges__，其次从 depends_on 重建，最后线性兜底
@@ -329,6 +362,7 @@ def _translate_plan_to_graph_config(
         EdgeConfig(from_node=e["from"], to_node=e["to"], condition=e.get("condition"))
         for e in raw_edges
     ]
+
     return nodes, edges
 
 
@@ -411,16 +445,45 @@ class YAMLWorkflowParser(WorkflowParser):
             }
         """
         raw_nodes = config.get("nodes", [])
-        return [
-            NodeConfig(
-                node_id=raw.get("node_id", "unknown"),
-                node_type=raw.get("node_type", "agent"),
-                agent_name=raw.get("agent_name", "SimpleAgent"),
-                tool_name=raw.get("tool_name", ""),
-                config=raw.get("config", {}),
+        parsed_nodes: List[NodeConfig] = []
+        for raw in raw_nodes:
+            node_id = str(raw.get("node_id", "unknown"))
+            node_type = str(raw.get("node_type", "agent")).strip().lower()
+            agent_name = str(raw.get("agent_name", "SimpleAgent"))
+            tool_name = str(raw.get("tool_name", ""))
+            node_cfg = raw.get("config", {})
+            if not isinstance(node_cfg, dict):
+                logger.warning(
+                    f"[WorkflowParser] 节点 {node_id} 的 config 不是对象，已回退为空字典"
+                )
+                node_cfg = {}
+
+            if node_type == "tool" and not tool_name:
+                raise ValueError(
+                    f"[WorkflowParser] 工具节点 '{node_id}' 缺少 tool_name 配置"
+                )
+            if node_type == "user":
+                prompt_template = node_cfg.get("prompt_template")
+                if not isinstance(prompt_template, str) or not prompt_template.strip():
+                    raise ValueError(
+                        f"[WorkflowParser] 用户节点 '{node_id}' 缺少 config.prompt_template"
+                    )
+                input_schema = node_cfg.get("input_schema", {"type": "text"})
+                if not isinstance(input_schema, dict):
+                    raise ValueError(
+                        f"[WorkflowParser] 用户节点 '{node_id}' 的 input_schema 必须是对象"
+                    )
+
+            parsed_nodes.append(
+                NodeConfig(
+                    node_id=node_id,
+                    node_type=node_type,
+                    agent_name=agent_name,
+                    tool_name=tool_name,
+                    config=node_cfg,
+                )
             )
-            for raw in raw_nodes
-        ]
+        return parsed_nodes
 
     def parse_edges(self, config: Dict[str, Any]) -> List[EdgeConfig]:
         """
@@ -450,6 +513,7 @@ class YAMLWorkflowParser(WorkflowParser):
         context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
         persona_memory: Optional[Any] = None,
+        human_input_provider: Optional[Any] = None,
     ) -> Any:
         """
         调用 build_dynamic_graph() 编译 LangGraph 图。
@@ -464,6 +528,7 @@ class YAMLWorkflowParser(WorkflowParser):
             context_manager=context_manager,
             default_history_mode=default_history_mode,
             persona_memory=persona_memory,
+            human_input_provider=human_input_provider,
         )
 
     def from_task_plan(

@@ -174,9 +174,6 @@ from config.planner_config import (
     PLANNER_TEMPERATURE,
     MAX_PLAN_ROUNDS_DEFAULT,
     SUPERVISOR_MIN_QUALITY_SCORE,
-    COMPLEXITY_AGENT_MAP,
-    COMPLEXITY_COMPLEX_KEYWORDS,
-    COMPLEXITY_MEDIUM_KEYWORDS,
     PLAN_OUTPUT_SCHEMA,
     SUPERVISOR_OUTPUT_SCHEMA,
     SINGLE_TURN_NODE_CONTRACT,
@@ -351,14 +348,14 @@ class AutoAgentsMASPlanner(MASPlanner):
             spec = plan.assigned_agents.get(node_id)
             if spec is None:
                 continue
+            node_type = str(spec.get("node_type", "agent")).strip().lower()
+            if node_type in ("tool", "user"):
+                spec["route_source"] = f"{node_type}_node"
+                continue
             subtask_text = spec.get("subtask", node_id)
 
             # --- [BaseRouter 预留接口] ---
-            # 当前阶段：仅 SimpleAgent 已实现，直接固定使用，跳过复杂度推断。
-            # 待 ReActAgent / PlanAndSolveAgent 实现后：
-            #   1. 若 self.router 已注入 → 调用 router.evaluate_complexity(msg) 评估复杂度
-            #   2. 否则                  → 调用 _infer_complexity(subtask_text) 关键词推断
-            #   3. 两者均通过 _resolve_agent_type(complexity) 映射到 Agent 类型
+            # 当前阶段：仅 SimpleAgent 已实现，直接固定使用。
             if self.router is not None:
                 # NOTE: 未来升级点——解注释以下代码以启用 BaseRouter 路由
                 # try:
@@ -435,63 +432,37 @@ class AutoAgentsMASPlanner(MASPlanner):
         return nodes, edges
 
     # ------------------------------------------------------------------
-    # [BaseRouter 预留接口] 复杂度推断 & Agent 类型解析
-    # ------------------------------------------------------------------
-
-    def _resolve_agent_type(self, complexity: str) -> str:
-        """
-        将复杂度标签映射为 Agent 类型名称。
-
-        [BaseRouter 预留接口] 此方法是 BaseRouter → Agent 类型的"翻译层"：
-          - 当前：由 _infer_complexity() 的关键词规则输出驱动。
-          - 未来：由 router.evaluate_complexity() 或 router.route() 的输出驱动。
-          若 COMPLEXITY_AGENT_MAP 中对应类型尚未实现，build_dynamic_graph()
-          会在 AGENT_REGISTRY 中检测并自动降级为 SimpleAgent。
-
-        对应关系（与 BaseRouter.evaluate_complexity() 返回值严格对齐）：
-          "simple"  → SimpleAgent        （当前可运行）
-          "medium"  → ReActAgent          （待 ReActAgent 完整实现后激活）
-          "complex" → PlanAndSolveAgent   （待 PlanAndSolveAgent 完整实现后激活）
-        """
-        return COMPLEXITY_AGENT_MAP.get(complexity, "SimpleAgent")
-
-    def _infer_complexity(self, subtask_text: str) -> str:
-        """
-        基于关键词规则推断子任务复杂度（router=None 时的规则兜底）。
-
-        当 BaseRouter 实现并传入 self.router 后，此方法将被
-        router.evaluate_complexity() 替代，但保留作为极端情况下的
-        无 LLM / 无 Router 兜底，确保系统在任何环境下均可运行。
-
-        Returns:
-            "simple" / "medium" / "complex"（与 COMPLEXITY_AGENT_MAP 键对齐）
-        """
-        text = subtask_text.lower()
-        if any(kw in text for kw in COMPLEXITY_COMPLEX_KEYWORDS):
-            return "complex"
-        if any(kw in text for kw in COMPLEXITY_MEDIUM_KEYWORDS):
-            return "medium"
-        return "simple"
-
-    # ------------------------------------------------------------------
     # 内部 LLM 调用
     # ------------------------------------------------------------------
 
     def _plan_agent_call(self, task: str) -> Dict:
         """Round 1：PlanAgent LLM 调用，生成初始 agent 列表和图结构。"""
+        tool_catalog = self._build_tool_catalog_prompt()
         prompt = (
             f"你是多智能体系统规划师（PlanAgent）。\n"
             f"给定以下任务，请输出一个“高质量、但结构简洁”的执行方案。\n\n"
             f"任务：{task}\n\n"
+            f"可用工具目录（仅可使用以下工具，不得虚构）：\n"
+            f"{tool_catalog}\n\n"
             f"规划原则：\n"
             f"1) 默认按“指导型任务”处理：讲清概念 + 给可执行步骤。\n"
             f"2) 节点数控制在 2~8 个，根据任务复杂程度选择。\n"
+            f"2.1) node_type='tool' 与 node_type='user' 都是可选能力，默认不强制使用。\n"
+            f"2.2) 仅当“确实能提升结果质量”时才使用 tool 节点；否则使用 agent 节点直接完成。\n"
+            f"2.3) 若使用 tool 节点，必须包含 node_type='tool'、tool_name、tool_input；"
+            f"tool_input 不能为空字符串，优先引用 ${'{metadata.<上游节点>.result}'}，否则使用 ${'{input}'}。\n"
+            f"2.4) 仅当任务存在真实的人类决策点（偏好/取舍/阈值确认）时，才允许插入 user 节点；"
+            f"不得把原本应由 agent 完成的分析任务转嫁给用户。\n"
+            f"2.5) 若使用 user 节点，必须包含 node_type='user'、prompt_template，"
+            f"并建议提供 input_schema/validation/default_value。\n"
+            f"2.6) 最终交付节点必须是 agent 节点，不得设置为 user/tool。\n"
             f"3) 必须包含“最终交付节点”（负责整合并给用户最终行动建议）。\n"
             f"   最终交付节点必须直接回答原始问题，并给出可执行步骤/示例，禁止仅复述上游摘要。\n"
             f"4) 除非用户明确要求完整开发与测试，不要引入重型实现/测试流水线。\n"
             f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n\n"
-            f"6) 每个节点的 system_prompt/subtask 必须满足“单次流水线执行契约”，"
-            f"严禁等待式追问用户；信息不足时应采用默认假设继续交付。\n\n"
+            f"6) 每个 agent/tool 节点的 system_prompt/subtask 必须满足“单次流水线执行契约”，"
+            f"严禁等待式追问用户；信息不足时应采用默认假设继续交付。"
+            f"（仅 user 节点允许向用户发起一次明确提问）\n\n"
             f"单次流水线执行契约（所有节点必须遵守）：\n"
             f"{SINGLE_TURN_NODE_CONTRACT}\n\n"
             f"推荐结构（可等价改名）：\n"
@@ -504,10 +475,32 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"- edges 中每个 from 值只能出现一次\n"
             f"- depends_on 中每个节点只能依赖紧邻的上一个节点（最多一个前驱）\n"
             f"- edges 数量必须恰好等于节点数量减一（n 个节点对应 n-1 条边）\n\n"
-            f"必须且只能输出如下 JSON 格式（不要任何其他内容）：\n{PLAN_OUTPUT_SCHEMA}"
+            f"【输出规范（硬约束）】\n"
+            f"- 必须且只能输出一个合法 JSON 对象，禁止输出任何解释、前言、后记。\n"
+            f"- 绝对禁止 Markdown 代码块标记（例如 ```json / ```）。\n"
+            f"- 输出首字符必须是 '{{'，末字符必须是 '}}'。\n"
+            f"- 所有键必须使用双引号，禁止尾随逗号，禁止注释。\n"
+            f"- 严格遵循以下 schema 的键名与层级（可填充内容，但不可改结构）：\n"
+            f"{PLAN_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
         return parse_llm_json(raw, context="PlanAgent", fallback=dict(_PLAN_FALLBACK))
+
+    def _build_tool_catalog_prompt(self) -> str:
+        """
+        构建供 PlanAgent 使用的工具目录说明（名称/功能/输入接口）。
+        """
+        from tools.tool_list import tool_list
+
+        lines = []
+        for tool in tool_list:
+            schema = getattr(tool, "input_schema", {}) or {}
+            lines.append(
+                f"- tool_name: {getattr(tool, 'name', '')}\n"
+                f"  description: {getattr(tool, 'description', '')}\n"
+                f"  input_schema: {json.dumps(schema, ensure_ascii=False)}"
+            )
+        return "\n".join(lines) if lines else "（当前无可用工具）"
 
     def _supervisor_call(
         self,
@@ -550,7 +543,13 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"3) 若 approved=false，必须同时提供 revised_agents + revised_edges + revised_entry_node，且三者一致可运行。\n"
             f"4) quality_score 使用 1~10 分制；若本轮修复了上一轮关键问题，评分应尽量提高，不应无故下降。\n"
             f"5) 当评分 >= {SUPERVISOR_MIN_QUALITY_SCORE:.2f} 且不存在关键硬问题时，优先 approved=true。\n\n"
-            f"必须且只能输出如下 JSON 格式：\n{SUPERVISOR_OUTPUT_SCHEMA}"
+            f"【输出规范（硬约束）】\n"
+            f"- 必须且只能输出一个合法 JSON 对象，禁止输出任何解释、前言、后记。\n"
+            f"- 绝对禁止 Markdown 代码块标记（例如 ```json / ```）。\n"
+            f"- 输出首字符必须是 '{{'，末字符必须是 '}}'。\n"
+            f"- 所有键必须使用双引号，禁止尾随逗号，禁止注释。\n"
+            f"- 严格遵循以下 schema 的键名与层级（可填充内容，但不可改结构）：\n"
+            f"{SUPERVISOR_OUTPUT_SCHEMA}"
         )
         raw = self._call_llm(prompt)
         return parse_llm_json(
@@ -799,6 +798,7 @@ class AutoAgentsMASPlanner(MASPlanner):
                     "node_id":    n.node_id,
                     "node_type":  n.node_type,
                     "agent_name": n.agent_name,
+                    "tool_name":  n.tool_name,
                     "config":     n.config,
                 }
                 for n in nodes

@@ -1,0 +1,63 @@
+{
+  "nodes": [
+    {
+      "node_id": "intent_drafter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是需求草拟节点。请在不追问的前提下，先给出一个可执行草案。",
+        "subtask": "基于用户输入先输出一个简洁执行草案（目标、范围、步骤）。",
+        "depends_on": [],
+        "temperature": 0.3
+      }
+    },
+    {
+      "node_id": "user_confirmation",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请确认是否接受该草案：${metadata.intent_drafter.summary}。请输入 yes 或 no。",
+        "input_schema": {
+          "type": "single_choice",
+          "options": [
+            "yes",
+            "no"
+          ]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "yes",
+        "write_to": "feedback.approval",
+        "depends_on": [
+          "intent_drafter"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_writer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。必须结合用户确认结果给出最终答复。",
+        "subtask": "若 feedback.approval=yes，输出最终方案与下一步。若为 no，先给一个改进版方案再给下一步。",
+        "depends_on": [
+          "user_confirmation"
+        ],
+        "temperature": 0.2
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "intent_drafter",
+      "to_node": "user_confirmation",
+      "condition": null
+    },
+    {
+      "from_node": "user_confirmation",
+      "to_node": "final_writer",
+      "condition": null
+    }
+  ]
+}

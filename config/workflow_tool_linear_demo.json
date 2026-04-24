@@ -1,0 +1,52 @@
+{
+  "nodes": [
+    {
+      "node_id": "query_refiner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是查询改写节点。你的目标是将用户原始问题转换为 arXiv 友好的英文检索表达。禁止等待式追问。只输出简短英文检索词，不要解释。",
+        "subtask": "将用户输入提炼为英文检索字符串（3~10个英文词），可包含 OR。输出必须是可直接用于 arXiv 的英文 query，不要包含中文、不要加引号、不要多段说明。",
+        "depends_on": [],
+        "temperature": 0.3
+      }
+    },
+    {
+      "node_id": "arxiv_search_node",
+      "node_type": "tool",
+      "tool_name": "arxiv_search",
+      "config": {
+        "tool_input": "${metadata.query_refiner.result}",
+        "depends_on": [
+          "query_refiner"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_writer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。你必须严格基于工具节点的真实结果输出，不得编造论文题目、作者或年份。",
+        "subtask": "若上游工具检索成功：输出结构化总结（主题概览、代表论文、建议阅读顺序）。若上游检索失败或无结果：明确说明“本次未检索到结果”，并给出3条可执行的英文检索词改写建议。",
+        "depends_on": [
+          "arxiv_search_node"
+        ],
+        "temperature": 0.2
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "query_refiner",
+      "to_node": "arxiv_search_node",
+      "condition": null
+    },
+    {
+      "from_node": "arxiv_search_node",
+      "to_node": "final_writer",
+      "condition": null
+    }
+  ]
+}

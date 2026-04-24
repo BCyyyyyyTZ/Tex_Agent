@@ -1,0 +1,123 @@
+{
+  "description": "挑战流1：证据驱动 + 用户视角分流",
+  "test_question": "请帮我做“多智能体在论文写作辅助中的研究”阶段计划，先给证据再给执行方案。",
+  "nodes": [
+    {
+      "node_id": "requirement_clarifier",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是需求澄清节点。你必须先提炼任务边界、时间约束和交付形态，禁止等待式追问。",
+        "subtask": "将用户任务重写为“可检索的问题陈述”，输出：研究目标、边界条件、检索关键词草案（中英混合可）。",
+        "depends_on": [],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "paper_retriever",
+      "node_type": "tool",
+      "tool_name": "arxiv_search",
+      "config": {
+        "tool_input": "${metadata.query_refiner.result}",
+        "depends_on": [
+          "query_refiner"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "query_refiner",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是 arXiv 查询改写节点。你必须把上游需求改写成可直接用于 arXiv 的英文检索式。",
+        "subtask": "严格只输出一行英文检索字符串（3-12个关键词）。可使用 AND/OR 与括号；禁止中文、禁止多段说明、禁止列表、禁止标点噪声。优先包含 domain + task + method 三类词。",
+        "depends_on": [
+          "requirement_clarifier"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "evidence_synthesizer",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是证据综合节点。必须严格基于工具返回内容总结，不得编造论文信息。",
+        "subtask": "从检索结果中提炼3个研究方向，并给出每个方向的优势、风险与适配场景。",
+        "depends_on": [
+          "paper_retriever"
+        ],
+        "temperature": 0.3,
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "focus_selector",
+      "node_type": "user",
+      "config": {
+        "prompt_template": "请从以下研究视角中选择一个作为最终方案主线：理论机制 / 方法创新 / 场景应用。你也可以直接回复其中一个词。",
+        "input_schema": {
+          "type": "single_choice",
+          "options": [
+            "理论机制",
+            "方法创新",
+            "场景应用"
+          ]
+        },
+        "validation": {
+          "required": true
+        },
+        "default_value": "场景应用",
+        "write_to": "user_feedback.focus",
+        "depends_on": [
+          "evidence_synthesizer"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_plan_builder",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是最终交付节点。你必须融合证据综合结论和用户选择，给出可执行计划。",
+        "subtask": "输出4周执行计划：每周目标、交付物、检查点、风险控制。必须显式说明你采用了哪个 user_feedback.focus 视角。",
+        "depends_on": [
+          "focus_selector"
+        ],
+        "temperature": 0.2,
+        "history_mode": "minimal"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "requirement_clarifier",
+      "to_node": "query_refiner",
+      "condition": null
+    },
+    {
+      "from_node": "query_refiner",
+      "to_node": "paper_retriever",
+      "condition": null
+    },
+    {
+      "from_node": "paper_retriever",
+      "to_node": "evidence_synthesizer",
+      "condition": null
+    },
+    {
+      "from_node": "evidence_synthesizer",
+      "to_node": "focus_selector",
+      "condition": null
+    },
+    {
+      "from_node": "focus_selector",
+      "to_node": "final_plan_builder",
+      "condition": null
+    }
+  ]
+}

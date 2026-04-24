@@ -21,3 +21,7 @@ pytest-asyncio>=0.21.0
 
 # PDF 处理依赖
 pymupdf>=1.24.0
+
+# 文档解析工具
+docling>=2.0
+pymupdf>=1.24.0
