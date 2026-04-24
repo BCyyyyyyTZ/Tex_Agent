@@ -3,7 +3,7 @@ BaseAgent 抽象基类。
 所有 Agent 实现均继承此类，保证接口统一，支持面向接口编程与 Mock 测试。
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 import asyncio
 import openai
 
@@ -98,6 +98,7 @@ class GeminiClient:
         self.client = genai.Client(api_key=self.api_key)
         self.temperature = temperature
         self.files = {}
+        self.files_by_id = {}
         
     def _upload_files_parallel(self, file_paths: List[str]):
         """
@@ -113,6 +114,7 @@ class GeminiClient:
             file_obj = self.client.files.upload(file=path)
             uploaded_files.append(file_obj)
             self.files[path] = file_obj
+            self.files_by_id[getattr(file_obj, "name", str(file_obj))] = file_obj
 
         # 轮询检查所有文件的状态
         print("等待所有文件处理完成...")
