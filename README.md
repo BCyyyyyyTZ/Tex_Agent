@@ -28,23 +28,48 @@ python main.py
 
 ### Web 交互页面（类 Cursor 风格，支持 Markdown 渲染）
 
+与 `main.py` 共用 `TeXAgentCLI` 与会话；默认工作流来自 `config/workflow_registry.json` 的 `default`。`plan` 模式对应 `run_plan_task`（更慢）。
+
+**依赖（含上传 PDF 所需 `python-multipart`）：**
+
 ```bash
 pip install -r requirements.txt
-# 推荐：单脚本（逻辑集中；在 VS / Cursor 里装本仓库扩展后，用命令「单脚本启动 Web 并在本窗口 Simple Browser 打开」= 同窗内置浏览器）
-python scripts/start_texagent_web.py --no-browser   # 仅起服务，再用扩展 Ctrl+Alt+T 或让扩展代开 Simple Browser
-# 或直接：python scripts/start_texagent_web.py   # 会尝试本机 code/cursor，仍可能多弹一窗
-# 传统：python -m ui.web.server（在 **VS / Cursor 集成终端**里跑时，启动后会尽量在**当前窗口** Simple Browser 打开）
-# 说明见 scripts/start_texagent_web.py 与 ui/web/ide_launch.py。环境：TEX_AGENT_WEB_HOST、TEX_AGENT_WEB_PORT
 ```
 
-与 `main.py` 使用同一套 `TeXAgentCLI` 会话与默认工作流；`plan` 模式对应 `run_plan_task`（更慢）。
+**启动服务（任选其一）：**
+
+```bash
+# 方式 A：模块入口（常用）
+python -m ui.web.server
+
+# 方式 B：一键脚本（约 2.2s 后可尝试用系统默认浏览器打开页面；可用 --no-browser 仅起服务）
+python scripts/start_texagent_web.py
+# python scripts/start_texagent_web.py --no-browser
+# python scripts/start_texagent_web.py --port 9000
+```
+
+默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。
+
+**页面能力概览：**
+
+| 区域 | 说明 |
+|------|------|
+| 左侧 | **工作流编排**：节点与有向边，保存到服务端；顶栏选「自定义（左侧编排）」且 `workflow=__web__` 时走该图。保存时有 DAG 校验（唯一入口/唯一汇、无环、无孤立等）。 |
+| 中部上 | **分支树**：调用 `GET/POST /api/branches` 等，图上可切换分支、从父节点新建子分支。 |
+| 中部 | **PDF 资料**：上传到项目内 **`storage/pdfs/`**（已加入 `.gitignore`，不提交用户文件），列表与下载走 `GET/POST /api/storage/pdfs`。 |
+| 底部 | 对话；`task` 时可在顶栏选择注册表工作流或「自定义」。 |
+
+**相关 REST API（便于联调）：**  
+`GET/POST /api/branches`、`POST /api/branches/switch`、`GET/PUT /api/workflow/draft`、`GET /api/workflow/registry`、`GET/POST /api/storage/pdfs`、`GET /api/storage/pdfs/{文件名}/raw`。
+
+**启动后打开浏览器：** 默认尝试**系统默认浏览器**（WSL 常见为调 Windows 侧打开，见 `ui/web/browser_open.py`）。可设置 `TEX_AGENT_NO_OPEN_BROWSER=1` 不自动打开；`TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1` 在打开系统浏览器后**再**尝试 Simple Browser。详见 `ui/web/ide_launch.py` 与 `scripts/start_texagent_web.py` 文头说明。
 
 ### VS Code / Cursor 里看到聊天界面
 
 - **推荐（装本仓库扩展）**：命令面板 **「TeX Agent: 单脚本启动 Web 并在本窗口 Simple Browser 打开」** = 终端跑 `scripts/start_texagent_web.py --no-browser` + 约 2 秒后 **同一窗口** 打开 Simple Browser（`http://127.0.0.1:8765/`）。
 - **仅开页（服务已起）**：**Ctrl+Alt+T** / 状态栏 **「TeX Agent 聊天」** / 任务 **「TeX Agent: 仅 Simple Browser 打开」**。
 - **免装扩展**：**Ctrl+Shift+B** 默认「构建」= 单脚本起服务（`--no-browser`）；再起第二项任务或浏览器手开 `http://127.0.0.1:8765/`。任务见 `.vscode/tasks.json`。
-- **可选**：侧栏活动栏 **TeX Agent**（iframe 嵌同一地址）；`vscode-extension` 可 `vsce package` 安装。调试：`.vscode/launch.json` → **Run Extension: TeX Agent Chat**。
+- **可选**：侧栏活动栏 **TeX Agent**（iframe 嵌同一地址）；`vscode-extension` 可 `vsce package` 安装。调试：`.vscode/launch.json` → **Run Extension: TeX Agent Chat**。装扩展后**推荐**用 `--no-browser` 起服务，由扩展或快捷键打开，避免 WSL/无 Linux 浏览器时的无效 `xdg-open` 提示。
 
 ---
 
@@ -65,7 +90,7 @@ python scripts/start_texagent_web.py --no-browser   # 仅起服务，再用扩�
 
 ##### 1. workflow/graph_builder.py 动态配置装配
 
-- `build_app_from_workflow(workflow_name, ...)`：统一构建入口
+- `build_app_from_workflow(workflow_name, ...)`：统一构建入口；可选参数 **`config_dict`** 时直接解析内存中的 `nodes/edges`（JSON），用于 Web 左侧「自定义」工作流，无需写注册表文件
 - `load_workflow_graph_config(workflow_name)`：从 `workflow_registry` 读取配置
 - `build_dynamic_graph(nodes, edges, ...)`：根据配置构图并执行
 
@@ -112,9 +137,12 @@ python scripts/start_texagent_web.py --no-browser   # 仅起服务，再用扩�
 ```
 TeX_Agent/
 ├── main.py                      # 程序主入口，支持 task / task --wf / plan
-├── requirements.txt             # 项目依赖（langgraph, langchain, chromadb, arxiv 等）
+├── requirements.txt             # 项目依赖（含 FastAPI、uvicorn、python-multipart 等）
 ├── .env.example                 # 环境变量示例（OPENAI_API_KEY 等，复制为 .env 使用）
 ├── README.md                    # 本文件
+├── storage/pdfs/                # Web 上传的 PDF 存放目录（用户文件默认被 .gitignore 忽略）
+├── ui/web/                      # FastAPI Web UI：server.py、静态页、pdf_storage、ide_launch 等
+│   └── static/                  # index.html、app.js、分支/工作流/PDF 相关 JS 与样式
 ├── Framework.md                 # 框架拓展路线图
 │
 ├── doc/                         # 相关说明文件
