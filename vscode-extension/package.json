@@ -1,0 +1,106 @@
+{
+  "name": "tex-agent-chat",
+  "displayName": "TeX Agent Chat",
+  "description": "在侧栏/编辑器中打开 TeX Agent 聊天页（与 Cursor 类似的对话区，需本机运行为 ui.web.server）",
+  "version": "0.1.0",
+  "publisher": "texagent",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:texagent.chatView",
+    "onCommand:texagent.openChatPanel",
+    "onCommand:texagent.openSimpleBrowser"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "TeX Agent",
+      "properties": {
+        "texagent.webServerUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "本机 TeX Agent Web UI 地址（与 python -m ui.web.server 一致）"
+        },
+        "texagent.sidebarMode": {
+          "type": "string",
+          "enum": ["proxy", "iframe"],
+          "default": "proxy",
+          "description": "侧栏聊天：proxy=由扩展主进程调 API（推荐，Enter/发送在侧栏可用）；iframe=内嵌整页（易与侧栏键盘冲突）"
+        },
+        "texagent.openSimpleBrowserAfterStartServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "通过「在终端启动 Web 服务」命令运行 python -m ui.web.server 后，自动在当前窗口的 Simple Browser 打开聊天页（约 2 秒后）"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "texagent",
+          "title": "TeX Agent",
+          "icon": "media/texagent.svg"
+        }
+      ]
+    },
+    "views": {
+      "texagent": [
+        {
+          "type": "webview",
+          "id": "texagent.chatView",
+          "name": "聊天",
+          "contextualTitle": "TeX Agent"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "texagent.openSimpleBrowser",
+        "key": "ctrl+alt+t",
+        "mac": "cmd+alt+t"
+      }
+    ],
+    "commands": [
+      {
+        "command": "texagent.openSimpleBrowser",
+        "title": "TeX Agent: 在 Simple Browser 打开聊天（最简）",
+        "icon": "$(browser)"
+      },
+      {
+        "command": "texagent.openChatPanel",
+        "title": "TeX Agent: 在编辑器区域打开聊天 (Webview)",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "texagent.startServerInTerminal",
+        "title": "TeX Agent: 单脚本启动 Web 并在本窗口 Simple Browser 打开"
+      },
+      {
+        "command": "texagent.refreshWebview",
+        "title": "TeX Agent: 刷新聊天页",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "texagent.openSimpleBrowser",
+          "group": "TeXAgent@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "texagent.refreshWebview",
+          "when": "view == texagent.chatView",
+          "group": "navigation"
+        }
+      ]
+    }
+  }
+}

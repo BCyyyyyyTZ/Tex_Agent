@@ -25,6 +25,27 @@ cp .env.example .env
 # 4. 运行 MVP 基础链路
 python main.py
 ```
+
+### Web 交互页面（类 Cursor 风格，支持 Markdown 渲染）
+
+```bash
+pip install -r requirements.txt
+# 推荐：单脚本（逻辑集中；在 VS / Cursor 里装本仓库扩展后，用命令「单脚本启动 Web 并在本窗口 Simple Browser 打开」= 同窗内置浏览器）
+python scripts/start_texagent_web.py --no-browser   # 仅起服务，再用扩展 Ctrl+Alt+T 或让扩展代开 Simple Browser
+# 或直接：python scripts/start_texagent_web.py   # 会尝试本机 code/cursor，仍可能多弹一窗
+# 传统：python -m ui.web.server（在 **VS / Cursor 集成终端**里跑时，启动后会尽量在**当前窗口** Simple Browser 打开）
+# 说明见 scripts/start_texagent_web.py 与 ui/web/ide_launch.py。环境：TEX_AGENT_WEB_HOST、TEX_AGENT_WEB_PORT
+```
+
+与 `main.py` 使用同一套 `TeXAgentCLI` 会话与默认工作流；`plan` 模式对应 `run_plan_task`（更慢）。
+
+### VS Code / Cursor 里看到聊天界面
+
+- **推荐（装本仓库扩展）**：命令面板 **「TeX Agent: 单脚本启动 Web 并在本窗口 Simple Browser 打开」** = 终端跑 `scripts/start_texagent_web.py --no-browser` + 约 2 秒后 **同一窗口** 打开 Simple Browser（`http://127.0.0.1:8765/`）。
+- **仅开页（服务已起）**：**Ctrl+Alt+T** / 状态栏 **「TeX Agent 聊天」** / 任务 **「TeX Agent: 仅 Simple Browser 打开」**。
+- **免装扩展**：**Ctrl+Shift+B** 默认「构建」= 单脚本起服务（`--no-browser`）；再起第二项任务或浏览器手开 `http://127.0.0.1:8765/`。任务见 `.vscode/tasks.json`。
+- **可选**：侧栏活动栏 **TeX Agent**（iframe 嵌同一地址）；`vscode-extension` 可 `vsce package` 安装。调试：`.vscode/launch.json` → **Run Extension: TeX Agent Chat**。
+
 ---
 
 ## 在现有架构基础上进行修改的说明

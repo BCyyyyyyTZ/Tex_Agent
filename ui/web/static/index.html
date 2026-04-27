@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TeX Agent</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <aside class="sidebar-wf" aria-label="工作流编排">
+        <h2 class="sidebar-wf-title">工作流</h2>
+        <p class="sidebar-wf-desc">
+          用 Agent 节点与有向边组装图；与 <code>config/workflow_*.json</code> 结构一致。保存后，在右侧顶栏将「工作流」选为「自定义」以执行本图。
+        </p>
+        <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
+        <div id="wf-nodes" class="wf-nodes"></div>
+        <button type="button" class="btn-secondary wf-add-node-btn" id="wf-add-node">＋ 添加 Agent 节点</button>
+        <form id="wf-add-edge" class="wf-add-edge" autocomplete="off">
+          <span class="label">有向边</span>
+          <div class="wf-edge-picks">
+            <select id="wf-edge-from" title="从"></select>
+            <span class="wf-edge-arrow">→</span>
+            <select id="wf-edge-to" title="到"></select>
+            <button type="submit" class="btn-tiny">添加</button>
+          </div>
+        </form>
+        <div id="wf-edges" class="wf-edges"></div>
+        <form id="wf-form-save" class="wf-form-save">
+          <button type="submit" class="btn-primary wf-save">保存到服务器</button>
+        </form>
+        <p id="wf-status" class="wf-status" role="status"></p>
+      </aside>
+
+      <div class="app main-col">
+      <header class="header">
+        <div class="brand">
+          <span class="logo" aria-hidden="true">T</span>
+          <div>
+            <h1>TeX Agent</h1>
+            <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <label class="select-wrap">
+            <span class="label">工作流</span>
+            <select id="workflow-select" title="已注册或左侧自定义">
+              <option value="default" selected>default（注册表）</option>
+              <option value="__web__">自定义（左侧编排）</option>
+            </select>
+          </label>
+          <label class="select-wrap">
+            <span class="label">模式</span>
+            <select id="mode" title="执行模式">
+              <option value="task" selected>task（工作流）</option>
+              <option value="plan">plan（动态规划，较慢）</option>
+            </select>
+          </label>
+        </div>
+      </header>
+
+      <section class="branch-panel" id="branch-panel" aria-label="对话分支树">
+        <div class="branch-panel-head">
+          <h2 class="branch-panel-title">分支</h2>
+          <span class="branch-current" id="branch-current-lbl">当前分支: main</span>
+        </div>
+        <p class="branch-panel-hint">节点由上到下为自父到子；连线表示从父分支切出。点击节点可切换当前对话所在分支；新建分支会复制该父节点上的记忆与历史。</p>
+        <div id="branch-graph" class="branch-graph" role="img" aria-label="分支继承图"></div>
+        <p id="branch-panel-status" class="branch-panel-status" role="status"></p>
+        <form id="branch-new-form" class="branch-new-form" autocomplete="off">
+          <label class="branch-new-name-wrap">
+            <span class="label">新分支</span>
+            <input
+              type="text"
+              id="branch-new-name"
+              class="branch-input"
+              pattern="[a-zA-Z0-9_-]+"
+              placeholder="如 experiment-1"
+              maxlength="64"
+              title="字母、数字、下划线、连字符"
+            />
+          </label>
+          <label class="branch-new-from-wrap">
+            <span class="label">从</span>
+            <select id="branch-new-from" class="branch-select" title="作为父节点">
+              <option value="main">main</option>
+            </select>
+          </label>
+          <button type="submit" class="btn-secondary">新建子分支</button>
+        </form>
+      </section>
+
+      <main class="chat" id="chat" aria-live="polite">
+        <div id="chat-empty" class="chat-empty" role="status">
+          <p class="chat-empty-title">开始与 TeX Agent 对话</p>
+          <p class="chat-empty-desc">回复为工作流<strong>最终节点</strong>文本，按 Markdown 渲染；代码块需指定语言以高亮。</p>
+        </div>
+      </main>
+
+      <footer class="composer">
+        <form id="form" class="form">
+          <textarea
+            id="input"
+            rows="4"
+            placeholder="输入需求...（支持 Markdown 回复渲染）"
+            spellcheck="false"
+          ></textarea>
+          <div class="form-footer">
+            <span class="hint">点「发送」最稳；Enter 发送（嵌入侧栏时若无效请用 Ctrl+Enter 或一次「发送」）。选用「自定义」工作流前请先左侧保存。</span>
+            <button type="submit" id="send" class="btn-primary">发送</button>
+          </div>
+        </form>
+      </footer>
+      </div>
+    </div>
+
+    <!-- 本地 vendor，避免 VS Code 侧栏 iframe 内无法访问外网 CDN 导致脚本未加载、无法发送 -->
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/purify.min.js"></script>
+    <script src="vendor/highlight.min.js"></script>
+    <script src="branch_graph.js"></script>
+    <script src="workflow_builder.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

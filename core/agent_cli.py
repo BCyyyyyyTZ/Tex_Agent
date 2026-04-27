@@ -150,7 +150,9 @@ class TeXAgentCLI:
             except Exception as e:
                 logger.warning("会话记忆落盘失败: %s", e)
 
-    def _execute_with_app(self, user_input: str, app: Any, workflow_label: str) -> dict:
+    def _execute_with_app(
+        self, user_input: str, app: Any, workflow_label: str, *, use_loading: bool = True
+    ) -> dict:
         """
         统一执行器：给定 app 后执行任务，负责状态装配、invoke 与上下文回写。
         """
@@ -190,7 +192,10 @@ class TeXAgentCLI:
         def _invoke():
             return app.invoke(initial_state)
 
-        result = run_with_loading(_invoke, message="🤖 LLM 生成中", style="braille")
+        if use_loading:
+            result = run_with_loading(_invoke, message="🤖 LLM 生成中", style="braille")
+        else:
+            result = _invoke()
 
         # 执行后回写消息到 Context（仅追加本轮新增消息，避免重复写入历史）
         if result and "messages" in result:
@@ -210,8 +215,15 @@ class TeXAgentCLI:
     
     # core/agent_cli.py - 修复 run_task 方法
 
-    def run_task(self, user_input: str, branch: str = None, workflow_name: str = None) -> dict:
-        """执行任务（带加载动画）"""
+    def run_task(
+        self,
+        user_input: str,
+        branch: str = None,
+        workflow_name: str = None,
+        *,
+        use_loading: bool = True,
+    ) -> dict:
+        """执行任务。use_loading=False 时不在终端显示旋转动画（供 Web/API 使用）。"""
         target_branch = branch or self.current_branch
         
         if target_branch != self.current_branch:
@@ -236,9 +248,13 @@ class TeXAgentCLI:
                 "retrieved_context": "",
             }
 
-        return self._execute_with_app(user_input, app, workflow_label)
+        return self._execute_with_app(
+            user_input, app, workflow_label, use_loading=use_loading
+        )
 
-    def run_plan_task(self, user_input: str, branch: str = None) -> dict:
+    def run_plan_task(
+        self, user_input: str, branch: str = None, *, use_loading: bool = True
+    ) -> dict:
         """
         统一的 plan 任务入口：
         规划 -> 解析图 -> 构图 -> 复用统一执行器 _execute_with_app。
@@ -275,7 +291,9 @@ class TeXAgentCLI:
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
         )
-        result = self._execute_with_app(user_input, app, workflow_label="plan_dynamic")
+        result = self._execute_with_app(
+            user_input, app, workflow_label="plan_dynamic", use_loading=use_loading
+        )
 
         if result.get("error") is None:
             node_ids = [n.node_id for n in nodes]
@@ -284,12 +302,18 @@ class TeXAgentCLI:
 
         return result
     
-    def switch_branch(self, branch_name: str):
-        """切换分支"""
+    def switch_branch(self, branch_name: str) -> bool:
+        """切换分支；未知分支时返回 False。"""
         if branch_name == self.current_branch:
             print(f"✅ 已经在分支 '{branch_name}'")
-            return
-        
+            return True
+
+        sh = self.memory_system.get("shared")
+        if self.use_branch and sh is not None and hasattr(sh, "list_branches"):
+            if branch_name not in sh.list_branches():
+                print(f"❌ 无此分支: {branch_name!r}")
+                return False
+
         old_branch = self.current_branch
         self.current_branch = branch_name
         for memory in self.memory_system.values():
@@ -304,24 +328,84 @@ class TeXAgentCLI:
 
         print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
         print(f"   📝 对话历史: {len(self.context)} 条")
-    
-    def create_branch(self, branch_name: str, from_branch: str = "main"):
-        """创建分支"""
+        return True
+
+    def create_branch(self, branch_name: str, from_branch: str = "main") -> bool:
+        """
+        创建分支；各记忆模块须全部成功才复制上下文。名称已存在或 from 非法时返回 False。
+        """
+        if not str(branch_name or "").strip() or str(branch_name).strip() == "main":
+            return False
+        branch_name = str(branch_name).strip()
+        from_b = str(from_branch or "main").strip() or "main"
+        flags: List[bool] = []
         for memory in self.memory_system.values():
-            if hasattr(memory, 'create_branch'):
-                memory.create_branch(branch_name, from_branch)
-        
-        # 复制上下文
-        if from_branch in self.contexts:
-            from_ctx = self.contexts[from_branch]
+            if hasattr(memory, "create_branch"):
+                flags.append(bool(memory.create_branch(branch_name, from_b)))
+        if not flags or not all(flags):
+            return False
+
+        if from_b in self.contexts:
+            from_ctx = self.contexts[from_b]
             new_ctx = ContextManager(max_messages=200, default_limit=20)
             for msg in from_ctx.load():
                 new_ctx.save(msg)
             self.contexts[branch_name] = new_ctx
         else:
             self.contexts[branch_name] = ContextManager(max_messages=200, default_limit=20)
-        
-        print(f"✅ 创建分支: {branch_name} (基于 {from_branch})")
+
+        print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
+        return True
+
+    def get_branch_tree_for_api(self) -> Dict[str, Any]:
+        """
+        供 Web：当前活动分支、树节点 id/parent/记忆条数/对话条数。
+        """
+        shared = self.memory_system.get("shared")
+        if not self.use_branch or not shared or not getattr(shared, "branch_enabled", False):
+            ctx = self.contexts.get(self.current_branch) or self.context
+            msg_n = len(ctx) if ctx is not None else 0
+            return {
+                "current": self.current_branch,
+                "nodes": [
+                    {
+                        "id": "main",
+                        "parent": None,
+                        "size": 0,
+                        "messages": msg_n,
+                    }
+                ],
+            }
+        info = shared.get_branch_info()
+        details = info.get("branch_details") or {}
+        names: List[str] = list(
+            (info.get("branches") or list(details.keys()) or ["main"])
+        )
+        if "main" in names:
+            names.remove("main")
+            names = ["main"] + sorted(names)
+        else:
+            names = sorted(names)
+        out: List[Dict[str, Any]] = []
+        for name in names:
+            d = details.get(name) or {}
+            ctx = self.contexts.get(name)
+            msg_n = len(ctx) if ctx is not None else 0
+            p = d.get("parent")
+            if name == "main":
+                p = None
+            out.append(
+                {
+                    "id": name,
+                    "parent": p,
+                    "size": int(d.get("size", 0) or 0),
+                    "messages": msg_n,
+                }
+            )
+        return {
+            "current": self.current_branch,
+            "nodes": out,
+        }
     
     def merge_branch(self, branch_name: str):
         """合并分支"""

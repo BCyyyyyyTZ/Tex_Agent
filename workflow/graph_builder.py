@@ -361,11 +361,22 @@ def build_app_from_workflow(
     runtime_memory: Optional[Any] = None,
     default_history_mode: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
+    config_dict: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """
-    统一的工作流构建入口：加载注册表中的 workflow 并构建可执行图。
+    统一的工作流构建入口。
+
+    - 若传入 ``config_dict``（含 ``nodes`` / ``edges``），从内存 JSON 解析，不再读注册表文件。
+    - 否则按 ``workflow_name`` 从 ``workflow_registry.json`` 加载文件。
     """
-    nodes, edges = load_workflow_graph_config(workflow_name)
+    if config_dict is not None:
+        from workflow.workflow_parser import YAMLWorkflowParser
+
+        parser = YAMLWorkflowParser()
+        nodes = parser.parse_nodes(config_dict)
+        edges = parser.parse_edges(config_dict)
+    else:
+        nodes, edges = load_workflow_graph_config(workflow_name)
     return build_dynamic_graph(
         nodes=nodes,
         edges=edges,
