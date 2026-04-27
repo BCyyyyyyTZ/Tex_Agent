@@ -13,6 +13,8 @@
   --radius: 8px;
   --font: "Segoe UI", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "Noto Sans Mono SC", monospace;
+  /* 主列左内与右内边距，顶栏/聊天/输入区统一（0 与左中右三列无额外缝） */
+  --main-pad-x: 0px;
 }
 
 * {
@@ -23,6 +25,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -30,30 +33,207 @@ body {
   line-height: 1.55;
 }
 
-/* 主区 + 左侧工作流栏 */
+/* 占满浏览器宽度；内层四列可拖曳分隔条 */
+.app-shell {
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  min-height: 100vh;
+  margin: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 主区：最左工作流 | 分支 | 聊天 | 最右资料 */
 .app-layout {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  min-height: 100vh;
-  max-width: 1400px;
-  margin: 0 auto;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.layout-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 由 layout_resizer.js 覆盖；工作流列默认加宽、分支略窄于工作流时旧值可自拖 */
+.layout-col--wf {
+  flex: 0 0 400px;
+  width: 400px;
+  background: #252526;
+}
+.layout-col--branch {
+  flex: 0 0 320px;
+  width: 320px;
+  background: #252526;
+}
+.layout-col--right {
+  flex: 0 0 300px;
+  width: 300px;
+  background: #252526;
+}
+
+.layout-col--main {
+  flex: 1 1 0;
+  min-width: 160px;
+  background: #1a1a1a;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch; /* 主列铺满，避免与左右栏之间出现无内容留白 */
+  overflow: hidden;
+}
+
+/* 列间不占布局宽度，避免与左右栏出现色带缝；用伪元素保留约 10px 可拖曳带 */
+.layout-gutter {
+  flex: 0 0 0;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  cursor: col-resize;
+  background: transparent;
+  align-self: stretch;
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+}
+.layout-gutter::after {
+  content: "";
+  position: absolute;
+  left: -5px;
+  width: 10px;
+  top: 0;
+  bottom: 0;
+  cursor: col-resize;
+  pointer-events: auto;
+  transition: background 0.12s ease;
+}
+.layout-gutter:hover::after,
+.layout-gutter.is-dragging::after {
+  background: rgba(61, 110, 168, 0.35);
+}
+
+.sidebar-right {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  background: transparent;
+  padding: 10px 12px 20px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.uploaded-files-block {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid #3a3a3a;
+}
+.uploaded-files-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.asset-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #333;
+  color: #b0b0b0;
+  margin-right: 4px;
+  font-family: var(--mono);
+}
+.asset-list--uploaded {
+  max-height: 240px;
+}
+.sidebar-right-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sidebar-right-desc {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.sidebar-right-desc strong {
+  color: #c9d1d9;
+  font-weight: 600;
+}
+.right-asset-block {
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #333;
+}
+.right-asset-block:last-of-type {
+  border-bottom: none;
+}
+.right-asset-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.right-asset-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.right-asset-hint code {
+  font-size: 11px;
+}
+
+.sidebar-branch {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  background: transparent;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-wf {
-  flex: 0 0 min(30vw, 300px);
-  min-width: 240px;
-  max-width: 360px;
-  background: #252526;
-  border-right: 1px solid #2d2d2d;
-  padding: 10px 12px 16px;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  background: transparent;
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* 可滚动主区：缩略图+节点+边，占满中间高度 */
+.wf-body {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
-  max-height: 100vh;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
+}
+/* 保存按钮区贴左栏底，不被中间内容顶在半截 */
+.wf-footer {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid #3a3a3a;
+}
+.wf-footer .wf-form-save {
+  margin: 0;
+}
+.wf-footer .wf-status {
+  margin-bottom: 0;
 }
 
 .sidebar-wf-title {
@@ -64,22 +244,32 @@ body {
 
 .sidebar-wf-desc {
   margin: 0 0 8px;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 .sidebar-wf-desc code {
-  font-size: 10px;
+  font-size: 12px;
   color: #b0b0b0;
 }
 
 .wf-preview {
-  min-height: 56px;
+  flex: 1 1 12rem;
+  min-height: 320px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #1a1a1a;
   margin-bottom: 8px;
-  overflow: hidden;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+/* 缩略图 SVG 占满预览盒宽度，最小高度与 JS 中 viewBox 下限一致 */
+.wf-preview > svg {
+  display: block;
+  width: 100%;
+  min-height: 300px;
+  flex: 1 1 auto;
 }
 .wf-preview-empty {
   margin: 0;
@@ -108,7 +298,9 @@ body {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
-  max-height: 40vh;
+  max-height: min(42vh, 22rem);
+  min-height: 0;
+  flex: 0 1 auto;
   overflow-y: auto;
 }
 .wf-node-row {
@@ -141,7 +333,7 @@ body {
 }
 .wf-add-edge .label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-bottom: 4px;
 }
@@ -176,7 +368,7 @@ body {
   border-bottom: 1px solid #333;
 }
 .wf-form-save {
-  margin: 6px 0 4px;
+  margin: 0;
 }
 .wf-save {
   width: 100%;
@@ -189,7 +381,7 @@ body {
   font-size: 12px;
 }
 .wf-status {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   margin: 0;
   line-height: 1.4;
@@ -210,12 +402,20 @@ body {
   background: #4a4a4a;
 }
 
+/* 主列：水平内边距只设一处，顶栏 / chat-scroll / 输入区 内容同宽；铺满 flex 子项宽度 */
 .app.main-col {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-left: var(--main-pad-x, 16px);
+  padding-right: var(--main-pad-x, 16px);
 }
 
 /* 无侧栏时兼容旧 .app 单栏（若有脚本引用） */
@@ -233,12 +433,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 0;
   background: #1e1e1e;
   border-bottom: 1px solid #2d2d2d;
   gap: 12px;
   flex-wrap: wrap;
   flex-shrink: 0;
+  /* 与 .chat-scroll 一致，避免顶栏可排版宽度多出一截滚动条位 */
+  scrollbar-gutter: stable;
 }
 
 .brand {
@@ -298,7 +502,17 @@ select {
   appearance: auto;
 }
 
-/* 对话分支图 */
+/* 对话分支图（第二列） */
+.sidebar-branch .branch-panel {
+  padding: 10px 12px 16px;
+  background: transparent;
+  border-bottom: none;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
 .branch-panel {
   flex-shrink: 0;
   padding: 10px 16px 12px;
@@ -326,19 +540,27 @@ select {
 }
 .branch-panel-hint {
   margin: 0 0 10px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-muted);
-  max-width: 52rem;
+  max-width: none;
+}
+.sidebar-branch .branch-panel-hint {
+  font-size: 13px;
 }
 .branch-graph {
-  min-height: 120px;
+  min-height: 220px;
   width: 100%;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: #1e1e1e;
   overflow: auto;
   margin-bottom: 8px;
+}
+/* 在侧栏内纵向多占一截，便于看全分支图 */
+.sidebar-branch .branch-graph {
+  flex: 1 1 auto;
+  min-height: 220px;
 }
 .branch-edge {
   stroke: #4a4a5a;
@@ -389,7 +611,7 @@ select {
   gap: 4px;
 }
 .branch-new-form .label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .branch-input {
@@ -428,31 +650,6 @@ select {
   background: #4a4a4a;
 }
 
-/* PDF 上传与列表 */
-.pdf-panel {
-  flex-shrink: 0;
-  padding: 10px 16px 12px;
-  background: #222;
-  border-bottom: 1px solid #2d2d2d;
-}
-.pdf-panel-head {
-  margin-bottom: 4px;
-}
-.pdf-panel-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-.pdf-panel-hint {
-  margin: 0 0 8px;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-muted);
-  max-width: 52rem;
-}
-.pdf-panel-hint code {
-  font-size: 11px;
-}
 .pdf-upload-form {
   display: flex;
   flex-wrap: wrap;
@@ -466,71 +663,99 @@ select {
   gap: 4px;
 }
 .pdf-file-label .label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .pdf-file-label input[type="file"] {
   font-size: 12px;
   max-width: min(100%, 28rem);
 }
-.pdf-panel-status {
+.asset-panel-status {
   font-size: 12px;
   color: var(--text-muted);
   margin: 0 0 6px;
   min-height: 1.2em;
 }
-.pdf-panel-status--err {
+.asset-panel-status--err {
   color: #f85149;
 }
-.pdf-list {
+.asset-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 200px;
+  max-height: 180px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #1a1a1a;
 }
-.pdf-list-item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 12px;
-  padding: 6px 10px;
-  border-bottom: 1px solid #2a2a2a;
-  font-size: 13px;
+.asset-list--right {
+  max-height: 220px;
 }
-.pdf-list-item:last-child {
+.asset-list-item {
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid #2a2a2a;
+  font-size: 12px;
+}
+.asset-list-item:last-child {
   border-bottom: none;
 }
-.pdf-list-link {
+.asset-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.asset-cb {
+  margin-top: 3px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.asset-link {
   color: var(--accent);
   text-decoration: none;
   word-break: break-all;
+  flex: 1;
+  min-width: 0;
 }
-.pdf-list-link:hover {
+.asset-link:hover {
   text-decoration: underline;
 }
-.pdf-list-meta {
+.asset-meta {
+  display: block;
   font-size: 11px;
   color: var(--text-muted);
   font-family: var(--mono);
+  margin-left: 22px;
 }
-.pdf-list-empty {
-  padding: 10px 12px;
+.asset-list-empty {
+  padding: 8px 10px;
   font-size: 12px;
   color: var(--text-muted);
 }
 
+/* 外层不滚动，宽度与 .header / .composer 外缘严格一致；滚动在 .chat-scroll */
 .chat {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.chat-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 16px 18px 20px;
+  padding: 16px 0 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  min-height: 120px;
   scrollbar-gutter: stable;
 }
 
@@ -556,12 +781,12 @@ select {
 
 .chat-empty-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .msg {
-  max-width: min(100%, 52rem);
+  max-width: 100%;
   border-radius: var(--radius);
   padding: 12px 14px;
   border: 1px solid transparent;
@@ -716,16 +941,81 @@ select {
 }
 
 .composer {
-  padding: 12px 16px 16px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 0 16px;
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  scrollbar-gutter: stable;
+}
+
+.composer-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* 「选择文件 + 选取器 + 上传」紧挨一组，避免按钮被 flex 撑到远处 */
+.composer-upload-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.composer-file-label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.composer-file-label .label {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-right: 6px;
+}
+.composer-file-input {
+  font-size: 12px;
+  flex: 1 1 8rem;
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+}
+.btn-upload-tight {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.composer-upload-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  min-height: 1.2em;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: right;
+  max-width: 100%;
+}
+.composer-upload-status--err {
+  color: #f85149;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
 }
 
 .form textarea {
@@ -757,12 +1047,14 @@ select {
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .hint {
   flex: 1;
   min-width: 12rem;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
   color: var(--text-muted);
 }

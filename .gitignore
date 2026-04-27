@@ -44,9 +44,15 @@ build/
 *.log
 logs/
 
-# Web UI 用户上传的 PDF（保留空目录用 .gitkeep）
+# Web UI 用户上传文件（各子目录用 .gitkeep 占位）
 storage/pdfs/*
 !storage/pdfs/.gitkeep
+storage/skills/*
+!storage/skills/.gitkeep
+storage/checklists/*
+!storage/checklists/.gitkeep
+storage/documents/*
+!storage/documents/.gitkeep
 
 # ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
 output/

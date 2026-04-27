@@ -75,11 +75,11 @@
   }
 
   function layoutWfGraph(nodes, edges) {
-    var W = 260;
-    var nodeW = 72;
-    var nodeH = 22;
-    var rowH = 44;
-    var padT = 10;
+    var W = 360;
+    var nodeW = 80;
+    var nodeH = 28;
+    var rowH = 64;
+    var padT = 16;
     var byId = {};
     var i, n, d, k, x, y, di, j, maxD, levels, pos, H;
     for (i = 0; i < nodes.length; i++) {
@@ -156,9 +156,12 @@
     }
     L = layoutWfGraph(JSON.parse(JSON.stringify(nodes)), JSON.parse(JSON.stringify(edges)));
     svg = document.createElementNS(NS, "svg");
+    /* 图示最小高度与 viewBox 一致，避免缩略图「看起来没变大」 */
+    var minBoxH = Math.max(L.H, 300);
     svg.setAttribute("width", "100%");
-    svg.setAttribute("height", String(Math.max(L.H, 50)));
-    svg.setAttribute("viewBox", "0 0 " + L.W + " " + Math.max(L.H, 50));
+    svg.setAttribute("height", String(minBoxH));
+    svg.setAttribute("viewBox", "0 0 " + L.W + " " + minBoxH);
+    svg.setAttribute("preserveAspectRatio", "xMidYMin meet");
     gE = document.createElementNS(NS, "g");
     gE.setAttribute("class", "wf-edge-group");
     gN = document.createElementNS(NS, "g");

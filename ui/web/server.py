@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core.agent_cli import TeXAgentCLI
-from ui.web import pdf_storage
+from ui.web import file_storage
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -276,6 +276,19 @@ class ChatRequest(BaseModel):
         None,
         description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 中的名称，默认 default",
     )
+    # 勾选后随请求发送 basename，服务端解析为 storage 下绝对路径并注入消息前部
+    active_pdfs: Optional[List[str]] = Field(
+        default=None, description="storage/pdfs 中已勾选文件名"
+    )
+    active_documents: Optional[List[str]] = Field(
+        default=None, description="storage/documents 中已勾选文件名"
+    )
+    active_skills: Optional[List[str]] = Field(
+        default=None, description="storage/skills 中已勾选文件名"
+    )
+    active_checklists: Optional[List[str]] = Field(
+        default=None, description="storage/checklists 中已勾选文件名"
+    )
 
 
 class WorkflowDraftIn(BaseModel):
@@ -329,6 +342,78 @@ class BranchCreateBody(BaseModel):
 
 class BranchSwitchBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
+
+
+def _augment_message_with_active_files(message: str, body: "ChatRequest") -> str:
+    """将各 storage 子目录中已勾选文件解析为绝对路径，置于用户消息前。"""
+    parts: List[str] = []
+    for label, cat, names in [
+        ("PDF", file_storage.CATEGORY_PDFS, body.active_pdfs),
+        ("文档", file_storage.CATEGORY_DOCUMENTS, body.active_documents),
+        ("Skill", file_storage.CATEGORY_SKILLS, body.active_skills),
+        ("Checklist", file_storage.CATEGORY_CHECKLISTS, body.active_checklists),
+    ]:
+        if not names:
+            continue
+        for raw in names:
+            if not isinstance(raw, str):
+                continue
+            name = raw.strip()
+            if not name:
+                continue
+            p = file_storage.abs_path_for_injection(cat, name)
+            if p:
+                parts.append(f"- [{label}] {p}")
+    if not parts:
+        return message
+    return (
+        "[Web UI 已勾选以下本地文件路径，需要时请用工具或根据路径引用。]\n"
+        + "\n".join(parts)
+        + "\n\n---\n\n"
+        + message
+    )
+
+
+async def _upload_to_category(
+    category: str, file: UploadFile
+) -> "PdfUploadResponse":
+    if category not in file_storage.ALL_CATEGORIES:
+        raise HTTPException(status_code=400, detail="无效存储类别")
+    fn = (file.filename or "").strip()
+    if not file_storage.extension_allowed(category, fn):
+        hint = file_storage.allowed_extensions_hint(category)
+        raise HTTPException(
+            status_code=400,
+            detail=f"此类别不支持的扩展名。允许: {hint}",
+        )
+    try:
+        dest = file_storage.unique_stored_path(category, fn or "file")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    total = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > file_storage.MAX_UPLOAD_BYTES:
+                    try:
+                        dest.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"文件过大，单文件上限 {file_storage.MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        raise
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return PdfUploadResponse(name=dest.name, size=total)
 
 
 _BR_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -460,7 +545,40 @@ def create_app() -> FastAPI:
 
     @app.get("/api/storage/pdfs", response_model=PdfListResponse)
     async def list_pdfs_ep() -> PdfListResponse:
-        raw = await anyio.to_thread.run_sync(pdf_storage.list_pdf_files)
+        def _load() -> List[Dict[str, Any]]:
+            return file_storage.list_files(file_storage.CATEGORY_PDFS)
+
+        raw = await anyio.to_thread.run_sync(_load)
+        return PdfListResponse(
+            files=[PdfFileItem(**x) for x in raw],
+        )
+
+    @app.get("/api/storage/documents", response_model=PdfListResponse)
+    async def list_documents_ep() -> PdfListResponse:
+        def _load() -> List[Dict[str, Any]]:
+            return file_storage.list_files(file_storage.CATEGORY_DOCUMENTS)
+
+        raw = await anyio.to_thread.run_sync(_load)
+        return PdfListResponse(
+            files=[PdfFileItem(**x) for x in raw],
+        )
+
+    @app.get("/api/storage/skills", response_model=PdfListResponse)
+    async def list_skills_ep() -> PdfListResponse:
+        def _load() -> List[Dict[str, Any]]:
+            return file_storage.list_files(file_storage.CATEGORY_SKILLS)
+
+        raw = await anyio.to_thread.run_sync(_load)
+        return PdfListResponse(
+            files=[PdfFileItem(**x) for x in raw],
+        )
+
+    @app.get("/api/storage/checklists", response_model=PdfListResponse)
+    async def list_checklists_ep() -> PdfListResponse:
+        def _load() -> List[Dict[str, Any]]:
+            return file_storage.list_files(file_storage.CATEGORY_CHECKLISTS)
+
+        raw = await anyio.to_thread.run_sync(_load)
         return PdfListResponse(
             files=[PdfFileItem(**x) for x in raw],
         )
@@ -469,59 +587,82 @@ def create_app() -> FastAPI:
     async def upload_pdf_ep(
         file: UploadFile = File(..., description="PDF 文件"),
     ) -> PdfUploadResponse:
-        fn = (file.filename or "").strip()
-        if not fn.lower().endswith(".pdf"):
-            raise HTTPException(
-                status_code=400,
-                detail="仅支持扩展名为 .pdf 的文件",
-            )
+        return await _upload_to_category(file_storage.CATEGORY_PDFS, file)
 
-        dest = pdf_storage.unique_pdf_path(fn or "upload.pdf")
-        total = 0
-        try:
-            with dest.open("wb") as out:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > pdf_storage.MAX_PDF_BYTES:
-                        try:
-                            dest.unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"文件过大，单文件上限 {pdf_storage.MAX_PDF_BYTES // (1024 * 1024)}MB",
-                        )
-                    out.write(chunk)
-        except HTTPException:
-            raise
-        except OSError as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+    @app.post("/api/storage/documents", response_model=PdfUploadResponse)
+    async def upload_document_ep(
+        file: UploadFile = File(..., description="其他文档（见允许的扩展名）"),
+    ) -> PdfUploadResponse:
+        return await _upload_to_category(file_storage.CATEGORY_DOCUMENTS, file)
 
-        return PdfUploadResponse(name=dest.name, size=total)
+    @app.post("/api/storage/skills", response_model=PdfUploadResponse)
+    async def upload_skill_ep(
+        file: UploadFile = File(..., description="Skill 文件"),
+    ) -> PdfUploadResponse:
+        return await _upload_to_category(file_storage.CATEGORY_SKILLS, file)
+
+    @app.post("/api/storage/checklists", response_model=PdfUploadResponse)
+    async def upload_checklist_ep(
+        file: UploadFile = File(..., description="Checklist 文件"),
+    ) -> PdfUploadResponse:
+        return await _upload_to_category(file_storage.CATEGORY_CHECKLISTS, file)
 
     @app.get("/api/storage/pdfs/{filename}/raw")
     async def download_pdf_ep(filename: str) -> FileResponse:
-        path = pdf_storage.resolve_safe_pdf_path(filename)
-        if path is None:
+        p = file_storage.resolve_safe_path(file_storage.CATEGORY_PDFS, filename)
+        if p is None:
             raise HTTPException(status_code=404, detail="文件不存在")
         return FileResponse(
-            path,
-            media_type="application/pdf",
-            filename=path.name,
+            p,
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
+        )
+
+    @app.get("/api/storage/documents/{filename}/raw")
+    async def download_document_ep(filename: str) -> FileResponse:
+        p = file_storage.resolve_safe_path(file_storage.CATEGORY_DOCUMENTS, filename)
+        if p is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(
+            p,
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
+        )
+
+    @app.get("/api/storage/skills/{filename}/raw")
+    async def download_skill_ep(filename: str) -> FileResponse:
+        p = file_storage.resolve_safe_path(file_storage.CATEGORY_SKILLS, filename)
+        if p is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(
+            p,
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
+        )
+
+    @app.get("/api/storage/checklists/{filename}/raw")
+    async def download_checklist_ep(filename: str) -> FileResponse:
+        p = file_storage.resolve_safe_path(file_storage.CATEGORY_CHECKLISTS, filename)
+        if p is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(
+            p,
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
         )
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(body: ChatRequest) -> ChatResponse:
         cli = get_cli()
+        user_text = _augment_message_with_active_files(
+            body.message.strip(), body
+        )
 
         def run_sync() -> Dict[str, Any]:
             if body.mode == "plan":
-                return cli.run_plan_task(body.message.strip(), use_loading=False)
+                return cli.run_plan_task(user_text, use_loading=False)
             return cli.run_task(
-                body.message.strip(),
+                user_text,
                 workflow_name=body.workflow,
                 use_loading=False,
             )

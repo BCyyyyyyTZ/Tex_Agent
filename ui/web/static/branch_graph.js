@@ -123,8 +123,8 @@
     var L = layoutTree(data);
     var svg = el("svg", {
       width: "100%",
-      height: String(Math.max(L.H, 120)),
-      viewBox: "0 0 " + L.W + " " + Math.max(L.H, 120),
+      height: String(Math.max(L.H, 220)),
+      viewBox: "0 0 " + L.W + " " + Math.max(L.H, 220),
     });
     var gEdges = el("g", { class: "branch-edges" });
     var gNodes = el("g", { class: "branch-nodes" });

@@ -11,141 +11,197 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-layout">
+    <div class="app-shell" id="app-shell">
+    <div class="app-layout" id="app-layout">
+      <div class="layout-col layout-col--wf" id="col-wf">
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
         <p class="sidebar-wf-desc">
-          用 Agent 节点与有向边组装图；与 <code>config/workflow_*.json</code> 结构一致。保存后，在右侧顶栏将「工作流」选为「自定义」以执行本图。
+          用 Agent 节点与有向边组装图；与 <code>config/workflow_*.json</code> 结构一致。保存后，在顶栏将「工作流」选为「自定义」以执行本图。
         </p>
-        <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
-        <div id="wf-nodes" class="wf-nodes"></div>
-        <button type="button" class="btn-secondary wf-add-node-btn" id="wf-add-node">＋ 添加 Agent 节点</button>
-        <form id="wf-add-edge" class="wf-add-edge" autocomplete="off">
-          <span class="label">有向边</span>
-          <div class="wf-edge-picks">
-            <select id="wf-edge-from" title="从"></select>
-            <span class="wf-edge-arrow">→</span>
-            <select id="wf-edge-to" title="到"></select>
-            <button type="submit" class="btn-tiny">添加</button>
-          </div>
-        </form>
-        <div id="wf-edges" class="wf-edges"></div>
-        <form id="wf-form-save" class="wf-form-save">
-          <button type="submit" class="btn-primary wf-save">保存到服务器</button>
-        </form>
-        <p id="wf-status" class="wf-status" role="status"></p>
+        <div class="wf-body">
+          <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
+          <div id="wf-nodes" class="wf-nodes"></div>
+          <button type="button" class="btn-secondary wf-add-node-btn" id="wf-add-node">＋ 添加 Agent 节点</button>
+          <form id="wf-add-edge" class="wf-add-edge" autocomplete="off">
+            <span class="label">有向边</span>
+            <div class="wf-edge-picks">
+              <select id="wf-edge-from" title="从"></select>
+              <span class="wf-edge-arrow">→</span>
+              <select id="wf-edge-to" title="到"></select>
+              <button type="submit" class="btn-tiny">添加</button>
+            </div>
+          </form>
+          <div id="wf-edges" class="wf-edges"></div>
+        </div>
+        <div class="wf-footer">
+          <form id="wf-form-save" class="wf-form-save">
+            <button type="submit" class="btn-primary wf-save">保存到服务器</button>
+          </form>
+          <p id="wf-status" class="wf-status" role="status"></p>
+        </div>
       </aside>
+      </div>
 
+      <div class="layout-gutter" id="gutter-wf-branch" title="拖动调整列宽" role="separator" aria-label="调整工作流与分支列之间宽度"></div>
+
+      <div class="layout-col layout-col--branch" id="col-branch">
+      <aside class="sidebar-branch" aria-label="对话分支树">
+        <section class="branch-panel" id="branch-panel">
+          <div class="branch-panel-head">
+            <h2 class="branch-panel-title">分支</h2>
+            <span class="branch-current" id="branch-current-lbl">当前分支: main</span>
+          </div>
+          <p class="branch-panel-hint">节点由上到下为自父到子；连线表示从父分支切出。点击节点可切换；新建子分支会复制父分支记忆与历史。</p>
+          <div id="branch-graph" class="branch-graph" role="img" aria-label="分支继承图"></div>
+          <p id="branch-panel-status" class="branch-panel-status" role="status"></p>
+          <form id="branch-new-form" class="branch-new-form" autocomplete="off">
+            <label class="branch-new-name-wrap">
+              <span class="label">新分支</span>
+              <input
+                type="text"
+                id="branch-new-name"
+                class="branch-input"
+                pattern="[a-zA-Z0-9_-]+"
+                placeholder="如 experiment-1"
+                maxlength="64"
+                title="字母、数字、下划线、连字符"
+              />
+            </label>
+            <label class="branch-new-from-wrap">
+              <span class="label">从</span>
+              <select id="branch-new-from" class="branch-select" title="作为父节点">
+                <option value="main">main</option>
+              </select>
+            </label>
+            <button type="submit" class="btn-secondary">新建子分支</button>
+          </form>
+        </section>
+      </aside>
+      </div>
+
+      <div class="layout-gutter" id="gutter-branch-main" title="拖动调整列宽" role="separator" aria-label="调整分支与聊天区之间宽度"></div>
+
+      <div class="layout-col layout-col--main" id="col-main">
       <div class="app main-col">
-      <header class="header">
-        <div class="brand">
-          <span class="logo" aria-hidden="true">T</span>
-          <div>
-            <h1>TeX Agent</h1>
-            <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
+        <header class="header">
+          <div class="brand">
+            <span class="logo" aria-hidden="true">T</span>
+            <div>
+              <h1>TeX Agent</h1>
+              <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
+            </div>
           </div>
-        </div>
-        <div class="header-actions">
-          <label class="select-wrap">
-            <span class="label">工作流</span>
-            <select id="workflow-select" title="已注册或左侧自定义">
-              <option value="default" selected>default（注册表）</option>
-              <option value="__web__">自定义（左侧编排）</option>
-            </select>
-          </label>
-          <label class="select-wrap">
-            <span class="label">模式</span>
-            <select id="mode" title="执行模式">
-              <option value="task" selected>task（工作流）</option>
-              <option value="plan">plan（动态规划，较慢）</option>
-            </select>
-          </label>
-        </div>
-      </header>
-
-      <section class="branch-panel" id="branch-panel" aria-label="对话分支树">
-        <div class="branch-panel-head">
-          <h2 class="branch-panel-title">分支</h2>
-          <span class="branch-current" id="branch-current-lbl">当前分支: main</span>
-        </div>
-        <p class="branch-panel-hint">节点由上到下为自父到子；连线表示从父分支切出。点击节点可切换当前对话所在分支；新建分支会复制该父节点上的记忆与历史。</p>
-        <div id="branch-graph" class="branch-graph" role="img" aria-label="分支继承图"></div>
-        <p id="branch-panel-status" class="branch-panel-status" role="status"></p>
-        <form id="branch-new-form" class="branch-new-form" autocomplete="off">
-          <label class="branch-new-name-wrap">
-            <span class="label">新分支</span>
-            <input
-              type="text"
-              id="branch-new-name"
-              class="branch-input"
-              pattern="[a-zA-Z0-9_-]+"
-              placeholder="如 experiment-1"
-              maxlength="64"
-              title="字母、数字、下划线、连字符"
-            />
-          </label>
-          <label class="branch-new-from-wrap">
-            <span class="label">从</span>
-            <select id="branch-new-from" class="branch-select" title="作为父节点">
-              <option value="main">main</option>
-            </select>
-          </label>
-          <button type="submit" class="btn-secondary">新建子分支</button>
-        </form>
-      </section>
-
-      <section class="pdf-panel" id="pdf-panel" aria-label="PDF 资料">
-        <div class="pdf-panel-head">
-          <h2 class="pdf-panel-title">PDF 资料</h2>
-        </div>
-        <p class="pdf-panel-hint">文件保存在项目 <code>storage/pdfs/</code>，可在此上传并在对话中让 Agent 使用（需工作流/工具支持读取该路径）。</p>
-        <form id="pdf-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
-          <label class="pdf-file-label">
-            <span class="label">选择 PDF</span>
-            <input
-              type="file"
-              id="pdf-file"
-              name="file"
-              accept="application/pdf,.pdf"
-            />
-          </label>
-          <button type="submit" class="btn-secondary">上传</button>
-        </form>
-        <p id="pdf-panel-status" class="pdf-panel-status" role="status"></p>
-        <ul class="pdf-list" id="pdf-list" aria-live="polite"></ul>
-      </section>
-
-      <main class="chat" id="chat" aria-live="polite">
-        <div id="chat-empty" class="chat-empty" role="status">
-          <p class="chat-empty-title">开始与 TeX Agent 对话</p>
-          <p class="chat-empty-desc">回复为工作流<strong>最终节点</strong>文本，按 Markdown 渲染；代码块需指定语言以高亮。</p>
-        </div>
-      </main>
-
-      <footer class="composer">
-        <form id="form" class="form">
-          <textarea
-            id="input"
-            rows="4"
-            placeholder="输入需求...（支持 Markdown 回复渲染）"
-            spellcheck="false"
-          ></textarea>
-          <div class="form-footer">
-            <span class="hint">点「发送」最稳；Enter 发送（嵌入侧栏时若无效请用 Ctrl+Enter 或一次「发送」）。选用「自定义」工作流前请先左侧保存。</span>
-            <button type="submit" id="send" class="btn-primary">发送</button>
+          <div class="header-actions">
+            <label class="select-wrap">
+              <span class="label">工作流</span>
+              <select id="workflow-select" title="已注册或左侧自定义">
+                <option value="default" selected>default（注册表）</option>
+                <option value="__web__">自定义（左侧编排）</option>
+              </select>
+            </label>
+            <label class="select-wrap">
+              <span class="label">模式</span>
+              <select id="mode" title="执行模式">
+                <option value="task" selected>task（工作流）</option>
+                <option value="plan">plan（动态规划，较慢）</option>
+              </select>
+            </label>
           </div>
-        </form>
-      </footer>
+        </header>
+
+        <main class="chat" id="chat" role="presentation">
+          <!-- 滚动只发生在内层，避免滚动条让本列与顶/底栏产生宽度差 -->
+          <div class="chat-scroll" id="chat-scroll" aria-live="polite">
+            <div id="chat-empty" class="chat-empty" role="status">
+              <p class="chat-empty-title">开始与 TeX Agent 对话</p>
+              <p class="chat-empty-desc">回复为工作流<strong>最终节点</strong>文本，按 Markdown 渲染；代码块需指定语言以高亮。</p>
+            </div>
+          </div>
+        </main>
+
+        <footer class="composer">
+          <form id="form" class="form">
+            <div class="composer-upload-row" aria-label="本地上传">
+              <div class="composer-upload-group">
+                <label class="composer-file-label" for="composer-file">
+                  <span class="label">选择文件</span>
+                </label>
+                <input type="file" id="composer-file" class="composer-file-input" />
+                <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
+              </div>
+              <span id="composer-upload-status" class="composer-upload-status" role="status"></span>
+            </div>
+            <textarea
+              id="input"
+              rows="5"
+              placeholder="输入需求...（支持 Markdown 回复渲染）"
+              spellcheck="false"
+            ></textarea>
+            <div class="form-footer">
+              <span class="hint">点「发送」最稳；Enter 发送。PDF 与 其它常用文档 使用上方选择并上传。选用「自定义」工作流前请先最左侧保存。竖条可拖曳调节各列宽。</span>
+              <button type="submit" id="send" class="btn-primary">发送</button>
+            </div>
+          </form>
+        </footer>
+      </div>
+      </div>
+
+      <div class="layout-gutter" id="gutter-main-right" title="拖动调整列宽" role="separator" aria-label="调整聊天与右侧资料列之间宽度"></div>
+
+      <div class="layout-col layout-col--right" id="col-right">
+      <aside class="sidebar-right" aria-label="选用资料与已上传列表">
+        <h2 class="sidebar-right-title">选用资料</h2>
+        <p class="sidebar-right-desc">
+          勾选仅表示<strong>当前对话</strong>要把对应路径注在消息前。Skill / Checklist 可在此区上传多份，按需勾选。
+        </p>
+        <div class="right-asset-block" id="skill-block">
+          <h3 class="right-asset-title">Skills</h3>
+          <p class="right-asset-hint">存 <code>storage/skills/</code>，建议 <code>.md</code> / <code>.txt</code> / <code>.yaml</code> 等。</p>
+          <form id="skill-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
+            <label class="pdf-file-label">
+              <span class="label">上传</span>
+              <input type="file" id="skill-file" name="file" />
+            </label>
+            <button type="submit" class="btn-secondary">上传</button>
+          </form>
+          <p id="skill-panel-status" class="asset-panel-status" role="status"></p>
+          <ul class="asset-list asset-list--right" id="skill-list" aria-live="polite"></ul>
+        </div>
+        <div class="right-asset-block" id="checklist-block">
+          <h3 class="right-asset-title">Checklists</h3>
+          <p class="right-asset-hint">存 <code>storage/checklists/</code>，与工作流/工具中路径一致时可直接引用。</p>
+          <form id="checklist-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
+            <label class="pdf-file-label">
+              <span class="label">上传</span>
+              <input type="file" id="checklist-file" name="file" />
+            </label>
+            <button type="submit" class="btn-secondary">上传</button>
+          </form>
+          <p id="checklist-panel-status" class="asset-panel-status" role="status"></p>
+          <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
+        </div>
+
+        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="已上传的 PDF 与其它文档">
+          <h3 class="uploaded-files-title">已上传文件列表</h3>
+          <p class="right-asset-hint">
+            含 <code>storage/pdfs/</code> 与 <code>storage/documents/</code>；在输入区旁上传的 PDF 与 其它文档 会出现在此，勾选后随发送注入绝对路径。
+          </p>
+          <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
+          <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
+        </div>
+      </aside>
       </div>
     </div>
+    </div>
 
-    <!-- 本地 vendor，避免 VS Code 侧栏 iframe 内无法访问外网 CDN 导致脚本未加载、无法发送 -->
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
+    <script src="layout_resizer.js"></script>
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
-    <script src="pdf_storage.js"></script>
+    <script src="web_assets.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

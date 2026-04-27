@@ -1,5 +1,5 @@
 (function () {
-  const chat = document.getElementById("chat");
+  const chat = document.getElementById("chat-scroll") || document.getElementById("chat");
   const form = document.getElementById("form");
   const input = document.getElementById("input");
   const send = document.getElementById("send");
@@ -166,6 +166,24 @@
           mode: modeVal,
         };
         if (wfVal) payload.workflow = wfVal;
+        var sel =
+          typeof getWebAssetSelection === "function"
+            ? getWebAssetSelection()
+            : null;
+        if (sel) {
+          if (sel.active_pdfs && sel.active_pdfs.length) {
+            payload.active_pdfs = sel.active_pdfs;
+          }
+          if (sel.active_documents && sel.active_documents.length) {
+            payload.active_documents = sel.active_documents;
+          }
+          if (sel.active_skills && sel.active_skills.length) {
+            payload.active_skills = sel.active_skills;
+          }
+          if (sel.active_checklists && sel.active_checklists.length) {
+            payload.active_checklists = sel.active_checklists;
+          }
+        }
         const res = await fetch(CHAT_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
