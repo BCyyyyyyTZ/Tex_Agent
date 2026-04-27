@@ -17,12 +17,14 @@ from collections import deque
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Set, Tuple
 
 import anyio
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core.agent_cli import TeXAgentCLI
+from ui.web import pdf_storage
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -287,6 +289,22 @@ class WorkflowRegistryOut(BaseModel):
     workflows: List[str]
 
 
+class PdfFileItem(BaseModel):
+    name: str
+    size: int
+    modified: str
+
+
+class PdfListResponse(BaseModel):
+    files: List[PdfFileItem]
+
+
+class PdfUploadResponse(BaseModel):
+    ok: bool = True
+    name: str
+    size: int
+
+
 class ChatResponse(BaseModel):
     reply: str
     error: Optional[str] = None
@@ -439,6 +457,61 @@ def create_app() -> FastAPI:
         from workflow.workflow_registry import WorkflowRegistry
 
         return WorkflowRegistryOut(workflows=WorkflowRegistry().list_workflows())
+
+    @app.get("/api/storage/pdfs", response_model=PdfListResponse)
+    async def list_pdfs_ep() -> PdfListResponse:
+        raw = await anyio.to_thread.run_sync(pdf_storage.list_pdf_files)
+        return PdfListResponse(
+            files=[PdfFileItem(**x) for x in raw],
+        )
+
+    @app.post("/api/storage/pdfs", response_model=PdfUploadResponse)
+    async def upload_pdf_ep(
+        file: UploadFile = File(..., description="PDF 文件"),
+    ) -> PdfUploadResponse:
+        fn = (file.filename or "").strip()
+        if not fn.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail="仅支持扩展名为 .pdf 的文件",
+            )
+
+        dest = pdf_storage.unique_pdf_path(fn or "upload.pdf")
+        total = 0
+        try:
+            with dest.open("wb") as out:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > pdf_storage.MAX_PDF_BYTES:
+                        try:
+                            dest.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"文件过大，单文件上限 {pdf_storage.MAX_PDF_BYTES // (1024 * 1024)}MB",
+                        )
+                    out.write(chunk)
+        except HTTPException:
+            raise
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        return PdfUploadResponse(name=dest.name, size=total)
+
+    @app.get("/api/storage/pdfs/{filename}/raw")
+    async def download_pdf_ep(filename: str) -> FileResponse:
+        path = pdf_storage.resolve_safe_pdf_path(filename)
+        if path is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            filename=path.name,
+        )
 
     @app.post("/api/chat", response_model=ChatResponse)
     async def chat(body: ChatRequest) -> ChatResponse:

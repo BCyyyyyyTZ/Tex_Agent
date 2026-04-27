@@ -94,6 +94,27 @@
         </form>
       </section>
 
+      <section class="pdf-panel" id="pdf-panel" aria-label="PDF 资料">
+        <div class="pdf-panel-head">
+          <h2 class="pdf-panel-title">PDF 资料</h2>
+        </div>
+        <p class="pdf-panel-hint">文件保存在项目 <code>storage/pdfs/</code>，可在此上传并在对话中让 Agent 使用（需工作流/工具支持读取该路径）。</p>
+        <form id="pdf-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
+          <label class="pdf-file-label">
+            <span class="label">选择 PDF</span>
+            <input
+              type="file"
+              id="pdf-file"
+              name="file"
+              accept="application/pdf,.pdf"
+            />
+          </label>
+          <button type="submit" class="btn-secondary">上传</button>
+        </form>
+        <p id="pdf-panel-status" class="pdf-panel-status" role="status"></p>
+        <ul class="pdf-list" id="pdf-list" aria-live="polite"></ul>
+      </section>
+
       <main class="chat" id="chat" aria-live="polite">
         <div id="chat-empty" class="chat-empty" role="status">
           <p class="chat-empty-title">开始与 TeX Agent 对话</p>
@@ -124,6 +145,7 @@
     <script src="vendor/highlight.min.js"></script>
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
+    <script src="pdf_storage.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
