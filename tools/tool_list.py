@@ -12,75 +12,10 @@ from tools.chapter_index_tool import ChapterIndexTool
 from tools.command_running_tool import CommandRunningTool
 from tools.docling_search_tool import DoclingSearchTool
 from tools.docling_tool import DoclingParseTool
-from tools.figure_ref_checker_tool import FigureRefCheckerTool
-from tools.file_loading_tool import FileLoadingTool
-from tools.markdown_section_tool import MarkdownSectionTool
-from tools.pdf_comment_tool import PdfCommentTool
-from tools.pymupdf_parse_tool import PyMuPDFParseTool
-from tools.rag_retrieve_tool import RAGRetrieveTool
-from tools.ref_checker_tool import RefCheckerTool
-from tools.user_persona_tools import build_user_persona_tools
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
-_shared_pm = get_shared_user_persona_memory()
-
-T = TypeVar("T")
-
-
-def _safe_instantiate(label: str, factory: Callable[[], T]) -> Optional[T]:
-    try:
-        return factory()
-    except Exception as e:  # noqa: BLE001 — 故意吞掉单工具失败
-        logger.warning("[tool_list] 跳过工具 %s：%s", label, e)
-        return None
-
-
-def _build_base_tools() -> List:
-    specs = [
-        ("arxiv_search", lambda: ArxivSearchTool()),
-        ("pdf_comment", lambda: PdfCommentTool()),
-        ("file_loading", lambda: FileLoadingTool()),
-        ("command_running", lambda: CommandRunningTool()),
-        ("docling_parse", lambda: DoclingParseTool()),
-        ("docling_search", lambda: DoclingSearchTool()),
-        ("markdown_section", lambda: MarkdownSectionTool()),
-        ("pymupdf_parse", lambda: PyMuPDFParseTool()),
-        ("chapter_index", lambda: ChapterIndexTool()),
-        ("ref_checker", lambda: RefCheckerTool()),
-        ("figure_ref_checker", lambda: FigureRefCheckerTool()),
-        ("rag_retrieve", lambda: RAGRetrieveTool()),
-    ]
-    out = []
-    for label, factory in specs:
-        t = _safe_instantiate(label, factory)
-        if t is not None:
-            out.append(t)
-    return out
-
-
-_BASE_TOOLS = _build_base_tools()
-
-try:
-    _USER_PERSONA_TOOLS = build_user_persona_tools(_shared_pm)
-except Exception as e:  # noqa: BLE001
-    logger.warning("[tool_list] 用户画像工具组不可用：%s", e)
-    _USER_PERSONA_TOOLS = []
-
-# 全量列表：动态图中由 build_tools_for_graph_node 按节点过滤
-tool_list: List = list(_BASE_TOOLS) + list(_USER_PERSONA_TOOLS)
-
-
-def build_tools_for_graph_node(*, is_entry_node: bool):
-    """
-    动态图节点专用：仅入口节点挂载用户画像工具，避免非入口误写画像。
-    """
-    if is_entry_node:
-        return list(_BASE_TOOLS) + list(_USER_PERSONA_TOOLS)
-    return list(_BASE_TOOLS)
-
-
-__all__ = [
-    "tool_list",
-    "build_tools_for_graph_node",
-]
+tool_list = {
+    "arxiv_search": ArxivSearchTool(),
+    "pdf_comment": PdfCommentTool(),
+    "file_loading": FileLoadingTool(),
+    "command_running": CommandRunningTool(),
+    "docling_parse": DoclingParseTool()
+}

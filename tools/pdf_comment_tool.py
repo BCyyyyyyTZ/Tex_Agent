@@ -263,43 +263,120 @@ class PdfCommentTool(BaseTool):
                 "output_path 为可选输出路径，不填则覆盖原文件。"
             ),
             input_schema={
-                "pdf_path":    "必填，原始 PDF 文件的绝对路径",
-                "annotations": (
-                    "必填，JSON 数组字符串，每项 {page_idx:int(从1开始), text:str, comment:str, color?:str}。"
-                    "color 可选，支持颜色名（yellow/red/green/blue/orange/purple/pink）"
-                    "或自动按 comment 中的关键词推断（摘要→黄, 结构→蓝, 语言→绿, 图表→橙, 实验→浅红, 排版→紫）。"
-                ),
-                "output_path": "可选，带注释的 PDF 输出路径，不填则覆盖原文件",
+                "page_idx": "需要注释的内容所在的页码(从 0 开始)",
+                "text": "需要添加高亮的文本",
+                "comment": "需要添加的注释内容",
             }
         )
 
-    # ------------------------------------------------------------------
-    # 公开接口（workflow tool 节点 / 直接调用 均可用）
-    # ------------------------------------------------------------------
-
-    def run(
-        self,
-        pdf_path: str,
-        annotations: Union[str, List[Dict]],
-        output_path: Optional[str] = None,
-    ) -> ToolResult:
+    def fuzzy_search(self, page, target_text):
         """
-        批量高亮 PDF 文本并添加注释。
-
-        Args:
-            pdf_path:    原始 PDF 路径。
-            annotations: JSON 数组或 Python 列表，每项 {page_idx, text, comment}。
-                         page_idx 从 1 开始。
-            output_path: 输出路径，None 表示覆盖原文件。
-
-        Returns:
-            ToolResult，output 包含成功/失败统计和输出路径。
+        模糊搜索：将页面所有单词提取出来，通过滑动窗口匹配目标文本
         """
-        logger.info(f"PdfCommentTool 执行 | pdf={pdf_path!r}")
+        # 1. 提取页面所有单词及其位置
+        # words 结构: (x0, y0, x1, y1, "word", block_no, line_no, word_no)
+        words = page.get_text("words")
+        target_words = target_text.split()
+        if not target_words: return []
 
-        # 1. 解析 annotations
-        items, parse_err = _parse_annotations(annotations)
-        if parse_err:
+        results = []
+        # 2. 简单的滑动窗口匹配
+        for i in range(len(words) - len(target_words) + 1):
+            # 提取窗口内的文本并合并
+            window_text = "".join(w[4] for w in words[i : i + len(target_words)])
+            target_concat = "".join(target_words)
+            
+            # 允许一定程度的差异（比如忽略角标字符）
+            if target_concat.lower() in window_text.lower() or window_text.lower() in target_concat.lower():
+                # 合并该窗口内所有单词的矩形框
+                rect = words[i][0:4] # 取第一个词的坐标
+                for j in range(i + 1, i + len(target_words)):
+                    rect = fitz.Rect(rect) | fitz.Rect(words[j][0:4]) # 取并集矩形
+                results.append(rect)
+                
+        return results
+
+    def run_single(self, pdf_path, output_path, page_idx, text, comment, author = None):
+        """
+        高亮 PDF 中的文本并添加注释
+        :param pdf_path: 原始 PDF 路径
+        :param output_path: 输出 PDF 路径
+        :param page_idx: 页码（从 0 开始）
+        :param text: 要高亮的文本内容
+        :param comment: 注释内容
+        :param author: 标注者名称
+        """
+        
+        base_path = output_path if output_path and os.path.exists(output_path) else pdf_path
+        same_file = os.path.abspath(base_path) == os.path.abspath(output_path)
+        temp_path = None
+        
+        try:
+            # 如果是同一个文件，创建临时文件
+            if same_file:
+                temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf')
+                os.close(temp_fd)
+                save_path = temp_path
+            else:
+                save_path = output_path
+            
+            # 打开 PDF
+            doc = fitz.open(base_path)
+            
+            if not (0 <= page_idx < len(doc)):
+                return ToolResult(
+                    success=False,
+                    output=None,
+                    error=f"页码{page_idx}无效，该 PDF 共有 {len(doc)} 页（索引 0~{len(doc)-1}）",
+                )
+
+            page = doc[page_idx]
+            
+            # 查找要高亮的文本
+            text_instances = page.search_for(text)
+            
+            if not text_instances:
+                doc.close()
+                return ToolResult(
+                    success=False,
+                    output=None,
+                    error=f"未找到要高亮注释的文本: '{text}'，在页码{page_idx}未找到",
+                )
+            
+            # 格式化时间
+            now = datetime.now()
+            creation_date_str = f"D:{now.strftime('%Y%m%d%H%M%S')}"
+            
+            # 为每个找到的文本实例添加高亮和注释
+            for inst in text_instances:
+                # 添加高亮
+                highlight = page.add_highlight_annot(inst)
+                highlight.set_info(
+                    #title=author,
+                    content=comment,
+                    #creationDate=creation_date_str
+                )
+                
+                # 可选：在高亮旁边添加一个便签注释
+                # 获取高亮区域的右上角位置
+                annot_point = fitz.Point(inst.x1 + 10, inst.y0)
+                sticky_note = page.add_text_annot(annot_point, comment, icon="Note")
+                sticky_note.set_info(
+                    #title=author,
+                    content=comment,
+                    #creationDate=creation_date_str
+                )
+            
+            # 保存并优化 PDF
+            doc.save(save_path, garbage=4, deflate=True, clean=True)
+            doc.close()
+            
+            # 如果是同一个文件，用临时文件替换原文件
+            if same_file:
+                os.replace(temp_path, output_path)
+            
+            print(f"✅ 已高亮 '{text}' 并添加注释")
+            #print(f"   标注者：{author}，时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")
             return ToolResult(
                 success=False,
                 output="",
@@ -309,28 +386,21 @@ class PdfCommentTool(BaseTool):
         if not items:
             return ToolResult(
                 success=False,
-                output="",
-                error="annotations 为空列表，无需处理",
-                metadata={"pdf_path": pdf_path},
+                output="处理失败",
+                error=f"处理 PDF 时出错: {str(e)}",
             )
 
-        if not output_path:
-            output_path = pdf_path
-
-        # 2. 执行批量注释
-        return self._batch_annotate(pdf_path, output_path, items)
-
-    # ------------------------------------------------------------------
-    # 内部实现
-    # ------------------------------------------------------------------
-
-    def _batch_annotate(
-        self,
-        pdf_path: str,
-        output_path: str,
-        items: List[Dict],
-    ) -> ToolResult:
-        same_file = os.path.abspath(pdf_path) == os.path.abspath(output_path)
+    def run(self, pdf_path, output_path, question_list, author=None):
+        """
+        批量高亮 PDF 中的文本并添加注释
+        :param pdf_path: 原始 PDF 路径
+        :param output_path: 输出 PDF 路径
+        :param question_list: 问题列表，每个字典包含 page_idx, text, comment 三个项
+        :param author: 标注者名称
+        """
+        
+        base_path = output_path if output_path and os.path.exists(output_path) else pdf_path
+        same_file = os.path.abspath(base_path) == os.path.abspath(output_path)
         temp_path = None
 
         try:
@@ -340,17 +410,20 @@ class PdfCommentTool(BaseTool):
                 save_path = temp_path
             else:
                 save_path = output_path
-                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
-            doc = fitz.open(pdf_path)
-            total_pages = len(doc)
+            
+            # 打开 PDF
+            doc = fitz.open(base_path)
+            
+            # 格式化时间
             now = datetime.now()
             success_count = 0
-            errors: List[str] = []
-            # page_idx → [comments] for unfound texts
-            page_fallback: Dict[int, List[str]] = {}
-
-            for i, item in enumerate(items, 1):
+            error_messages = []
+            
+            # 存储每页找不到文本的注释
+            page_not_found_comments = {}
+            commented_pages = set()
+            
+            for i, question in enumerate(question_list):
                 try:
                     raw_page = item.get("page_idx")
                     raw_text = item.get("text") or item.get("text_quote") or ""
@@ -418,7 +491,9 @@ class PdfCommentTool(BaseTool):
                         logger.warning(f"[{i}] 未在 page {raw_page} 找到文本: {text[:40]!r}")
 
                     success_count += 1
-
+                    commented_pages.add(page_idx + 1)
+                    print(f"✅ 已处理问题 {i+1}")
+                    
                 except Exception as e:
                     errors.append(f"[{i}] 处理异常: {e}")
 
@@ -435,20 +510,20 @@ class PdfCommentTool(BaseTool):
             doc.close()
 
             if same_file:
-                os.remove(pdf_path)
-                shutil.move(temp_path, pdf_path)   # shutil.move 支持跨驱动器
-                final_path = pdf_path
-            else:
-                final_path = output_path
-
-            summary = (
-                f"已处理 {success_count}/{len(items)} 条注释，"
-                f"{len(page_fallback)} 条文本未精确定位（已添加汇总便签），"
-                f"{len(errors)} 条跳过。\n"
-                f"输出文件: {final_path}"
-            )
-            logger.info(summary)
-
+                os.replace(temp_path, output_path)
+            
+            print(f"\n📋 批量处理完成")
+            print(f"   成功: {success_count} 个问题")
+            print(f"   失败: {len(error_messages)} 个问题")
+            if error_messages:
+                print(f"   错误信息: {'; '.join(error_messages)}")
+            print(f"   标注者：{author}，时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # 构建输出消息
+            output_message = f"已成功处理 {success_count} 个问题"
+            if error_messages:
+                output_message += f"，{len(error_messages)} 个问题处理失败"
+            
             return ToolResult(
                 success=success_count > 0,
                 output=summary,
@@ -457,10 +532,11 @@ class PdfCommentTool(BaseTool):
                     "output_path": final_path,
                     "total": len(items),
                     "success_count": success_count,
-                    "unfound_count": sum(len(v) for v in page_fallback.values()),
-                    "error_count": len(errors),
-                    "errors": errors[:10],   # 最多返回前10条
-                },
+                    "total_count": len(question_list),
+                    "error_count": len(error_messages),
+                    "error_messages": error_messages,
+                    "commented_pages": commented_pages
+                }
             )
 
         except Exception as e:
@@ -472,21 +548,41 @@ class PdfCommentTool(BaseTool):
                     pass
             return ToolResult(
                 success=False,
-                output="",
-                error=f"PDF 处理异常: {e}",
-                metadata={"pdf_path": pdf_path},
+                output="处理失败",
+                error=f"批量处理 PDF 时出错: {str(e)}",
             )
 
-    # ------------------------------------------------------------------
-    # 兼容旧接口（向后兼容，不推荐在 workflow 中使用）
-    # ------------------------------------------------------------------
 
-    def run_batch_legacy(
-        self,
-        pdf_path: str,
-        output_path: str,
-        question_list: List[Dict],
-        author: Optional[str] = None,
-    ) -> ToolResult:
-        """旧批量接口（向后兼容），内部直接委托给 run()。"""
-        return self.run(pdf_path=pdf_path, annotations=question_list, output_path=output_path)
+if __name__ == "__main__":
+    tool = PdfCommentTool()
+    
+    # 测试单个标注
+    # tool.run(
+    #     pdf_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+    #     output_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+    #     page_idx=0,
+    #     text="AutoGen",
+    #     comment="这是一个注释",
+    #     author="TestUser",
+    # )
+    
+    # 测试批量标注
+    question_list = [
+        {
+            "page_idx": 0,
+            "text": "TEST",
+            "comment": "这是第一个注释"
+        },
+        {
+            "page_idx": 0,
+            "text": "Framework",
+            "comment": "这是第二个注释"
+        }
+    ]
+    
+    tool.run(
+        pdf_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+        output_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+        question_list=question_list,
+        author="TestUser"
+    )
