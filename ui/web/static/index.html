@@ -110,8 +110,8 @@
             <label class="select-wrap select-wrap--header">
               <span class="label">工作流</span>
               <select id="workflow-select" title="已注册或左侧自定义">
-                <option value="default" selected>default（注册表）</option>
-                <option value="__web__">自定义（左侧编排）</option>
+                <option value="__web__" selected>自定义（左侧编排）</option>
+                <option value="default">default（模板）</option>
               </select>
             </label>
             <label class="select-wrap select-wrap--header">
@@ -159,7 +159,7 @@
               spellcheck="false"
             ></textarea>
             <div class="form-footer">
-              <span class="hint">点「发送」最稳；Enter 发送。PDF 与 其它常用文档 使用上方选择并上传。选用「自定义」工作流前请先最左侧保存。竖条可拖曳调节各列宽。</span>
+              <span class="hint">点「发送」最稳；Enter 发送。PDF 与 其它常用文档 使用上方选择并上传。默认使用左侧自定义工作流，修改后请先「保存到服务器」。竖条可拖曳调节各列宽。</span>
               <button type="submit" id="send" class="btn-primary">发送</button>
             </div>
           </form>

@@ -277,7 +277,7 @@ class ChatRequest(BaseModel):
     mode: Literal["task", "plan"] = "task"
     workflow: Optional[str] = Field(
         None,
-        description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 中的名称，默认 default",
+        description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 名称；省略时服务端用 DEFAULT_WORKFLOW（通常为 default）",
     )
     # 勾选后随请求发送 basename，服务端解析为 storage 下绝对路径并注入消息前部
     active_pdfs: Optional[List[str]] = Field(

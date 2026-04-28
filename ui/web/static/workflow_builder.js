@@ -258,7 +258,7 @@
 
   function getWorkflowSelectValue() {
     var sel = document.getElementById("workflow-select");
-    return (sel && sel.value) || "default";
+    return (sel && sel.value) || "__web__";
   }
 
   function refreshWorkflowCanvas() {
@@ -308,17 +308,14 @@
         var wfs = (d && d.workflows) || [];
         sel.innerHTML = "";
         sel.appendChild(
-          el("option", { value: "default", textContent: "default（注册表）" })
-        );
-        wfs.forEach(function (n) {
-          if (n === "default") return;
-          sel.appendChild(el("option", { value: n, textContent: n }));
-        });
-        sel.appendChild(
           el("option", { value: "__web__", textContent: "自定义（左侧编排）" })
         );
-        if (wfs.indexOf(cur) >= 0 || cur === "__web__" || cur === "default") sel.value = cur;
-        else sel.value = "default";
+        wfs.forEach(function (n) {
+          var label = n === "default" ? "default（模板）" : n;
+          sel.appendChild(el("option", { value: n, textContent: label }));
+        });
+        if (wfs.indexOf(cur) >= 0 || cur === "__web__") sel.value = cur;
+        else sel.value = "__web__";
         refreshWorkflowCanvas();
       })
       .catch(function () {
@@ -898,7 +895,7 @@
             return r.json();
           })
           .then(function () {
-            setStatus("已保存。若跑「自定义」任务，请在上方选择工作流为「左侧编排」", false);
+            setStatus("已保存。默认使用左侧自定义图；选用注册表模板时请在上方切换。", false);
           })
           .catch(function (e) {
             setStatus((e && e.message) || String(e), true);
