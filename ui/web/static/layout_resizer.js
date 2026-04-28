@@ -7,9 +7,9 @@
   "use strict";
 
   var LS_KEY = "texagent.layout.widths";
-  var DEFAULTS = { wf: 400, branch: 320, right: 300 };
+  var DEFAULTS = { wf: 440, branch: 320, right: 300 };
   var MIN = { wf: 160, branch: 150, right: 180 };
-  var MAX = { wf: 520, branch: 480, right: 520 };
+  var MAX = { wf: 580, branch: 480, right: 520 };
 
   function load() {
     try {

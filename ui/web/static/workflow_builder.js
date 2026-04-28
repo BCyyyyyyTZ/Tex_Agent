@@ -14,6 +14,8 @@
 
   var state = { nodes: [], edges: [] };
   var nodeIdSeq = 1;
+  /** 避免快速切换工作流时异步图示乱序 */
+  var registryPreviewSeq = 0;
 
   /** 与 tools/tool_list 常见工具对齐；未知工具用 {}，可在节点列表里再改 */
   var TOOL_INPUT_DEFAULTS = {
@@ -177,10 +179,121 @@
     }
   }
 
-  var selectedFrom = null; // 用于直接在图示上连边
+  /** 从输出点拖到输入点连边：{ fromId, onMove, onUp } */
+  var edgeDrag = null;
+  /** 拖拽结束后浏览器可能补发 click，避免误开编辑 */
+  var wfIgnoreRectClickUntil = 0;
+  /** 节点矩形拖拽：{ nid, grabDx, grabDy, sx, sy, moved, onMove, onUp } */
+  var nodePointerDrag = null;
+
+  function clientToSvgPoint(svg, clientX, clientY) {
+    var pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    var ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    return pt.matrixTransform(ctm.inverse());
+  }
+
+  function endEdgeDrag(ev) {
+    if (!edgeDrag) return;
+    var fromId = edgeDrag.fromId;
+    document.removeEventListener("pointermove", edgeDrag.onMove, true);
+    document.removeEventListener("pointerup", edgeDrag.onUp, true);
+    document.removeEventListener("pointercancel", edgeDrag.onUp, true);
+    edgeDrag = null;
+
+    var hit = document.elementFromPoint(ev.clientX, ev.clientY);
+    var toId = null;
+    if (hit && typeof hit.closest === "function") {
+      var tin = hit.closest('[data-wf-port="in"]');
+      if (tin) toId = tin.getAttribute("data-node-id") || null;
+    }
+    var ok =
+      toId &&
+      toId !== fromId &&
+      !state.edges.some(function (ex) {
+        return ex.from_node === fromId && ex.to_node === toId;
+      });
+    if (ok) {
+      state.edges.push({ from_node: fromId, to_node: toId, condition: null });
+    }
+    wfIgnoreRectClickUntil = Date.now() + 450;
+    render();
+  }
+
+  function startEdgeDrag(svg, gDrag, fromId, x0, y0, ev) {
+    if (nodePointerDrag) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var NS = "http://www.w3.org/2000/svg";
+    var line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", String(x0));
+    line.setAttribute("y1", String(y0));
+    line.setAttribute("x2", String(x0));
+    line.setAttribute("y2", String(y0));
+    line.setAttribute("class", "wf-edge wf-edge--drag");
+
+    function onMove(e) {
+      var p = clientToSvgPoint(svg, e.clientX, e.clientY);
+      if (p) {
+        line.setAttribute("x2", String(p.x));
+        line.setAttribute("y2", String(p.y));
+      }
+    }
+    function onUp(e) {
+      endEdgeDrag(e);
+    }
+
+    gDrag.appendChild(line);
+    edgeDrag = { fromId: fromId, onMove: onMove, onUp: onUp };
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("pointercancel", onUp, true);
+  }
 
   function isProtectedNode(nodeId) {
     return nodeId === "design" || nodeId === "execute";
+  }
+
+  function getWorkflowSelectValue() {
+    var sel = document.getElementById("workflow-select");
+    return (sel && sel.value) || "default";
+  }
+
+  function refreshWorkflowCanvas() {
+    var prev = document.getElementById("wf-preview");
+    if (!prev) return;
+    var v = getWorkflowSelectValue();
+    if (v === "__web__") {
+      renderWfPreview(prev, state.nodes, state.edges, { readOnly: false });
+      return;
+    }
+    var seq = ++registryPreviewSeq;
+    var q = encodeURIComponent(v);
+    fetch(API + "workflow/graph?name=" + q, { method: "GET" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        if (seq !== registryPreviewSeq) return;
+        var nodes = (d.nodes || []).map(function (x) {
+          return JSON.parse(JSON.stringify(x));
+        });
+        var edges = (d.edges || []).map(function (x) {
+          return {
+            from_node: x.from_node || x.from,
+            to_node: x.to_node || x.to,
+            condition: x.condition != null ? x.condition : null,
+          };
+        });
+        renderWfPreview(prev, nodes, edges, { readOnly: true });
+      })
+      .catch(function () {
+        if (seq !== registryPreviewSeq) return;
+        prev.innerHTML = "<p class=\"wf-preview-empty\">无法加载该工作流图示</p>";
+      });
   }
 
   function syncWorkflowSelect() {
@@ -206,13 +319,15 @@
         );
         if (wfs.indexOf(cur) >= 0 || cur === "__web__" || cur === "default") sel.value = cur;
         else sel.value = "default";
+        refreshWorkflowCanvas();
       })
       .catch(function () {
-        /* 保留 HTML 内建 option */
+        refreshWorkflowCanvas();
       });
   }
 
-  function layoutWfGraph(nodes, edges) {
+  /** 自动分层布局（无 ui_pos 的节点使用） */
+  function layoutWfGraphAuto(nodes, edges) {
     var W = 360;
     var nodeW = 80;
     var nodeH = 28;
@@ -282,19 +397,138 @@
       }
     }
     H = padT * 2 + (levels.length > 0 ? (levels.length - 1) * rowH : 0) + nodeH;
-    return { W: W, H: H, pos: pos, edges: edges, byId: byId, memo: memo };
+    return { W: W, H: H, pos: pos, edges: edges };
   }
 
-  function renderWfPreview(mount, nodes, edges) {
+  /** 合并节点上的 ui_pos（随草稿保存）与自动布局 */
+  function layoutForPreview(nodes, edges) {
+    var autoL = layoutWfGraphAuto(nodes, edges);
+    var nodeW = 80;
+    var nodeH = 28;
+    var margin = 28;
+    var pos = {};
+    var i, n, id, up, id2, p, r, b;
+    for (i = 0; i < nodes.length; i++) {
+      n = nodes[i];
+      id = n.node_id;
+      up = n.ui_pos;
+      if (
+        up &&
+        typeof up.x === "number" &&
+        typeof up.y === "number" &&
+        !isNaN(up.x) &&
+        !isNaN(up.y)
+      ) {
+        pos[id] = { x: +up.x, y: +up.y, w: nodeW, h: nodeH, n: n };
+      } else if (autoL.pos[id]) {
+        pos[id] = autoL.pos[id];
+      } else {
+        pos[id] = { x: margin, y: margin, w: nodeW, h: nodeH, n: n };
+      }
+    }
+    var maxR = 360;
+    var maxB = autoL.H;
+    for (id2 in pos) {
+      p = pos[id2];
+      r = p.x + p.w + margin;
+      b = p.y + p.h + margin;
+      if (r > maxR) maxR = r;
+      if (b > maxB) maxB = b;
+    }
+    return {
+      W: Math.max(360, maxR),
+      H: Math.max(480, Math.max(autoL.H, maxB)),
+      pos: pos,
+      edges: edges,
+    };
+  }
+
+  function endNodePointerDrag() {
+    if (!nodePointerDrag) return;
+    var moved = nodePointerDrag.moved;
+    var nid = nodePointerDrag.nid;
+    document.removeEventListener("pointermove", nodePointerDrag.onMove, true);
+    document.removeEventListener("pointerup", nodePointerDrag.onUp, true);
+    document.removeEventListener("pointercancel", nodePointerDrag.onUp, true);
+    nodePointerDrag = null;
+    if (moved) {
+      wfIgnoreRectClickUntil = Date.now() + 400;
+      render();
+      return;
+    }
+    if (nid) {
+      var idx = state.nodes.findIndex(function (nd) {
+        return nd.node_id === nid;
+      });
+      if (idx >= 0) editNode(state.nodes[idx], idx);
+    }
+  }
+
+  function startNodePointerDrag(svg, w, ev) {
+    if (edgeDrag || nodePointerDrag) return;
+    if (ev.pointerType === "mouse" && ev.button !== 0) return;
+    if (Date.now() < wfIgnoreRectClickUntil) return;
+    var p0 = clientToSvgPoint(svg, ev.clientX, ev.clientY);
+    if (!p0) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var st = {
+      nid: w.n.node_id,
+      grabDx: p0.x - w.x,
+      grabDy: p0.y - w.y,
+      sx: ev.clientX,
+      sy: ev.clientY,
+      moved: false,
+    };
+    function onMove(e) {
+      if (!nodePointerDrag) return;
+      if (!nodePointerDrag.moved) {
+        if (
+          Math.abs(e.clientX - nodePointerDrag.sx) > 4 ||
+          Math.abs(e.clientY - nodePointerDrag.sy) > 4
+        ) {
+          nodePointerDrag.moved = true;
+        }
+      }
+      if (!nodePointerDrag.moved) return;
+      var mountEl = document.getElementById("wf-preview");
+      var svgEl = mountEl && mountEl.querySelector("svg");
+      if (!svgEl) return;
+      var p = clientToSvgPoint(svgEl, e.clientX, e.clientY);
+      if (!p) return;
+      var nd = state.nodes.find(function (x) {
+        return x.node_id === nodePointerDrag.nid;
+      });
+      if (!nd) return;
+      var nx = Math.round(p.x - nodePointerDrag.grabDx);
+      var ny = Math.round(p.y - nodePointerDrag.grabDy);
+      nx = Math.max(4, Math.min(4000, nx));
+      ny = Math.max(4, Math.min(4000, ny));
+      nd.ui_pos = { x: nx, y: ny };
+      render();
+    }
+    function onUp() {
+      endNodePointerDrag();
+    }
+    st.onMove = onMove;
+    st.onUp = onUp;
+    nodePointerDrag = st;
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("pointercancel", onUp, true);
+  }
+
+  function renderWfPreview(mount, nodes, edges, opts) {
     var NS = "http://www.w3.org/2000/svg";
     var i, j, e, a, b, L, svg, gE, gN, t1, t2, g, w, p;
+    var readOnly = !!(opts && opts.readOnly);
     if (!nodes || nodes.length === 0) {
       mount.innerHTML = "<p class=\"wf-preview-empty\">尚无节点</p>";
       return;
     }
-    L = layoutWfGraph(JSON.parse(JSON.stringify(nodes)), JSON.parse(JSON.stringify(edges)));
+    L = layoutForPreview(nodes, edges);
     svg = document.createElementNS(NS, "svg");
-    var minBoxH = Math.max(L.H, 360); // 匹配更大预览区
+    var minBoxH = Math.max(L.H, 480); // 与 .wf-preview 最小高度协调
     svg.setAttribute("width", "100%");
     svg.setAttribute("height", String(minBoxH));
     svg.setAttribute("viewBox", "0 0 " + L.W + " " + minBoxH);
@@ -303,8 +537,10 @@
     gE.setAttribute("class", "wf-edge-group");
     gN = document.createElementNS(NS, "g");
     gN.setAttribute("class", "wf-node-group");
+    var gDrag = document.createElementNS(NS, "g");
+    gDrag.setAttribute("class", "wf-edge-drag-layer");
 
-    // 绘制边
+    // 绘制边（底层可见线）
     for (i = 0; i < L.edges.length; i++) {
       e = L.edges[i];
       a = L.pos[e.from_node];
@@ -319,13 +555,17 @@
       gE.appendChild(t1);
     }
 
-    // 绘制节点 + 交互连边（IIFE 固定闭包，避免 for-in 共用同一 w）
+    var gEdgeUi = document.createElementNS(NS, "g");
+    gEdgeUi.setAttribute("class", "wf-edge-ui-layer");
+
+    // 绘制节点；readOnly 时仅展示，不可拖拽/连边/删除
     for (p in L.pos) {
       (function (w) {
         g = document.createElementNS(NS, "g");
+        g.setAttribute("class", readOnly ? "wf-node-readonly" : "wf-node-interactive");
         g.setAttribute("transform", "translate(" + w.x + "," + w.y + ")");
         var nodeType = (w.n && w.n.node_type) || "agent";
-        var isSelected = selectedFrom && selectedFrom === w.n.node_id;
+        var nidStr = (w.n && w.n.node_id) || "?";
 
         t1 = document.createElementNS(NS, "rect");
         t1.setAttribute("width", w.w);
@@ -333,201 +573,166 @@
         t1.setAttribute("rx", 6);
         var rectClass = "wf-node-rect";
         if (nodeType === "tool") rectClass += " tool-node";
-        if (isSelected) rectClass += " selected";
+        if (readOnly) rectClass += " wf-node-rect--readonly";
         t1.setAttribute("class", rectClass);
+        if (!readOnly) {
+          t1.addEventListener("pointerdown", function (ev) {
+            startNodePointerDrag(svg, w, ev);
+          });
+        }
 
         t2 = document.createElementNS(NS, "text");
         t2.setAttribute("x", w.w / 2);
         t2.setAttribute("y", w.h / 2 + 4);
         t2.setAttribute("text-anchor", "middle");
         t2.setAttribute("class", "wf-node-txt");
-        var label = w.n.node_id.length > 11 ? w.n.node_id.slice(0, 10) + "…" : w.n.node_id;
+        var label = nidStr.length > 11 ? nidStr.slice(0, 10) + "…" : nidStr;
         if (nodeType === "tool") label = "🛠 " + label;
-        if (isSelected) label = "● " + label;
         t2.textContent = label;
 
-        g.style.cursor = "pointer";
-        g.addEventListener("click", function (ev) {
-          ev.stopImmediatePropagation();
-          var clickedId = w.n.node_id;
-          var isProt = isProtectedNode(clickedId);
-          var mountEl = document.getElementById("wf-preview");
+        var cx = w.w / 2;
+        var circIn = document.createElementNS(NS, "circle");
+        circIn.setAttribute("cx", String(cx));
+        circIn.setAttribute("cy", "0");
+        circIn.setAttribute("r", "7");
+        circIn.setAttribute(
+          "class",
+          readOnly ? "wf-port wf-port-in wf-port--readonly" : "wf-port wf-port-in"
+        );
+        if (!readOnly) {
+          circIn.setAttribute("data-wf-port", "in");
+          circIn.setAttribute("data-node-id", nidStr);
+          circIn.setAttribute("title", "输入：从他节点下方连接点拖线到此松开");
+        }
 
-          if (selectedFrom === null) {
-            if (!isProt) {
-              selectedFrom = clickedId;
-              if (mountEl) renderWfPreview(mountEl, state.nodes, state.edges);
-              window.setTimeout(function () {
-                selectedFrom = null;
-                if (mountEl) renderWfPreview(mountEl, state.nodes, state.edges);
-              }, 8000);
-            } else {
-              editNode(w.n, state.nodes.findIndex(function (nd) { return nd.node_id === clickedId; }));
-            }
-          } else {
-            if (selectedFrom !== clickedId && !state.edges.some(function (ex) {
-              return ex.from_node === selectedFrom && ex.to_node === clickedId;
-            })) {
-              state.edges.push({ from_node: selectedFrom, to_node: clickedId, condition: null });
-            }
-            selectedFrom = null;
-            render();
-          }
-        });
+        var circOut = document.createElementNS(NS, "circle");
+        circOut.setAttribute("cx", String(cx));
+        circOut.setAttribute("cy", String(w.h));
+        circOut.setAttribute("r", "7");
+        circOut.setAttribute(
+          "class",
+          readOnly ? "wf-port wf-port-out wf-port--readonly" : "wf-port wf-port-out"
+        );
+        if (!readOnly) {
+          circOut.setAttribute("data-wf-port", "out");
+          circOut.setAttribute("data-node-id", nidStr);
+          circOut.setAttribute("title", "输出：按住拖向目标节点上方的点");
+          circOut.addEventListener("pointerdown", function (ev) {
+            var ax = w.x + cx;
+            var ay = w.y + w.h;
+            startEdgeDrag(svg, gDrag, nidStr, ax, ay, ev);
+          });
+        }
 
         g.appendChild(t1);
         g.appendChild(t2);
+        g.appendChild(circIn);
+        g.appendChild(circOut);
+
+        var nid = nidStr;
+        if (!readOnly && !isProtectedNode(nid)) {
+          var btnRm = document.createElementNS(NS, "g");
+          btnRm.setAttribute("class", "wf-node-remove");
+          btnRm.setAttribute("transform", "translate(" + (w.w - 15) + ",1)");
+          var rmbg = document.createElementNS(NS, "circle");
+          rmbg.setAttribute("cx", "6");
+          rmbg.setAttribute("cy", "6");
+          rmbg.setAttribute("r", "8");
+          rmbg.setAttribute("class", "wf-node-remove-bg");
+          var rmtxt = document.createElementNS(NS, "text");
+          rmtxt.setAttribute("x", "6");
+          rmtxt.setAttribute("y", "10");
+          rmtxt.setAttribute("text-anchor", "middle");
+          rmtxt.setAttribute("class", "wf-node-remove-x");
+          rmtxt.textContent = "×";
+          btnRm.appendChild(rmbg);
+          btnRm.appendChild(rmtxt);
+          btnRm.setAttribute("title", "删除节点");
+          btnRm.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            ev.preventDefault();
+            if (!confirm("删除节点 " + nid + "？将清除所有相关边。")) return;
+            state.nodes = state.nodes.filter(function (n) {
+              return n.node_id !== nid;
+            });
+            state.edges = state.edges.filter(function (ed) {
+              return ed.from_node !== nid && ed.to_node !== nid;
+            });
+            render();
+          });
+          g.appendChild(btnRm);
+        }
+
         gN.appendChild(g);
       })(L.pos[p]);
     }
+
+    // 边交互：仅可编辑模式
+    if (!readOnly) for (j = 0; j < L.edges.length; j++) {
+      e = L.edges[j];
+      a = L.pos[e.from_node];
+      b = L.pos[e.to_node];
+      if (!a || !b) continue;
+      (function (fx1, fy1, fx2, fy2, fromN, toN) {
+        var mx = (fx1 + fx2) / 2;
+        var my = (fy1 + fy2) / 2;
+        var wrap = document.createElementNS(NS, "g");
+        wrap.setAttribute("class", "wf-edge-wrap");
+        // 仅中点附近可悬停，避免整条透明线盖住节点拦截点击
+        var hit = document.createElementNS(NS, "circle");
+        hit.setAttribute("cx", String(mx));
+        hit.setAttribute("cy", String(my));
+        hit.setAttribute("r", "24");
+        hit.setAttribute("class", "wf-edge-hit");
+        hit.setAttribute("title", "悬停显示删除");
+        var chip = document.createElementNS(NS, "g");
+        chip.setAttribute("class", "wf-edge-remove");
+        chip.setAttribute("transform", "translate(" + mx + "," + my + ")");
+        var ebg = document.createElementNS(NS, "circle");
+        ebg.setAttribute("r", "7");
+        ebg.setAttribute("class", "wf-edge-remove-bg");
+        var etx = document.createElementNS(NS, "text");
+        etx.setAttribute("y", "4");
+        etx.setAttribute("text-anchor", "middle");
+        etx.setAttribute("class", "wf-edge-remove-x");
+        etx.textContent = "×";
+        chip.appendChild(ebg);
+        chip.appendChild(etx);
+        chip.setAttribute("title", "删除此边");
+        wrap.appendChild(hit);
+        wrap.appendChild(chip);
+        chip.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          ev.preventDefault();
+          if (!confirm("删除边 " + fromN + " → " + toN + "？")) return;
+          state.edges = state.edges.filter(function (ed) {
+            return !(ed.from_node === fromN && ed.to_node === toN);
+          });
+          render();
+        });
+        gEdgeUi.appendChild(wrap);
+      })(
+        a.x + a.w / 2,
+        a.y + a.h,
+        b.x + b.w / 2,
+        b.y,
+        e.from_node,
+        e.to_node
+      );
+    }
+
     svg.appendChild(gE);
     svg.appendChild(gN);
+    svg.appendChild(gEdgeUi);
+    svg.appendChild(gDrag);
     mount.innerHTML = "";
     mount.appendChild(svg);
   }
 
   function render() {
-    var list = document.getElementById("wf-nodes");
-    var elist = document.getElementById("wf-edges");
-    var prev = document.getElementById("wf-preview");
-    if (!list || !elist) return;
-    list.innerHTML = "";
-
-    state.nodes.forEach(function (node, idx) {
-      var isProtected = isProtectedNode(node.node_id);
-      var box = el("div", { 
-        className: "wf-node-row" + (isProtected ? " wf-node-protected" : ""),
-        title: isProtected ? "入口 design / 出口 execute 不可删除。点击可编辑" : "点击节点编辑 prompt/tool"
-      });
-      box.addEventListener("click", function (e) {
-        if (e.target.tagName === "BUTTON" || e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
-        editNode(node, idx);
-      });
-
-      var h = el("div", { className: "wf-node-row-h" });
-      var typeBadge = el("span", { 
-        className: "wf-node-type-badge",
-        textContent: node.node_type || "agent"
-      });
-      if (node.node_type === "tool") typeBadge.style.background = "#2a5e2a";
-      if (node.node_type === "entry" || node.node_type === "exit") typeBadge.style.background = "#3a3a8a";
-      h.appendChild(typeBadge);
-
-      h.appendChild(
-        el("label", { className: "wf-inline", textContent: "ID" })
-      );
-      var idInp = el("input", { type: "text", className: "branch-input wf-node-id" });
-      idInp.value = node.node_id;
-      idInp.setAttribute("data-oid", node.node_id);
-      idInp.disabled = isProtected;
-      idInp.addEventListener("change", function () {
-        var ov = idInp.getAttribute("data-oid");
-        var nv = (idInp.value || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_");
-        if (!nv || isProtectedNode(ov)) {
-          idInp.value = ov;
-          return;
-        }
-        node.node_id = nv;
-        state.edges.forEach(function (e) {
-          if (e.from_node === ov) e.from_node = nv;
-          if (e.to_node === ov) e.to_node = nv;
-        });
-        idInp.setAttribute("data-oid", nv);
-        render();
-      });
-      h.appendChild(idInp);
-
-      var rm = el("button", { type: "button", className: "btn-tiny" });
-      rm.textContent = isProtected ? "保护" : "删除";
-      rm.disabled = isProtected;
-      rm.addEventListener("click", function (e) {
-        e.stopPropagation();
-        if (isProtected) {
-          alert("入口 design 与出口 execute 不可删除。");
-          return;
-        }
-        if (confirm("删除节点 " + node.node_id + "？这将清除所有相关边。")) {
-          var oid = node.node_id;
-          state.nodes = state.nodes.filter(function (x) {
-            return x.node_id !== oid;
-          });
-          state.edges = state.edges.filter(function (e) {
-            return e.from_node !== oid && e.to_node !== oid;
-          });
-          render();
-          initEdgeForm();
-        }
-      });
-      h.appendChild(rm);
-      box.appendChild(h);
-
-      // 条件编辑字段
-      if (node.node_type === "agent" || node.node_type === "SimpleAgent") {
-        var taPrompt = el("textarea", { className: "wf-ta" });
-        taPrompt.setAttribute("rows", "3");
-        taPrompt.placeholder = "system_prompt：论文检查专家职责...";
-        taPrompt.value = (node.config && node.config.system_prompt) || (node.config && node.config.subtask) || "";
-        taPrompt.addEventListener("change", function () {
-          if (!node.config) node.config = {};
-          node.config.system_prompt = taPrompt.value;
-        });
-        box.appendChild(taPrompt);
-      } else if (node.node_type === "tool") {
-        var toolNameLabel = el("div", { className: "wf-field-label", textContent: "tool_name" });
-        box.appendChild(toolNameLabel);
-        var toolInp = el("input", { 
-          type: "text", 
-          className: "branch-input wf-tool-name",
-          value: node.tool_name || ""
-        });
-        toolInp.addEventListener("change", function () {
-          node.tool_name = toolInp.value.trim();
-        });
-        box.appendChild(toolInp);
-
-        var taInput = el("textarea", { className: "wf-ta" });
-        taInput.setAttribute("rows", "3");
-        taInput.placeholder = 'tool_input JSON 或字符串 (支持 ${metadata.xxx})';
-        var inputVal = node.config && node.config.tool_input;
-        taInput.value = typeof inputVal === "object" ? JSON.stringify(inputVal, null, 2) : String(inputVal || "");
-        taInput.addEventListener("change", function () {
-          if (!node.config) node.config = {};
-          try {
-            node.config.tool_input = JSON.parse(taInput.value);
-          } catch (e) {
-            node.config.tool_input = taInput.value;
-          }
-        });
-        box.appendChild(taInput);
-      } else {
-        // entry/exit or other
-        var desc = el("div", { className: "wf-ta", style: "background:#252526;padding:8px;font-size:11px;min-height:40px;" });
-        desc.textContent = (node.config && node.config.description) || (node.node_type + " 节点");
-        box.appendChild(desc);
-      }
-
-      list.appendChild(box);
-    });
-
-    elist.innerHTML = "";
-    state.edges.forEach(function (edge) {
-      var row = el("div", { className: "wf-edge-row" });
-      row.textContent = edge.from_node + " → " + edge.to_node;
-      var btn = el("button", { type: "button", className: "btn-tiny" });
-      btn.textContent = "删";
-      btn.addEventListener("click", function () {
-        state.edges = state.edges.filter(function (e) {
-          return !(e.from_node === edge.from_node && e.to_node === edge.to_node);
-        });
-        render();
-      });
-      row.appendChild(btn);
-      elist.appendChild(row);
-    });
-    if (prev) {
-      renderWfPreview(prev, state.nodes, state.edges);
+    if (getWorkflowSelectValue() === "__web__") {
+      refreshWorkflowCanvas();
     }
-    initEdgeForm();
   }
 
   function editNode(node, idx) {
@@ -547,23 +752,9 @@
     render();
   }
 
-  function initEdgeForm() {
-    var fromS = document.getElementById("wf-edge-from");
-    var toS = document.getElementById("wf-edge-to");
-    if (!fromS || !toS) return;
-    fromS.innerHTML = "";
-    toS.innerHTML = "";
-    state.nodes.forEach(function (n) {
-      fromS.appendChild(el("option", { value: n.node_id, textContent: n.node_id }));
-      toS.appendChild(el("option", { value: n.node_id, textContent: n.node_id }));
-    });
-  }
-
   function init() {
-    var list = document.getElementById("wf-nodes");
-    if (!list) return;
+    if (!document.getElementById("wf-preview")) return;
     var st = document.getElementById("wf-status");
-    var formEdge = document.getElementById("wf-add-edge");
     var formSave = document.getElementById("wf-form-save");
 
     function setStatus(m, isErr) {
@@ -601,7 +792,6 @@
             newNode.config.system_prompt = promptText;
             state.nodes.push(newNode);
             render();
-            initEdgeForm();
             setStatus("已添加 Agent 节点: " + nodeId, false);
             if (promptInput) promptInput.value = "";
             return;
@@ -621,7 +811,6 @@
             newTool.config.tool_input = defaultToolInputFor(toolName);
             state.nodes.push(newTool);
             render();
-            initEdgeForm();
             setStatus("已添加 Tool 节点: " + nodeIdT + " → " + toolName, false);
           }
         },
@@ -674,8 +863,7 @@
         });
         migrateDeliverToExecute();
         ensureDesignExecute();
-        render();
-        initEdgeForm();
+        refreshWorkflowCanvas();
         setStatus("已从服务器加载草稿（design / execute 已保证）", false);
       })
       .catch(function () {
@@ -685,32 +873,9 @@
         state.nodes[1].config.system_prompt =
           "你是执行/交付节点，基于上游设计生成完整、可执行的最终回答。";
         state.edges = [{ from_node: "design", to_node: "execute", condition: null }];
-        render();
-        initEdgeForm();
+        refreshWorkflowCanvas();
         setStatus("已加载默认 design → execute", false);
       });
-
-    if (formEdge) {
-      formEdge.addEventListener("submit", function (ev) {
-        ev.preventDefault();
-        var fromS = document.getElementById("wf-edge-from");
-        var toS = document.getElementById("wf-edge-to");
-        var a = (fromS && fromS.value) || "";
-        var b = (toS && toS.value) || "";
-        if (a && b && a !== b) {
-          var dupe = state.edges.some(function (e) {
-            return e.from_node === a && e.to_node === b;
-          });
-          if (!dupe) {
-            state.edges.push({ from_node: a, to_node: b, condition: null });
-            render();
-            initEdgeForm();
-          } else {
-            setStatus("该边已存在", true);
-          }
-        }
-      });
-    }
 
     if (formSave) {
       formSave.addEventListener("submit", function (ev) {
@@ -741,6 +906,15 @@
     }
 
     syncWorkflowSelect();
+
+    var wfSel = document.getElementById("workflow-select");
+    if (wfSel) {
+      wfSel.addEventListener("change", refreshWorkflowCanvas, false);
+    }
+    var modeSel = document.getElementById("mode");
+    if (modeSel) {
+      modeSel.addEventListener("change", refreshWorkflowCanvas, false);
+    }
   }
 
   if (document.readyState === "loading") {

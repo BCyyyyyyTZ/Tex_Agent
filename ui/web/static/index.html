@@ -17,12 +17,10 @@
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
         <p class="sidebar-wf-desc">
-          默认入口 <strong>design</strong>、出口 <strong>execute</strong>（不可删除）。Agent 可写 prompt；Tool 从已注册工具下拉选择（无需手写 name/input）。<br>
-          图示中点击节点可连有向边（先点起点，再点终点）。参考 <code>config/workflow_checklist_annotate_v2.json</code>。
+          节点<strong>上绿点</strong>输入、<strong>下蓝点</strong>输出：从下点拖线到另一节点上点松开成边。<strong>拖动矩形</strong>调整位置（会随保存写入草稿）。单击矩形编辑；悬停显示删除。
         </p>
         <div class="wf-body">
           <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
-          <div id="wf-nodes" class="wf-nodes"></div>
 
           <!-- Agent 添加板块 -->
           <div class="wf-add-panel">
@@ -49,16 +47,6 @@
               <button type="button" class="btn-primary" id="add-tool-btn">添加 Tool 节点</button>
             </div>
           </div>
-          <form id="wf-add-edge" class="wf-add-edge" autocomplete="off">
-            <span class="label">有向边</span>
-            <div class="wf-edge-picks">
-              <select id="wf-edge-from" title="从"></select>
-              <span class="wf-edge-arrow">→</span>
-              <select id="wf-edge-to" title="到"></select>
-              <button type="submit" class="btn-tiny">添加</button>
-            </div>
-          </form>
-          <div id="wf-edges" class="wf-edges"></div>
         </div>
         <div class="wf-footer">
           <form id="wf-form-save" class="wf-form-save">
@@ -118,15 +106,15 @@
               <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
             </div>
           </div>
-          <div class="header-actions">
-            <label class="select-wrap">
+          <div class="header-actions" role="toolbar" aria-label="工作流与模式">
+            <label class="select-wrap select-wrap--header">
               <span class="label">工作流</span>
               <select id="workflow-select" title="已注册或左侧自定义">
                 <option value="default" selected>default（注册表）</option>
                 <option value="__web__">自定义（左侧编排）</option>
               </select>
             </label>
-            <label class="select-wrap">
+            <label class="select-wrap select-wrap--header">
               <span class="label">模式</span>
               <select id="mode" title="执行模式">
                 <option value="task" selected>task（工作流）</option>
@@ -150,10 +138,16 @@
           <form id="form" class="form">
             <div class="composer-upload-row" aria-label="本地上传">
               <div class="composer-upload-group">
-                <label class="composer-file-label" for="composer-file">
-                  <span class="label">选择文件</span>
+                <input
+                  type="file"
+                  id="composer-file"
+                  class="composer-file-input-native"
+                  aria-label="选择要上传的文件"
+                />
+                <label class="composer-file-btn" for="composer-file">
+                  <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
+                  <span class="composer-file-btn__text">选择文件</span>
                 </label>
-                <input type="file" id="composer-file" class="composer-file-input" />
                 <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
               </div>
               <span id="composer-upload-status" class="composer-upload-status" role="status"></span>
@@ -183,26 +177,42 @@
         </p>
         <div class="right-asset-block" id="skill-block">
           <h3 class="right-asset-title">Skills</h3>
-          <p class="right-asset-hint">存 <code>storage/skills/</code>，建议 <code>.md</code> / <code>.txt</code> / <code>.yaml</code> 等。</p>
           <form id="skill-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
-            <label class="pdf-file-label">
-              <span class="label">上传</span>
-              <input type="file" id="skill-file" name="file" />
-            </label>
-            <button type="submit" class="btn-secondary">上传</button>
+            <div class="right-upload-group">
+              <input
+                type="file"
+                id="skill-file"
+                name="file"
+                class="composer-file-input-native"
+                aria-label="选择要上传的 Skill 文件"
+              />
+              <label class="composer-file-btn composer-file-btn--compact" for="skill-file">
+                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
+                <span class="composer-file-btn__text">选择文件</span>
+              </label>
+              <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
+            </div>
           </form>
           <p id="skill-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="skill-list" aria-live="polite"></ul>
         </div>
         <div class="right-asset-block" id="checklist-block">
           <h3 class="right-asset-title">Checklists</h3>
-          <p class="right-asset-hint">存 <code>storage/checklists/</code>，与工作流/工具中路径一致时可直接引用。</p>
           <form id="checklist-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
-            <label class="pdf-file-label">
-              <span class="label">上传</span>
-              <input type="file" id="checklist-file" name="file" />
-            </label>
-            <button type="submit" class="btn-secondary">上传</button>
+            <div class="right-upload-group">
+              <input
+                type="file"
+                id="checklist-file"
+                name="file"
+                class="composer-file-input-native"
+                aria-label="选择要上传的 Checklist 文件"
+              />
+              <label class="composer-file-btn composer-file-btn--compact" for="checklist-file">
+                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
+                <span class="composer-file-btn__text">选择文件</span>
+              </label>
+              <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
+            </div>
           </form>
           <p id="checklist-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
@@ -210,9 +220,6 @@
 
         <div class="uploaded-files-block" id="uploaded-files-block" aria-label="已上传的 PDF 与其它文档">
           <h3 class="uploaded-files-title">已上传文件列表</h3>
-          <p class="right-asset-hint">
-            含 <code>storage/pdfs/</code> 与 <code>storage/documents/</code>；在输入区旁上传的 PDF 与 其它文档 会出现在此，勾选后随发送注入绝对路径。
-          </p>
           <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
         </div>

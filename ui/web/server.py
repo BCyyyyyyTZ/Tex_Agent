@@ -17,7 +17,7 @@ from collections import deque
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Set, Tuple
 
 import anyio
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -551,6 +551,55 @@ def create_app() -> FastAPI:
         from workflow.workflow_registry import WorkflowRegistry
 
         return WorkflowRegistryOut(workflows=WorkflowRegistry().list_workflows())
+
+    @app.get("/api/workflow/graph", response_model=WorkflowDraftIn)
+    async def get_workflow_graph(name: str = Query(..., description="注册表中的工作流名称，如 default")) -> WorkflowDraftIn:
+        """返回注册表工作流的 nodes/edges，供前端只读图示（与 plan/task 模式无关）。"""
+
+        def _load() -> WorkflowDraftIn:
+            from workflow.workflow_parser import YAMLWorkflowParser
+            from workflow.workflow_registry import WorkflowRegistry
+
+            reg = WorkflowRegistry()
+            names = reg.list_workflows()
+            if name not in names:
+                raise ValueError(f"未知工作流: {name!r}，可用: {', '.join(names[:12])}…")
+            cfg_path = reg.get_config_path(name)
+            parser = YAMLWorkflowParser()
+            config = parser.load_config(str(cfg_path))
+            raw_nodes = config.get("nodes") or []
+            raw_edges = config.get("edges") or []
+            if not isinstance(raw_nodes, list):
+                raw_nodes = []
+            if not isinstance(raw_edges, list):
+                raw_edges = []
+            nodes: List[Dict[str, Any]] = []
+            for item in raw_nodes:
+                if isinstance(item, dict):
+                    nodes.append(dict(item))
+            edges_out: List[Dict[str, Any]] = []
+            for e in raw_edges:
+                if not isinstance(e, dict):
+                    continue
+                a = e.get("from_node", e.get("from"))
+                b = e.get("to_node", e.get("to"))
+                if a is None or b is None:
+                    continue
+                edges_out.append(
+                    {
+                        "from_node": str(a),
+                        "to_node": str(b),
+                        "condition": e.get("condition"),
+                    }
+                )
+            return WorkflowDraftIn(nodes=nodes, edges=edges_out)
+
+        try:
+            return await anyio.to_thread.run_sync(_load)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
     @app.get("/api/tools/list", response_model=ToolsListOut)
     async def list_registered_tools() -> ToolsListOut:
