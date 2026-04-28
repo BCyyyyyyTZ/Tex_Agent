@@ -9,6 +9,7 @@ TeX Agent Web UI：FastAPI 服务 + 静态页面（Cursor 风格聊天 + Markdow
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 from contextlib import asynccontextmanager
@@ -19,11 +20,11 @@ from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Set, Tuple
 import anyio
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from core.agent_cli import TeXAgentCLI
+from core.agent_cli import TeXAgentCLI, _serialize_plan_graph_for_ui
 from ui.web import file_storage
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -289,6 +290,10 @@ class ChatRequest(BaseModel):
     active_checklists: Optional[List[str]] = Field(
         default=None, description="storage/checklists 中已勾选文件名"
     )
+    stream_plan: bool = Field(
+        default=False,
+        description="plan 模式下为 true 时以 NDJSON 流式返回：先 plan_graph，再 result",
+    )
 
 
 class WorkflowDraftIn(BaseModel):
@@ -330,6 +335,10 @@ class PdfUploadResponse(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     error: Optional[str] = None
+    plan_graph: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="plan 模式下 PlanAgent 生成的运行时工作流（nodes/edges），供左侧图示",
+    )
 
 
 class BranchNodeOut(BaseModel):
@@ -729,12 +738,79 @@ def create_app() -> FastAPI:
             filename=p.name,
         )
 
-    @app.post("/api/chat", response_model=ChatResponse)
-    async def chat(body: ChatRequest) -> ChatResponse:
+    @app.post("/api/chat")
+    async def chat(body: ChatRequest):
         cli = get_cli()
         user_text = _augment_message_with_active_files(
             body.message.strip(), body
         )
+
+        if body.mode == "plan" and body.stream_plan:
+
+            async def ndjson_plan_stream() -> AsyncIterator[bytes]:
+                def _line(obj: Dict[str, Any]) -> bytes:
+                    return (
+                        json.dumps(obj, ensure_ascii=False) + "\n"
+                    ).encode("utf-8")
+
+                try:
+                    nodes, edges, app = await anyio.to_thread.run_sync(
+                        lambda: cli.build_plan_graph_and_app(user_text)
+                    )
+                except ValueError as e:
+                    yield _line({"type": "error", "detail": str(e)})
+                    return
+                except Exception as e:  # noqa: BLE001
+                    yield _line({"type": "error", "detail": str(e)})
+                    return
+
+                try:
+                    plan_graph = _serialize_plan_graph_for_ui(nodes, edges)
+                except Exception as e:  # noqa: BLE001
+                    yield _line({"type": "error", "detail": str(e)})
+                    return
+
+                yield _line({"type": "plan_graph", "plan_graph": plan_graph})
+
+                try:
+                    result = await anyio.to_thread.run_sync(
+                        lambda: cli._execute_with_app(
+                            user_text,
+                            app,
+                            "plan_dynamic",
+                            use_loading=False,
+                        )
+                    )
+                except Exception as e:  # noqa: BLE001
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": str(e),
+                        }
+                    )
+                    return
+
+                try:
+                    result.setdefault("metadata", {})["__plan_graph__"] = (
+                        plan_graph
+                    )
+                except Exception:
+                    pass
+                err = result.get("error")
+                text = _format_reply_from_result(result)
+                yield _line(
+                    {
+                        "type": "result",
+                        "reply": text,
+                        "error": str(err) if err else None,
+                    }
+                )
+
+            return StreamingResponse(
+                ndjson_plan_stream(),
+                media_type="application/x-ndjson",
+            )
 
         def run_sync() -> Dict[str, Any]:
             if body.mode == "plan":
@@ -754,7 +830,14 @@ def create_app() -> FastAPI:
 
         err = result.get("error")
         text = _format_reply_from_result(result)
-        return ChatResponse(reply=text, error=str(err) if err else None)
+        plan_graph = None
+        if body.mode == "plan":
+            plan_graph = (result.get("metadata") or {}).get("__plan_graph__")
+        return ChatResponse(
+            reply=text,
+            error=str(err) if err else None,
+            plan_graph=plan_graph,
+        )
 
     if STATIC_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

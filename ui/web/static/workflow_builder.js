@@ -917,6 +917,26 @@
     }
   }
 
+  /** plan 模式聊天返回的运行时图（供 app.js 调用） */
+  function applyPlanGraphPreview(graph) {
+    if (!graph) return;
+    var prev = document.getElementById("wf-preview");
+    if (!prev) return;
+    var nodes = (graph.nodes || []).map(function (x) {
+      return JSON.parse(JSON.stringify(x));
+    });
+    var edges = (graph.edges || []).map(function (x) {
+      return {
+        from_node: x.from_node || x.from,
+        to_node: x.to_node || x.to,
+        condition: x.condition != null ? x.condition : null,
+      };
+    });
+    if (!nodes.length) return;
+    renderWfPreview(prev, nodes, edges, { readOnly: true });
+  }
+  window.applyTexAgentPlanGraph = applyPlanGraphPreview;
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, false);
   } else {

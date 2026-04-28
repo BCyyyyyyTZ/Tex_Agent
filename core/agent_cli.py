@@ -3,7 +3,7 @@
 TeX Agent CLI 核心类
 """
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from utils.logger import get_logger
@@ -19,8 +19,43 @@ from memory.persona_memory import get_shared_user_persona_memory
 from cli.commands import CommandRegistry
 from cli.branch_commands import BRANCH_COMMANDS
 from cli.task_commands import get_task_commands
+from workflow.workflow_parser import EdgeConfig, NodeConfig
 
 logger = get_logger(__name__)
+
+
+def _serialize_plan_graph_for_ui(nodes: List[Any], edges: List[Any]) -> Dict[str, Any]:
+    """将规划得到的 NodeConfig/EdgeConfig 转为可 JSON 序列化的 dict，供 Web 图示。"""
+    out_nodes: List[Dict[str, Any]] = []
+    for n in nodes:
+        if isinstance(n, NodeConfig):
+            out_nodes.append(
+                {
+                    "node_id": n.node_id,
+                    "node_type": n.node_type,
+                    "agent_name": n.agent_name,
+                    "tool_name": n.tool_name,
+                    "config": dict(n.config or {}),
+                    "parallel_branches": list(n.parallel_branches or []),
+                    "join_policy": n.join_policy,
+                    "source_branches": list(n.source_branches or []),
+                }
+            )
+    out_edges: List[Dict[str, Any]] = []
+    for e in edges:
+        if isinstance(e, EdgeConfig):
+            cond = None
+            if e.condition is not None:
+                cond = e.condition.to_dict()
+            out_edges.append(
+                {
+                    "from_node": e.from_node,
+                    "to_node": e.to_node,
+                    "condition": cond,
+                    "priority": e.priority,
+                }
+            )
+    return {"nodes": out_nodes, "edges": out_edges}
 
 
 class TeXAgentCLI:
@@ -252,12 +287,12 @@ class TeXAgentCLI:
             user_input, app, workflow_label, use_loading=use_loading
         )
 
-    def run_plan_task(
-        self, user_input: str, branch: str = None, *, use_loading: bool = True
-    ) -> dict:
+    def build_plan_graph_and_app(
+        self, user_input: str, branch: Optional[str] = None
+    ) -> Tuple[List[Any], List[Any], Any]:
         """
-        统一的 plan 任务入口：
-        规划 -> 解析图 -> 构图 -> 复用统一执行器 _execute_with_app。
+        仅完成规划与构图，不执行 invoke。
+        供 Web 在流式响应中先发 plan_graph，再单独调用 _execute_with_app。
         """
         target_branch = branch or self.current_branch
         if target_branch != self.current_branch:
@@ -282,7 +317,7 @@ class TeXAgentCLI:
         for n in nodes:
             print(f"      - [{n.agent_name}] {n.node_id}")
 
-        print("   [4/4] 构建并运行动态图...")
+        print("   [4/4] 构建动态图（即将执行）...")
         app = parser.build_graph(
             nodes,
             edges,
@@ -291,9 +326,26 @@ class TeXAgentCLI:
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
         )
+        return nodes, edges, app
+
+    def run_plan_task(
+        self, user_input: str, branch: str = None, *, use_loading: bool = True
+    ) -> dict:
+        """
+        统一的 plan 任务入口：
+        规划 -> 解析图 -> 构图 -> 复用统一执行器 _execute_with_app。
+        """
+        nodes, edges, app = self.build_plan_graph_and_app(user_input, branch)
         result = self._execute_with_app(
             user_input, app, workflow_label="plan_dynamic", use_loading=use_loading
         )
+
+        try:
+            result.setdefault("metadata", {})["__plan_graph__"] = _serialize_plan_graph_for_ui(
+                nodes, edges
+            )
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("[run_plan_task] 无法序列化规划图供 UI：%s", ex)
 
         if result.get("error") is None:
             node_ids = [n.node_id for n in nodes]

@@ -22,31 +22,12 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env，填写 OPENAI_API_KEY 等
 
-# 4. 运行 MVP 基础链路
-python main.py
-```
-
-### Web 交互页面（类 Cursor 风格，支持 Markdown 渲染）
-
-与 `main.py` 共用 `TeXAgentCLI` 与会话；默认工作流来自 `config/workflow_registry.json` 的 `default`。`plan` 模式对应 `run_plan_task`（更慢）。
-
-**依赖（含上传 PDF 所需 `python-multipart`）：**
-
-```bash
-pip install -r requirements.txt
-```
-
-**启动服务（任选其一）：**
+**启动服务：**
 
 ```bash
 # 方式 A：模块入口（常用）
 python -m ui.web.server
 
-# 方式 B：一键脚本（约 2.2s 后可尝试用系统默认浏览器打开页面；可用 --no-browser 仅起服务）
-python scripts/start_texagent_web.py
-# python scripts/start_texagent_web.py --no-browser
-# python scripts/start_texagent_web.py --port 9000
-```
 
 默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。
 

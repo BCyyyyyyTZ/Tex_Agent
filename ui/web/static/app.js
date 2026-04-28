@@ -184,33 +184,112 @@
             payload.active_checklists = sel.active_checklists;
           }
         }
+        if (modeVal === "plan") {
+          payload.stream_plan = true;
+        }
         const res = await fetch(CHAT_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
           signal: ac.signal,
         });
-        const data = await res.json().catch(function () {
-          return {};
-        });
-        if (!res.ok) {
-          const detail = data.detail || data.error || res.statusText;
-          const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
-          throw new Error(msg);
+        var ct = "";
+        try {
+          ct = (res.headers.get("content-type") || "").toLowerCase();
+        } catch (_ct) {
+          /* empty */
         }
-        const reply = data.reply != null ? String(data.reply) : "";
-        const err = data.error;
-        if (wrap) wrap.classList.remove("loading");
-        let html = "";
-        if (err) {
-          html +=
-            '<div class="error-banner">' +
-            (typeof err === "string" ? err : JSON.stringify(err)) +
-            "</div>";
+        var useNdjson =
+          modeVal === "plan" &&
+          res.ok &&
+          (ct.indexOf("ndjson") >= 0 || ct.indexOf("x-ndjson") >= 0);
+
+        if (useNdjson && res.body && typeof res.body.getReader === "function") {
+          const dec = new TextDecoder();
+          let buf = "";
+          const reader = res.body.getReader();
+          let finalReply = "";
+          let finalErr = null;
+          let streamFail = null;
+          while (true) {
+            const step = await reader.read();
+            if (step.done) break;
+            buf += dec.decode(step.value, { stream: true });
+            var nl;
+            while ((nl = buf.indexOf("\n")) >= 0) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line) continue;
+              var obj;
+              try {
+                obj = JSON.parse(line);
+              } catch (pe) {
+                streamFail = pe;
+                break;
+              }
+              if (!obj || typeof obj !== "object") continue;
+              if (obj.type === "plan_graph" && obj.plan_graph) {
+                if (typeof window.applyTexAgentPlanGraph === "function") {
+                  window.applyTexAgentPlanGraph(obj.plan_graph);
+                }
+                if (contentEl) {
+                  contentEl.innerHTML =
+                    "<p>规划已完成，正在执行工作流…</p>";
+                }
+              } else if (obj.type === "error" && obj.detail != null) {
+                finalErr = String(obj.detail);
+              } else if (obj.type === "result") {
+                finalReply = obj.reply != null ? String(obj.reply) : "";
+                if (obj.error != null && obj.error !== "") {
+                  finalErr = typeof obj.error === "string" ? obj.error : JSON.stringify(obj.error);
+                }
+              }
+            }
+            if (streamFail) break;
+          }
+          if (wrap) wrap.classList.remove("loading");
+          if (streamFail) {
+            throw streamFail;
+          }
+          let html = "";
+          if (finalErr) {
+            html +=
+              '<div class="error-banner">' +
+              (typeof finalErr === "string" ? finalErr : JSON.stringify(finalErr)) +
+              "</div>";
+          }
+          html += renderMd(finalReply);
+          if (contentEl) contentEl.innerHTML = html;
+        } else {
+          const data = await res.json().catch(function () {
+            return {};
+          });
+          if (!res.ok) {
+            const detail = data.detail || data.error || res.statusText;
+            const msg = typeof detail === "string" ? detail : JSON.stringify(detail);
+            throw new Error(msg);
+          }
+          const reply = data.reply != null ? String(data.reply) : "";
+          const err = data.error;
+          if (wrap) wrap.classList.remove("loading");
+          let html = "";
+          if (err) {
+            html +=
+              '<div class="error-banner">' +
+              (typeof err === "string" ? err : JSON.stringify(err)) +
+              "</div>";
+          }
+          /* 接口已只返回单段终局文本，这里直接当 Markdown 渲染 */
+          html += renderMd(reply);
+          if (contentEl) contentEl.innerHTML = html;
+          if (
+            modeVal === "plan" &&
+            data.plan_graph &&
+            typeof window.applyTexAgentPlanGraph === "function"
+          ) {
+            window.applyTexAgentPlanGraph(data.plan_graph);
+          }
         }
-        /* 接口已只返回单段终局文本，这里直接当 Markdown 渲染 */
-        html += renderMd(reply);
-        if (contentEl) contentEl.innerHTML = html;
       } catch (err) {
         if (err && err.name === "AbortError") {
           if (contentEl) {
