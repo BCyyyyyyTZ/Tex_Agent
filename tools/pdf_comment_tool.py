@@ -70,8 +70,8 @@ class PdfCommentTool(BaseTool):
         :param author: 标注者名称
         """
         
-        # 检查 pdf_path 和 output_path 是否相同
-        same_file = os.path.abspath(pdf_path) == os.path.abspath(output_path)
+        base_path = output_path if output_path and os.path.exists(output_path) else pdf_path
+        same_file = os.path.abspath(base_path) == os.path.abspath(output_path)
         temp_path = None
         
         try:
@@ -84,7 +84,7 @@ class PdfCommentTool(BaseTool):
                 save_path = output_path
             
             # 打开 PDF
-            doc = fitz.open(pdf_path)
+            doc = fitz.open(base_path)
             
             if not (0 <= page_idx < len(doc)):
                 return ToolResult(
@@ -136,8 +136,7 @@ class PdfCommentTool(BaseTool):
             
             # 如果是同一个文件，用临时文件替换原文件
             if same_file:
-                os.remove(pdf_path)
-                os.rename(temp_path, pdf_path)
+                os.replace(temp_path, output_path)
             
             print(f"✅ 已高亮 '{text}' 并添加注释")
             #print(f"   标注者：{author}，时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -168,8 +167,8 @@ class PdfCommentTool(BaseTool):
         :param author: 标注者名称
         """
         
-        # 检查 pdf_path 和 output_path 是否相同
-        same_file = os.path.abspath(pdf_path) == os.path.abspath(output_path)
+        base_path = output_path if output_path and os.path.exists(output_path) else pdf_path
+        same_file = os.path.abspath(base_path) == os.path.abspath(output_path)
         temp_path = None
         
         try:
@@ -182,7 +181,7 @@ class PdfCommentTool(BaseTool):
                 save_path = output_path
             
             # 打开 PDF
-            doc = fitz.open(pdf_path)
+            doc = fitz.open(base_path)
             
             # 格式化时间
             now = datetime.now()
@@ -194,6 +193,7 @@ class PdfCommentTool(BaseTool):
             
             # 存储每页找不到文本的注释
             page_not_found_comments = {}
+            commented_pages = set()
             
             for i, question in enumerate(question_list):
                 try:
@@ -245,6 +245,7 @@ class PdfCommentTool(BaseTool):
                         )
                     
                     success_count += 1
+                    commented_pages.add(page_idx + 1)
                     print(f"✅ 已处理问题 {i+1}")
                     
                 except Exception as e:
@@ -269,8 +270,7 @@ class PdfCommentTool(BaseTool):
             
             # 如果是同一个文件，用临时文件替换原文件
             if same_file:
-                os.remove(pdf_path)
-                os.rename(temp_path, pdf_path)
+                os.replace(temp_path, output_path)
             
             print(f"\n📋 批量处理完成")
             print(f"   成功: {success_count} 个问题")
@@ -291,7 +291,8 @@ class PdfCommentTool(BaseTool):
                     "success_count": success_count,
                     "total_count": len(question_list),
                     "error_count": len(error_messages),
-                    "error_messages": error_messages
+                    "error_messages": error_messages,
+                    "commented_pages": commented_pages
                 }
             )
             

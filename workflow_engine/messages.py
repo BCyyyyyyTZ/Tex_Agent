@@ -22,22 +22,18 @@ class ToolCallMessage(BaseModel):
 
 class ToolResultMessage(BaseModel):
     type: Literal["tool_result"] = "tool_result"
-    tool_name: str
-    result: ToolResult
+    tool_names: set[str]
+    results: list[ToolResult]
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @property
-    def success(self) -> bool:
-        return bool(self.result.success)
 
-    @property
-    def output(self) -> str:
-        return self.result.output
-
-    @property
-    def error(self) -> Optional[str]:
-        return self.result.error
+class MergedMessage(BaseModel):
+    type: Literal["merged"] = "merged"
+    text: str = ""
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    tool_results: dict[str, Any] = Field(default_factory=lambda: {"tool_names": set(), "results": []})
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-WorkflowMessage = TextMessage | ToolCallMessage | ToolResultMessage
+WorkflowMessage = TextMessage | ToolCallMessage | ToolResultMessage | MergedMessage
 

@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Any, Optional, Callable
 
 from tools.pdf_comment_tool import PdfCommentTool
-from workflow_engine.messages import TextMessage, ToolCallMessage, WorkflowMessage
+from workflow_engine.messages import TextMessage, ToolCallMessage, ToolResultMessage, MergedMessage, WorkflowMessage
 from workflow_engine.nodes import LlmClientLike, LlmNode, ToolNode, FunctionNode
 from workflow_engine.workflow import Workflow, WorkflowContext
+
+from workflow_engine.config import MODE
 
 
 @dataclass(frozen=True)
@@ -82,15 +84,15 @@ def build_section_prompt(section: ChecklistSection) -> str:
         "检查项：\n"
         f"{section.content}\n\n"
         "你的回答必须严格为以下格式之一：\n"
-        'RESULT [BEGIN [{"page_idx": 1, "text": "需要高亮的原文片段", "comment": "不符合原因"}, ...] END]\n'
+        'TOOL_CALL pdf_comment {"question_list": [{"page_idx": 1, "text": "需要高亮的原文片段", "comment": "不符合原因"}, ...]}\n'
         "或（没有任何问题时）：\n"
-        "RESULT [BEGIN [] END]\n\n"
+        "TOOL_CALL none []\n\n"
         "要求：\n"
         "1. page_idx 为问题在论文中的页码，从 1 开始。\n"
         "2. text 必须在字符串层面严格匹配 PDF 原文内容，尽量选择不包含特殊格式（上标/下标/角标/公式）的短片段。\n"
         "3. comment 为不符合原因，表述简洁明确。\n"
         "4. 输出必须是可被 json.loads 直接解析的 JSON。\n"
-        "5. 不要输出除 RESULT 格式外的任何内容。\n"
+        "5. 不要输出除 TOOL_CALL 格式外的任何内容。\n"
     )
 
 
@@ -98,22 +100,21 @@ class ThesisChecklistWorkflow:
     def __init__(
         self,
         *,
-        checklist_path: Optional[str] = None,
+        checklist_path: str,
         llm_client: Optional[LlmClientLike] = None,
         pdf_comment_tool: Optional[PdfCommentTool] = None,
-        model_name: str = "gemini-3.1-flash-lite-preview",
+        #model_name: str = "gemini-3.1-flash-lite-preview",
+        model_name: str = "gemini-3-flash-preview",
+        #model_name: str = "gemini-2.5-flash",
         api_key: str = "",
         temperature: float = 0.2,
     ):
-        self.checklist_path = (
-            str(Path(checklist_path).resolve())
-            if checklist_path
-            else str((Path(__file__).resolve().parent.parent / "thesis-checklists.md").resolve())
-        )
+        self.checklist_path = str(Path(checklist_path).resolve())
 
         with open(self.checklist_path, "r", encoding="utf-8") as f:
             md = f.read()
         self.sections = split_checklist_by_primary_headings(md)
+
 
         if llm_client is None:
             from agents.base_agent import GeminiClient
@@ -131,7 +132,7 @@ class ThesisChecklistWorkflow:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(pdf_path, output_path)
             return TextMessage(
-                text="prepare pdf done",
+                text="",
                 metadata={
                     "pdf_path": pdf_path,
                     "output_path": output_path,
@@ -141,10 +142,16 @@ class ThesisChecklistWorkflow:
         wf = Workflow()
         wf.add_node(FunctionNode("prepare_pdf", prepare_pdf))
 
-        prev = "prepare_pdf"
+        
+        wf.add_node(
+            ToolNode(
+                "pdf_comment", 
+                tool_names=["pdf_comment"],
+            )
+        )
+
         for idx, section in enumerate(self.sections, start=1):
             llm_node_id = f"sec_{idx:02d}_llm"
-            tool_node_id = f"sec_{idx:02d}_pdf_comment"
 
             wf.add_node(
                 LlmNode(
@@ -153,54 +160,68 @@ class ThesisChecklistWorkflow:
                     prompt=build_section_prompt(section),
                 )
             )
-            wf.add_node(
-                ToolNode(
-                    tool_node_id, 
-                    tool=self.pdf_comment_tool, 
-                    tool_name="pdf_comment"
-                )
-            )
+            
 
-            wf.add_edge(prev, llm_node_id)
-            wf.add_edge(llm_node_id, tool_node_id)
+            wf.add_edge("prepare_pdf", llm_node_id)
+            wf.add_edge(llm_node_id, "pdf_comment")
 
-            prev = tool_node_id
 
         def summarize(msg: WorkflowMessage, ctx: WorkflowContext) -> WorkflowMessage:
-            summaries: list[dict[str, Any]] = []
+
+            results = msg.tool_results["results"]
+
+            tool_call_summaries: list[dict[str, Any]] = []
             total_issues = 0
-            parse_errors: list[dict[str, Any]] = []
+            total_success_count = 0
+            total_error_count = 0
+            errors: list[dict[str, Any]] = []
+            commented_pages: set[int] = set()
 
-            for node_id in ctx.trace:
-                out = ctx.outputs.get(node_id)
-                if out is None:
-                    continue
-                if node_id.endswith("_pdf_comment"):
-                    meta = dict(getattr(out, "metadata", {}) or {})
-                    title = meta.get("section_title") or node_id
-                    issues = int(meta.get("issues") or 0)
-                    total_issues += issues
-                    summaries.append(
-                        {
-                            "title": title,
-                            "issues": issues,
-                            "tool_success": getattr(getattr(out, "result", None), "success", None),
-                        }
-                    )
-                    if meta.get("parse_error"):
-                        parse_errors.append({"title": title, "error": meta["parse_error"]})
+            for i, r in enumerate(results, start=1):
+                if MODE == "debug":
+                    print(f"总结第{i}个检查项结果: {r}\n\n")
+                r_meta = dict(getattr(r, "metadata", {}) or {})
+                issues = int(r_meta.get("total_count") or 0)
+                success_count = int(r_meta.get("success_count") or 0)
+                error_count = int(r_meta.get("error_count") or 0)
 
-            base_meta = dict(getattr(msg, "metadata", {}) or {})
-            base_meta["output_path"] = output_path
+                effective_success = bool(getattr(r, "success", False)) or issues == 0
+
+                total_issues += issues
+                total_success_count += success_count
+                total_error_count += error_count
+                commented_pages.update(r_meta.get("commented_pages", set()))
+                
+                tool_call_summaries.append(
+                    {
+                        "idx": i,
+                        "issues": issues,
+                        "success": effective_success,
+                        "success_count": success_count,
+                        "error_count": error_count,
+                    }
+                )
+
+                if getattr(r, "error", None):
+                    errors.append({"idx": i, "error": r.error})
+
+            tool_success = all(s["success"] for s in tool_call_summaries) if tool_call_summaries else True
+
+            base_meta: dict[str, Any] = {}
+            base_meta["tool_success"] = tool_success
             base_meta["total_issues"] = total_issues
-            base_meta["section_summaries"] = summaries
-            if parse_errors:
-                base_meta["parse_errors"] = parse_errors
+            base_meta["total_success_count"] = total_success_count
+            base_meta["total_error_count"] = total_error_count
+            base_meta["tool_call_summaries"] = tool_call_summaries
+            if errors:
+                base_meta["tool_errors"] = errors
 
-            return TextMessage(text=output_path, metadata=base_meta)
+            print(f"summary finish:\nsuccess: {tool_success}\ntotal issues: {total_issues}\ntotal success count: {total_success_count}\ntotal error count: {total_error_count}\ncommented pages: {sorted(commented_pages)}")
+
+            return TextMessage(text="summary finish", metadata=base_meta)
 
         wf.add_node(FunctionNode("summary", summarize))
-        wf.add_edge(prev, "summary")
+        wf.add_edge("pdf_comment", "summary")
 
         return wf
 
@@ -209,9 +230,24 @@ class ThesisChecklistWorkflow:
         *,
         pdf_path: str,
         output_path: str,
-        return_context: bool = False,
     ) -> Any:
+        ctx = WorkflowContext(
+            metadata={
+                "file_to_upload": [pdf_path], 
+                "tool_default_args": {
+                    "pdf_comment": {
+                        "pdf_path": pdf_path,
+                        "output_path": output_path,
+                    }
+                }
+            }
+        )
         wf = self.build()
-        initial = TextMessage(text="", metadata={"pdf_path": pdf_path, "output_path": output_path})
-        return wf.run(initial, start_nodes=["prepare_pdf"], return_context=return_context)
+        return wf.run(
+            initial_message=TextMessage(text="", metadata={"pdf_path": pdf_path, "output_path": output_path}), 
+            context=ctx
+        )
 
+if __name__ == "__main__":
+    wf = ThesisChecklistWorkflow(checklist_path="thesis-checklists.md")
+    wf.run(pdf_path=r"C:\Users\Drago\Downloads\zzy.pdf", output_path=r"C:\Users\Drago\Downloads\zzy_comment.pdf")

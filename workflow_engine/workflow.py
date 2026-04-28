@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Any
 
-from workflow_engine.messages import TextMessage, WorkflowMessage
+from workflow_engine.messages import TextMessage, ToolCallMessage, ToolResultMessage, MergedMessage, WorkflowMessage
 from workflow_engine.nodes import BaseNode
 
 @dataclass
@@ -12,6 +12,7 @@ class WorkflowContext:
     status: dict[str, str] = field(default_factory=dict)
     errors: dict[str, str] = field(default_factory=dict)
     trace: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 @dataclass(frozen=True)
 class Edge:
@@ -20,15 +21,48 @@ class Edge:
     condition: Optional[Callable[[WorkflowMessage, WorkflowContext], bool]] = None
 
 
-def _merge_messages(messages: list[WorkflowMessage]) -> WorkflowMessage:
+def _merge_message(messages: list[WorkflowMessage | None]) -> MergedMessage:
     if not messages:
-        raise ValueError("cannot merge empty messages")
-    if len(messages) == 1:
-        return messages[0]
-    if all(isinstance(m, TextMessage) for m in messages):
-        text = "\n\n".join(m.text for m in messages)
-        return TextMessage(text=text, metadata={"merged": True, "count": len(messages)})
-    return messages[-1]
+        return None
+
+    merged_texts: list[str] = []
+    merged_tool_calls: list[dict[str, Any]] = []
+    merged_tool_results: dict[str, Any] = {"tool_names": set(), "results": []}
+    merged_metadata: dict[str, Any] = {}
+
+    for m in messages:
+        meta = getattr(m, "metadata", None)
+        if isinstance(meta, dict):
+            merged_metadata.update(meta)
+
+        if isinstance(m, TextMessage):
+            merged_texts.append(m.text)
+        elif isinstance(m, ToolCallMessage):
+            merged_tool_calls.append({
+                "tool_name": m.tool_name,
+                "arguments": m.arguments,
+            })
+        elif isinstance(m, ToolResultMessage):
+            merged_tool_results["tool_names"].update(m.tool_names)
+            merged_tool_results["results"].extend(m.results)
+        elif isinstance(m, MergedMessage):
+            if m.text:
+                merged_texts.append(m.text)
+            merged_tool_calls.extend(m.tool_calls)
+            merged_tool_results["tool_names"].update(m.tool_names)
+            merged_tool_results["results"].extend(m.results)
+        else:
+            pass
+
+    text = "\n\n".join(t for t in merged_texts if t)
+    return MergedMessage(
+        text=text,
+        tool_calls=merged_tool_calls,
+        tool_results=merged_tool_results,
+        metadata=merged_metadata,
+    )
+
+
 
 
 class Workflow:
@@ -90,7 +124,7 @@ class Workflow:
 
     def run(
         self,
-        initial_message: WorkflowMessage,
+        initial_message: WorkflowMessage = None,
         *,
         start_nodes: Optional[list[str]] = None,
         context: Optional[WorkflowContext] = None,
@@ -106,30 +140,33 @@ class Workflow:
 
         order = self._topological_order()
         incoming_messages: dict[str, list[WorkflowMessage]] = {n: [] for n in self.nodes}
-        for n in start_nodes:
-            incoming_messages[n].append(initial_message)
+        
+        if initial_message:
+            for n in start_nodes:
+                incoming_messages[n].append(initial_message)
 
         ctx = context or WorkflowContext()
         for node_id in order:
             node = self.nodes[node_id]
             inputs = incoming_messages.get(node_id, [])
 
-            merged = _merge_messages(inputs)
+            merged = _merge_message(inputs)
             try:
                 out = node.run(merged, ctx)
                 ctx.status[node_id] = "executed"
                 ctx.outputs[node_id] = out
                 ctx.trace.append(node_id)
             except Exception as e:
+                print(f"Error in node {node_id}: {e}")
                 ctx.status[node_id] = "failed"
                 ctx.errors[node_id] = str(e)
                 ctx.trace.append(node_id)
                 out = None
 
-
-            for e in self._outgoing.get(node_id, []):
-                if e.condition is None or e.condition(out, ctx):
-                    incoming_messages[e.to_node].append(out)
+            if out is not None:
+                for e in self._outgoing.get(node_id, []):
+                    if e.condition is None or e.condition(out, ctx):
+                        incoming_messages[e.to_node].append(out)
 
         terminal_nodes = [n for n, outs in self._outgoing.items() if len(outs) == 0]
         results = [ctx.outputs[n] for n in terminal_nodes if n in ctx.outputs]
