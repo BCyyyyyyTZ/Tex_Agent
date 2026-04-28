@@ -43,11 +43,11 @@ DEFAULT_WEB_WORKFLOW: Dict[str, Any] = {
             },
         },
         {
-            "node_id": "deliver",
+            "node_id": "execute",
             "node_type": "agent",
             "agent_name": "SimpleAgent",
             "config": {
-                "system_prompt": "你是交付节点，基于上游设计生成完整、可执行的最终回答。",
+                "system_prompt": "你是执行/交付节点，基于上游设计生成完整、可执行的最终回答。",
                 "subtask": "输出最终可交付内容。",
                 "depends_on": ["design"],
                 "temperature": 0.4,
@@ -55,7 +55,7 @@ DEFAULT_WEB_WORKFLOW: Dict[str, Any] = {
         },
     ],
     "edges": [
-        {"from_node": "design", "to_node": "deliver", "condition": None},
+        {"from_node": "design", "to_node": "execute", "condition": None},
     ],
 }
 
@@ -302,6 +302,15 @@ class WorkflowRegistryOut(BaseModel):
     workflows: List[str]
 
 
+class ToolItemOut(BaseModel):
+    name: str
+    description: str = ""
+
+
+class ToolsListOut(BaseModel):
+    tools: List[ToolItemOut]
+
+
 class PdfFileItem(BaseModel):
     name: str
     size: int
@@ -542,6 +551,26 @@ def create_app() -> FastAPI:
         from workflow.workflow_registry import WorkflowRegistry
 
         return WorkflowRegistryOut(workflows=WorkflowRegistry().list_workflows())
+
+    @app.get("/api/tools/list", response_model=ToolsListOut)
+    async def list_registered_tools() -> ToolsListOut:
+        """供前端工作流编排下拉：与 tools/tool_list 一致。"""
+
+        def _work() -> ToolsListOut:
+            from tools.tool_list import tool_list
+
+            return ToolsListOut(
+                tools=[
+                    ToolItemOut(
+                        name=str(getattr(t, "name", "") or ""),
+                        description=str(getattr(t, "description", "") or ""),
+                    )
+                    for t in tool_list
+                    if getattr(t, "name", None)
+                ]
+            )
+
+        return await anyio.to_thread.run_sync(_work)
 
     @app.get("/api/storage/pdfs", response_model=PdfListResponse)
     async def list_pdfs_ep() -> PdfListResponse:

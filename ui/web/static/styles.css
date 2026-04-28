@@ -207,62 +207,87 @@ body {
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
-  background: transparent;
-  padding: 10px 12px 12px;
-  overflow: hidden;
+  background: #1e1e1e;
+  border-right: 1px solid #333;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  box-shadow: 3px 0 15px rgba(0,0,0,0.5);
 }
-/* 可滚动主区：缩略图+节点+边，占满中间高度 */
+
+.sidebar-wf-title {
+  padding: 16px 20px 10px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #e0e0e0;
+  border-bottom: 1px solid #333;
+  background: linear-gradient(90deg, #252526, #1e1e1e);
+}
+
+.sidebar-wf-desc {
+  padding: 12px 20px 14px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #b0b0b0;
+  border-bottom: 1px solid #2a2a2a;
+  background: #252526;
+}
+.sidebar-wf-desc code {
+  font-size: 12px;
+  color: #7dd3fc;
+  background: #1f2937;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* 可滚动主区：更大预览 + 节点列表 */
 .wf-body {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-height: 0;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: auto;
+  gap: 14px;
+  background: #18181b;
 }
-/* 保存按钮区贴左栏底，不被中间内容顶在半截 */
+
+/* 保存按钮区 */
 .wf-footer {
   flex-shrink: 0;
   margin-top: auto;
-  padding-top: 10px;
-  border-top: 1px solid #3a3a3a;
-}
-.wf-footer .wf-form-save {
-  margin: 0;
-}
-.wf-footer .wf-status {
-  margin-bottom: 0;
-}
-
-.sidebar-wf-title {
-  margin: 0 0 6px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.sidebar-wf-desc {
-  margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-muted);
-}
-.sidebar-wf-desc code {
-  font-size: 12px;
-  color: #b0b0b0;
+  padding: 14px 18px 18px;
+  border-top: 1px solid #333;
+  background: #1e1e1e;
 }
 
 .wf-preview {
-  flex: 1 1 12rem;
-  min-height: 320px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: #1a1a1a;
-  margin-bottom: 8px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+  flex: 0 0 380px;
+  border: 2px solid #444;
+  border-radius: 10px;
+  background: #111113;
+  overflow: hidden;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+  position: relative;
+  min-height: 380px;
+}
+
+.wf-preview::before {
+  content: "工作流可视化（点击节点 → 连边 / 双击编辑）";
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  font-size: 11px;
+  color: #666;
+  z-index: 5;
+  background: rgba(15,15,20,0.9);
+  padding: 3px 10px;
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
 }
 /* 缩略图 SVG 占满预览盒宽度，最小高度与 JS 中 viewBox 下限一致 */
 .wf-preview > svg {
@@ -285,13 +310,24 @@ body {
 .wf-node-rect {
   fill: #2a2a32;
   stroke: #5a5a6a;
-  stroke-width: 0.8;
+  stroke-width: 1.5;
+  transition: all 0.2s ease;
+}
+.wf-node-rect:hover {
+  stroke: #a5b4fc;
+  stroke-width: 2.5;
+}
+.wf-node-rect.selected {
+  fill: #4338ca;
+  stroke: #a5b4fc;
+  stroke-width: 3;
 }
 .wf-node-txt {
-  font-size: 8px;
+  font-size: 9px;
   font-family: var(--mono);
-  fill: #ccc;
+  fill: #ddd;
   pointer-events: none;
+  font-weight: 500;
 }
 .wf-nodes {
   display: flex;
@@ -380,6 +416,55 @@ body {
   margin-bottom: 8px;
   font-size: 12px;
 }
+
+.wf-add-panel {
+  position: relative;
+  z-index: 2;
+  background: #252526;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.wf-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #7dd3fc;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.wf-panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wf-panel-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: #aaa;
+  gap: 3px;
+}
+
+.wf-panel-form input,
+.wf-panel-form textarea {
+  background: #1e1e1e;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #ddd;
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+
+.wf-panel-form button {
+  margin-top: 4px;
+  padding: 8px 12px;
+}
 .wf-status {
   font-size: 12px;
   color: var(--text-muted);
@@ -400,6 +485,45 @@ body {
 }
 .btn-tiny:hover {
   background: #4a4a4a;
+}
+
+.wf-node-type-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: white;
+  font-family: var(--mono);
+  background: #3a5f9a;
+  flex-shrink: 0;
+}
+
+.wf-node-protected {
+  opacity: 0.9;
+  border-color: #555;
+}
+
+.wf-field-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 2px;
+  display: block;
+}
+
+.wf-tool-name {
+  width: 100%;
+  margin-bottom: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.wf-node-rect.tool-node {
+  fill: #1e3a1e;
+  stroke: #4ade80;
+}
+
+.wf-node-rect.entry-exit-node {
+  fill: #2a2a5a;
+  stroke: #818cf8;
 }
 
 /* 主列：水平内边距只设一处，顶栏 / chat-scroll / 输入区 内容同宽；铺满 flex 子项宽度 */

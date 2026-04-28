@@ -17,12 +17,38 @@
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
         <p class="sidebar-wf-desc">
-          用 Agent 节点与有向边组装图；与 <code>config/workflow_*.json</code> 结构一致。保存后，在顶栏将「工作流」选为「自定义」以执行本图。
+          默认入口 <strong>design</strong>、出口 <strong>execute</strong>（不可删除）。Agent 可写 prompt；Tool 从已注册工具下拉选择（无需手写 name/input）。<br>
+          图示中点击节点可连有向边（先点起点，再点终点）。参考 <code>config/workflow_checklist_annotate_v2.json</code>。
         </p>
         <div class="wf-body">
           <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
           <div id="wf-nodes" class="wf-nodes"></div>
-          <button type="button" class="btn-secondary wf-add-node-btn" id="wf-add-node">＋ 添加 Agent 节点</button>
+
+          <!-- Agent 添加板块 -->
+          <div class="wf-add-panel">
+            <div class="wf-panel-title">添加 Agent 节点</div>
+            <div class="wf-panel-form">
+              <label>节点 ID <input type="text" id="agent-id" class="branch-input" value="analyze_abstract" placeholder="analyze_abstract"></label>
+              <label>System Prompt
+                <textarea id="agent-prompt" rows="3" class="wf-ta" placeholder="你是论文摘要检查专家..."></textarea>
+              </label>
+              <button type="button" class="btn-primary" id="add-agent-btn">添加 Agent 节点</button>
+            </div>
+          </div>
+
+          <!-- Tool 添加板块：仅选已注册工具 -->
+          <div class="wf-add-panel">
+            <div class="wf-panel-title">添加 Tool 节点</div>
+            <div class="wf-panel-form">
+              <label>节点 ID（可留空，默认与工具名相同）
+                <input type="text" id="tool-node-id" class="branch-input" placeholder="留空则用工具名" />
+              </label>
+              <label>选择工具
+                <select id="tool-select" class="branch-input wf-tool-select" title="来自服务端已注册工具"></select>
+              </label>
+              <button type="button" class="btn-primary" id="add-tool-btn">添加 Tool 节点</button>
+            </div>
+          </div>
           <form id="wf-add-edge" class="wf-add-edge" autocomplete="off">
             <span class="label">有向边</span>
             <div class="wf-edge-picks">

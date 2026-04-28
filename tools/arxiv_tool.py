@@ -2,9 +2,14 @@
 ArxivSearchTool：调用 arXiv API 进行学术文献检索（可运行）。
 这是框架中第一个完整实现的工具，验证 BaseTool 接口的正确性与可用性。
 """
-from typing import List, Optional
+from __future__ import annotations
 
-import arxiv
+from typing import Any, List, Optional
+
+try:
+    import arxiv
+except ImportError:  # 允许在未安装 arxiv 时仍能 import 本模块（如 Web 工具列表）
+    arxiv = None  # type: ignore[misc, assignment]
 
 from tools.base_tool import BaseTool
 from core.message import ToolResult
@@ -39,10 +44,9 @@ class ArxivSearchTool(BaseTool):
             }
         )
         self._max_results = max_results if max_results is not None else settings.arxiv_max_results
-        self._client = arxiv.Client()
+        self._client = arxiv.Client() if arxiv is not None else None
 
-
-    def _format_results(self, results: List[arxiv.Result]) -> str:
+    def _format_results(self, results: List[Any]) -> str:
         """将 arXiv 检索结果格式化为可读的文本字符串。"""
         if not results:
             raise RuntimeError("未找到相关论文。")
@@ -80,6 +84,13 @@ class ArxivSearchTool(BaseTool):
             失败时 success=False 且 error 字段包含错误信息。
         """
         logger.info(f"arXiv 检索启动 | 查询: {query!r} | 最大结果数: {self._max_results}")
+        if arxiv is None or self._client is None:
+            return ToolResult(
+                success=False,
+                output="",
+                error="未安装 arxiv 包，请执行: pip install arxiv",
+                metadata={"query": query},
+            )
         try:
             search = arxiv.Search(
                 query=query,
