@@ -45,14 +45,7 @@ python -m ui.web.server
 
 **启动后打开浏览器：** 默认尝试**系统默认浏览器**（WSL 常见为调 Windows 侧打开，见 `ui/web/browser_open.py`）。可设置 `TEX_AGENT_NO_OPEN_BROWSER=1` 不自动打开；`TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1` 在打开系统浏览器后**再**尝试 Simple Browser。详见 `ui/web/ide_launch.py` 与 `scripts/start_texagent_web.py` 文头说明。
 
-### VS Code / Cursor 里看到聊天界面
 
-- **推荐（装本仓库扩展）**：命令面板 **「TeX Agent: 单脚本启动 Web 并在本窗口 Simple Browser 打开」** = 终端跑 `scripts/start_texagent_web.py --no-browser` + 约 2 秒后 **同一窗口** 打开 Simple Browser（`http://127.0.0.1:8765/`）。
-- **仅开页（服务已起）**：**Ctrl+Alt+T** / 状态栏 **「TeX Agent 聊天」** / 任务 **「TeX Agent: 仅 Simple Browser 打开」**。
-- **免装扩展**：**Ctrl+Shift+B** 默认「构建」= 单脚本起服务（`--no-browser`）；再起第二项任务或浏览器手开 `http://127.0.0.1:8765/`。任务见 `.vscode/tasks.json`。
-- **可选**：侧栏活动栏 **TeX Agent**（iframe 嵌同一地址）；`vscode-extension` 可 `vsce package` 安装。调试：`.vscode/launch.json` → **Run Extension: TeX Agent Chat**。装扩展后**推荐**用 `--no-browser` 起服务，由扩展或快捷键打开，避免 WSL/无 Linux 浏览器时的无效 `xdg-open` 提示。
-
----
 
 ## 在现有架构基础上进行修改的说明
 
