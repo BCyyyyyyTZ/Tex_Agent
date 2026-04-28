@@ -566,6 +566,7 @@
         g.setAttribute("transform", "translate(" + w.x + "," + w.y + ")");
         var nodeType = (w.n && w.n.node_type) || "agent";
         var nidStr = (w.n && w.n.node_id) || "?";
+        g.setAttribute("data-wf-node-id", nidStr);
 
         t1 = document.createElementNS(NS, "rect");
         t1.setAttribute("width", w.w);
@@ -916,6 +917,28 @@
       modeSel.addEventListener("change", refreshWorkflowCanvas, false);
     }
   }
+
+  /** 高亮当前执行批次对应的节点（与 /api/chat NDJSON 的 exec_nodes 配合） */
+  function setTexAgentWorkflowActiveNodes(nodeIds) {
+    var prev = document.getElementById("wf-preview");
+    if (!prev) return;
+    var svg = prev.querySelector("svg");
+    if (!svg) return;
+    var want = {};
+    if (nodeIds && nodeIds.length) {
+      nodeIds.forEach(function (id) {
+        if (id == null) return;
+        var s = String(id).trim();
+        if (s) want[s] = true;
+      });
+    }
+    svg.querySelectorAll("[data-wf-node-id]").forEach(function (el) {
+      var id = el.getAttribute("data-wf-node-id");
+      if (id && want[id]) el.classList.add("wf-node-exec-active");
+      else el.classList.remove("wf-node-exec-active");
+    });
+  }
+  window.setTexAgentWorkflowActiveNodes = setTexAgentWorkflowActiveNodes;
 
   /** plan 模式聊天返回的运行时图（供 app.js 调用） */
   function applyPlanGraphPreview(graph) {

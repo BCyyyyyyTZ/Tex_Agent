@@ -184,8 +184,8 @@
             payload.active_checklists = sel.active_checklists;
           }
         }
-        if (modeVal === "plan") {
-          payload.stream_plan = true;
+        if (modeVal === "plan" || modeVal === "task") {
+          payload.stream = true;
         }
         const res = await fetch(CHAT_URL, {
           method: "POST",
@@ -200,7 +200,7 @@
           /* empty */
         }
         var useNdjson =
-          modeVal === "plan" &&
+          (modeVal === "plan" || modeVal === "task") &&
           res.ok &&
           (ct.indexOf("ndjson") >= 0 || ct.indexOf("x-ndjson") >= 0);
 
@@ -236,9 +236,26 @@
                   contentEl.innerHTML =
                     "<p>规划已完成，正在执行工作流…</p>";
                 }
+              } else if (obj.type === "workflow_graph" && obj.workflow_graph) {
+                if (typeof window.applyTexAgentPlanGraph === "function") {
+                  window.applyTexAgentPlanGraph(obj.workflow_graph);
+                }
+                if (contentEl) {
+                  contentEl.innerHTML = "<p>正在执行任务…</p>";
+                }
               } else if (obj.type === "error" && obj.detail != null) {
+                if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
+                  window.setTexAgentWorkflowActiveNodes([]);
+                }
                 finalErr = String(obj.detail);
+              } else if (obj.type === "exec_nodes" && obj.node_ids) {
+                if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
+                  window.setTexAgentWorkflowActiveNodes(obj.node_ids);
+                }
               } else if (obj.type === "result") {
+                if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
+                  window.setTexAgentWorkflowActiveNodes([]);
+                }
                 finalReply = obj.reply != null ? String(obj.reply) : "";
                 if (obj.error != null && obj.error !== "") {
                   finalErr = typeof obj.error === "string" ? obj.error : JSON.stringify(obj.error);
@@ -291,6 +308,9 @@
           }
         }
       } catch (err) {
+        if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
+          window.setTexAgentWorkflowActiveNodes([]);
+        }
         if (err && err.name === "AbortError") {
           if (contentEl) {
             contentEl.innerHTML = '<div class="error-banner">请求超时，请重试或缩短任务/换用本地终端。</div>';

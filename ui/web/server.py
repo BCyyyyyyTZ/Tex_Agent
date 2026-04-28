@@ -11,7 +11,9 @@ from __future__ import annotations
 import copy
 import json
 import os
+import queue
 import re
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from collections import deque
@@ -290,9 +292,16 @@ class ChatRequest(BaseModel):
     active_checklists: Optional[List[str]] = Field(
         default=None, description="storage/checklists 中已勾选文件名"
     )
+    stream: bool = Field(
+        default=False,
+        description=(
+            "为 true 时以 NDJSON 流式返回：plan 先发 plan_graph；"
+            "task 先发 workflow_graph；二者均推送 exec_nodes 与 result"
+        ),
+    )
     stream_plan: bool = Field(
         default=False,
-        description="plan 模式下为 true 时以 NDJSON 流式返回：先 plan_graph，再 result",
+        description="兼容旧字段：与 stream 任一为 true 则启用流式",
     )
 
 
@@ -301,6 +310,80 @@ class WorkflowDraftIn(BaseModel):
 
     nodes: List[Dict[str, Any]] = Field(default_factory=list)
     edges: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _registry_workflow_draft_sync(name: str) -> WorkflowDraftIn:
+    """从注册表加载工作流 nodes/edges（与 ``GET /api/workflow/graph`` 一致）。"""
+    from workflow.workflow_parser import YAMLWorkflowParser
+    from workflow.workflow_registry import WorkflowRegistry
+
+    reg = WorkflowRegistry()
+    names = reg.list_workflows()
+    if name not in names:
+        raise ValueError(
+            f"未知工作流: {name!r}，可用: {', '.join(names[:12])}…"
+        )
+    cfg_path = reg.get_config_path(name)
+    parser = YAMLWorkflowParser()
+    config = parser.load_config(str(cfg_path))
+    raw_nodes = config.get("nodes") or []
+    raw_edges = config.get("edges") or []
+    if not isinstance(raw_nodes, list):
+        raw_nodes = []
+    if not isinstance(raw_edges, list):
+        raw_edges = []
+    nodes: List[Dict[str, Any]] = []
+    for item in raw_nodes:
+        if isinstance(item, dict):
+            nodes.append(dict(item))
+    edges_out: List[Dict[str, Any]] = []
+    for e in raw_edges:
+        if not isinstance(e, dict):
+            continue
+        a = e.get("from_node", e.get("from"))
+        b = e.get("to_node", e.get("to"))
+        if a is None or b is None:
+            continue
+        edges_out.append(
+            {
+                "from_node": str(a),
+                "to_node": str(b),
+                "condition": e.get("condition"),
+            }
+        )
+    return WorkflowDraftIn(nodes=nodes, edges=edges_out)
+
+
+def _workflow_stream_graph_payload(
+    cli: TeXAgentWebUI, workflow_name: Optional[str]
+) -> Dict[str, Any]:
+    """Task 流式首包：与当前执行所用工作流一致的图示 JSON。"""
+    wn = workflow_name or cli.DEFAULT_WORKFLOW
+    if wn == "__web__":
+        wf = cli.web_workflow or {}
+        if not wf.get("nodes"):
+            raise ValueError(
+                "自定义工作流没有节点，请在左侧添加并「保存到服务器」"
+            )
+        nodes = [dict(n) for n in (wf.get("nodes") or []) if isinstance(n, dict)]
+        edges_out: List[Dict[str, Any]] = []
+        for e in wf.get("edges") or []:
+            if not isinstance(e, dict):
+                continue
+            a = e.get("from_node", e.get("from"))
+            b = e.get("to_node", e.get("to"))
+            if a is None or b is None:
+                continue
+            edges_out.append(
+                {
+                    "from_node": str(a),
+                    "to_node": str(b),
+                    "condition": e.get("condition"),
+                }
+            )
+        return {"nodes": nodes, "edges": edges_out}
+    draft = _registry_workflow_draft_sync(wn)
+    return {"nodes": list(draft.nodes), "edges": list(draft.edges)}
 
 
 class WorkflowRegistryOut(BaseModel):
@@ -565,46 +648,10 @@ def create_app() -> FastAPI:
     async def get_workflow_graph(name: str = Query(..., description="注册表中的工作流名称，如 default")) -> WorkflowDraftIn:
         """返回注册表工作流的 nodes/edges，供前端只读图示（与 plan/task 模式无关）。"""
 
-        def _load() -> WorkflowDraftIn:
-            from workflow.workflow_parser import YAMLWorkflowParser
-            from workflow.workflow_registry import WorkflowRegistry
-
-            reg = WorkflowRegistry()
-            names = reg.list_workflows()
-            if name not in names:
-                raise ValueError(f"未知工作流: {name!r}，可用: {', '.join(names[:12])}…")
-            cfg_path = reg.get_config_path(name)
-            parser = YAMLWorkflowParser()
-            config = parser.load_config(str(cfg_path))
-            raw_nodes = config.get("nodes") or []
-            raw_edges = config.get("edges") or []
-            if not isinstance(raw_nodes, list):
-                raw_nodes = []
-            if not isinstance(raw_edges, list):
-                raw_edges = []
-            nodes: List[Dict[str, Any]] = []
-            for item in raw_nodes:
-                if isinstance(item, dict):
-                    nodes.append(dict(item))
-            edges_out: List[Dict[str, Any]] = []
-            for e in raw_edges:
-                if not isinstance(e, dict):
-                    continue
-                a = e.get("from_node", e.get("from"))
-                b = e.get("to_node", e.get("to"))
-                if a is None or b is None:
-                    continue
-                edges_out.append(
-                    {
-                        "from_node": str(a),
-                        "to_node": str(b),
-                        "condition": e.get("condition"),
-                    }
-                )
-            return WorkflowDraftIn(nodes=nodes, edges=edges_out)
-
         try:
-            return await anyio.to_thread.run_sync(_load)
+            return await anyio.to_thread.run_sync(
+                lambda: _registry_workflow_draft_sync(name)
+            )
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         except ValueError as e:
@@ -745,7 +792,9 @@ def create_app() -> FastAPI:
             body.message.strip(), body
         )
 
-        if body.mode == "plan" and body.stream_plan:
+        use_stream = body.stream or body.stream_plan
+
+        if body.mode == "plan" and use_stream:
 
             async def ndjson_plan_stream() -> AsyncIterator[bytes]:
                 def _line(obj: Dict[str, Any]) -> bytes:
@@ -772,21 +821,51 @@ def create_app() -> FastAPI:
 
                 yield _line({"type": "plan_graph", "plan_graph": plan_graph})
 
-                try:
-                    result = await anyio.to_thread.run_sync(
-                        lambda: cli._execute_with_app(
+                out_q: queue.Queue = queue.Queue()
+
+                def _run_plan_execute() -> None:
+                    def _emit_batch(node_ids: List[str]) -> None:
+                        out_q.put(("exec", list(node_ids)))
+
+                    try:
+                        res = cli._execute_with_app(
                             user_text,
                             app,
                             "plan_dynamic",
                             use_loading=False,
+                            on_graph_progress=_emit_batch,
                         )
-                    )
-                except Exception as e:  # noqa: BLE001
+                        out_q.put(("done", res))
+                    except Exception as ex:  # noqa: BLE001
+                        out_q.put(("err", ex))
+
+                threading.Thread(target=_run_plan_execute, daemon=True).start()
+                result: Optional[Dict[str, Any]] = None
+                while True:
+                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
+                    if kind == "exec":
+                        yield _line({"type": "exec_nodes", "node_ids": payload})
+                    elif kind == "done":
+                        result = payload
+                        break
+                    elif kind == "err":
+                        yield _line(
+                            {
+                                "type": "result",
+                                "reply": "",
+                                "error": str(payload),
+                            }
+                        )
+                        return
+                    else:
+                        break
+
+                if not isinstance(result, dict):
                     yield _line(
                         {
                             "type": "result",
                             "reply": "",
-                            "error": str(e),
+                            "error": "执行未返回有效结果",
                         }
                     )
                     return
@@ -809,6 +888,114 @@ def create_app() -> FastAPI:
 
             return StreamingResponse(
                 ndjson_plan_stream(),
+                media_type="application/x-ndjson",
+            )
+
+        if body.mode == "task" and use_stream:
+
+            async def ndjson_task_stream() -> AsyncIterator[bytes]:
+                def _line(obj: Dict[str, Any]) -> bytes:
+                    return (
+                        json.dumps(obj, ensure_ascii=False) + "\n"
+                    ).encode("utf-8")
+
+                workflow_label = body.workflow or cli.DEFAULT_WORKFLOW
+
+                try:
+                    graph_payload = _workflow_stream_graph_payload(
+                        cli, body.workflow
+                    )
+                except ValueError as e:
+                    yield _line({"type": "error", "detail": str(e)})
+                    return
+                except Exception as e:  # noqa: BLE001
+                    yield _line({"type": "error", "detail": str(e)})
+                    return
+
+                try:
+                    app = await anyio.to_thread.run_sync(
+                        lambda: cli._build_app_for_workflow(body.workflow)
+                    )
+                except Exception as e:  # noqa: BLE001
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": str(e),
+                        }
+                    )
+                    return
+
+                yield _line(
+                    {
+                        "type": "workflow_graph",
+                        "workflow_graph": graph_payload,
+                    }
+                )
+
+                out_q: queue.Queue = queue.Queue()
+
+                def _run_task_execute() -> None:
+                    def _emit_batch(node_ids: List[str]) -> None:
+                        out_q.put(("exec", list(node_ids)))
+
+                    try:
+                        res = cli._execute_with_app(
+                            user_text,
+                            app,
+                            workflow_label,
+                            use_loading=False,
+                            on_graph_progress=_emit_batch,
+                        )
+                        out_q.put(("done", res))
+                    except Exception as ex:  # noqa: BLE001
+                        out_q.put(("err", ex))
+
+                threading.Thread(
+                    target=_run_task_execute, daemon=True
+                ).start()
+                result: Optional[Dict[str, Any]] = None
+                while True:
+                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
+                    if kind == "exec":
+                        yield _line({"type": "exec_nodes", "node_ids": payload})
+                    elif kind == "done":
+                        result = payload
+                        break
+                    elif kind == "err":
+                        yield _line(
+                            {
+                                "type": "result",
+                                "reply": "",
+                                "error": str(payload),
+                            }
+                        )
+                        return
+                    else:
+                        break
+
+                if not isinstance(result, dict):
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": "执行未返回有效结果",
+                        }
+                    )
+                    return
+
+                err = result.get("error")
+                text = _format_reply_from_result(result)
+                yield _line(
+                    {
+                        "type": "result",
+                        "reply": text,
+                        "error": str(err) if err else None,
+                    }
+                )
+
+            return StreamingResponse(
+                ndjson_task_stream(),
                 media_type="application/x-ndjson",
             )
 

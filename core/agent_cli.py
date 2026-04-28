@@ -3,7 +3,7 @@
 TeX Agent CLI 核心类
 """
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from utils.logger import get_logger
@@ -186,10 +186,21 @@ class TeXAgentCLI:
                 logger.warning("会话记忆落盘失败: %s", e)
 
     def _execute_with_app(
-        self, user_input: str, app: Any, workflow_label: str, *, use_loading: bool = True
+        self,
+        user_input: str,
+        app: Any,
+        workflow_label: str,
+        *,
+        use_loading: bool = True,
+        on_graph_progress: Optional[Callable[[List[str]], None]] = None,
     ) -> dict:
         """
         统一执行器：给定 app 后执行任务，负责状态装配、invoke 与上下文回写。
+
+        on_graph_progress：若提供且底层图支持 .stream，则在每个 updates 批次回调
+        本批刚写入的节点 node_id 列表（与 LangGraph stream_mode=updates 一致；
+        节点耗时的推理过程中可能无回调，直至该节点返回）。
+        此时会忽略 use_loading 的旋转条（与 Web 流式进度二选一）。
         """
         # 从当前分支 Context 加载历史消息
         history_messages = []
@@ -224,10 +235,61 @@ class TeXAgentCLI:
         }
         logger.info(f"本轮节点 I/O 将写入: {run_output_dir}")
 
-        def _invoke():
+        def _graph_node_keys_from_update(u: Any) -> List[str]:
+            if not isinstance(u, dict):
+                return []
+            return [
+                str(k)
+                for k in u
+                if isinstance(k, str) and not k.startswith("__")
+            ]
+
+        def _invoke() -> dict:
             return app.invoke(initial_state)
 
-        if use_loading:
+        def _invoke_streaming() -> dict:
+            stream_fn = getattr(app, "stream", None)
+            if stream_fn is None or on_graph_progress is None:
+                return _invoke()
+            result: Optional[dict] = None
+            try:
+                for event in stream_fn(
+                    initial_state, stream_mode=["updates", "values"]
+                ):
+                    pairs = []
+                    if isinstance(event, tuple) and len(event) == 2:
+                        pairs = [(event[0], event[1])]
+                    elif isinstance(event, dict):
+                        pairs = list(event.items())
+                    for mode, payload in pairs:
+                        if mode == "values" and isinstance(payload, dict):
+                            result = payload
+                        elif (
+                            mode == "updates"
+                            and isinstance(payload, dict)
+                            and on_graph_progress
+                        ):
+                            ids = _graph_node_keys_from_update(payload)
+                            if ids:
+                                on_graph_progress(ids)
+            except TypeError:
+                try:
+                    for payload in stream_fn(initial_state, stream_mode="values"):
+                        if isinstance(payload, dict):
+                            result = payload
+                except Exception as ex:  # noqa: BLE001
+                    logger.warning("graph.stream(values) 不可用，回退 invoke: %s", ex)
+                    return _invoke()
+            except Exception as ex:  # noqa: BLE001
+                logger.warning("graph.stream 失败，回退 invoke: %s", ex)
+                return _invoke()
+            if not isinstance(result, dict):
+                return _invoke()
+            return result
+
+        if on_graph_progress is not None:
+            result = _invoke_streaming()
+        elif use_loading:
             result = run_with_loading(_invoke, message="🤖 LLM 生成中", style="braille")
         else:
             result = _invoke()

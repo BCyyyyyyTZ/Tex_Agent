@@ -389,6 +389,25 @@ body {
   stroke: #a5b4fc;
   stroke-width: 3;
 }
+@keyframes wf-node-exec-pulse {
+  0%,
+  100% {
+    stroke: #58a6ff;
+    filter: drop-shadow(0 0 4px rgba(88, 166, 255, 0.45));
+  }
+  50% {
+    stroke: #93c5fd;
+    filter: drop-shadow(0 0 10px rgba(147, 197, 253, 0.5));
+  }
+}
+.wf-node-exec-active .wf-node-rect {
+  stroke: #58a6ff;
+  stroke-width: 2.6;
+  animation: wf-node-exec-pulse 1.1s ease-in-out infinite;
+}
+.wf-node-exec-active .wf-node-rect--readonly {
+  cursor: default;
+}
 .wf-node-txt {
   font-size: 9px;
   font-family: var(--mono);
