@@ -55,7 +55,8 @@ python -m ui.web.server
 
 # 7. 构造输出
 "pdf_path": "./storage/pdfs/paper1.pdf",
-"checklist_path": "./storage/checklists/thesis-checklists.md"
+"checklist_path": "./storage/checklists/thesis-checklists.md",
+"output_path": "./storage/documents/paper1.pdf"
 
 # 8. 如果正常就可以看到输出了
 ```
