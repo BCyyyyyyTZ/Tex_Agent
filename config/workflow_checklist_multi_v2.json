@@ -172,15 +172,31 @@
             }
         },
         {
+            "node_id": "offer_download",
+            "node_type": "tool",
+            "tool_name": "offer_artifact_download",
+            "config": {
+                "tool_input": {
+                    "file_path": "${metadata.pdf_annotator.metadata.tool_metadata.output_path}"
+                },
+                "depends_on": [
+                    "pdf_annotator",
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
             "node_id": "final_report",
             "node_type": "agent",
             "agent_name": "SimpleAgent",
             "config": {
                 "system_prompt": "你是审查结果总结助手。",
-                "subtask": "根据 annotation_formatter 与 pdf_annotator 的结果，给用户一段简明总结：总问题数、主要问题类型、已生成的带标注 PDF 路径。不要再做 PDF 理解。",
+                "subtask": "根据 annotation_formatter、pdf_annotator 与 offer_download 的结果，给用户一段简明中文总结：总问题数、主要问题类型、带标注 PDF 的保存路径；并提醒用户可在对话中的「附件下载」链接点击，将 PDF 保存到本机。不要再做 PDF 理解。",
                 "depends_on": [
                     "annotation_formatter",
                     "pdf_annotator",
+                    "offer_download",
                     "register_inputs"
                 ],
                 "temperature": 0.15,
@@ -247,6 +263,11 @@
         },
         {
             "from_node": "pdf_annotator",
+            "to_node": "offer_download",
+            "condition": null
+        },
+        {
+            "from_node": "offer_download",
             "to_node": "final_report",
             "condition": null
         }

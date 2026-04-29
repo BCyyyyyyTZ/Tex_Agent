@@ -26,3 +26,40 @@
 + RAG库查询封装成tool
 + 在文档解析的工具中，实现了一个基础的大文件拼接的旁路（效果还是不太好，如果有需求需要后续优化）
 
+#### [2026-04-30](./2026-04-30.md)
+
+主要更新了支持文档上传和文档结果下载的工作流，具体实现思路见文档
+
+这里说一下如何运行：
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/BCyyyyyyTZ/Tex_Agent.git
+cd TeX_Agent
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 配置环境变量
+cp .env.example .env
+
+# 4. 准备一个完全英文路径+英文名称的pdf路径（也许解读中文路径有bug，但我没来得及修，也许修也不会特别麻烦？）
+
+# 5. 运行web-ui
+python -m ui.web.server
+
+# 6. 选择带multi的三个工作流之一（v1、v2、v3）
+#    v1 6个检查节点并行
+#    v2 6个检查节点串行
+#    v3 只保留一个检查节点（干六个节点的活），理论上速度最快、最稳定
+
+# 7. 构造输出
+"pdf_path": "./storage/pdfs/paper1.pdf",
+"checklist_path": "./storage/checklists/thesis-checklists.md"
+
+# 8. 如果正常就可以看到输出了
+```
+
+注：
+1. 目前最好构造输入的路径是全英文和数字的（中文路径出过bug但没有特别多的进行测试）
+2. Gemini API可能连接不够稳定，并发执行大概率会有的连接失败，串行执行也有小概率失败某一个节点 —— 一个节点失败理论上不影响正常输出标注pdf，但会在UI显示有错误

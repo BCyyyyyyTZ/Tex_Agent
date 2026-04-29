@@ -33,7 +33,7 @@
   const FETCH_MS = 30 * 60 * 1000;
 
   var PURIFY = {
-    ADD_ATTR: ["class", "id", "target", "rel", "open"],
+    ADD_ATTR: ["class", "id", "target", "rel", "open", "download"],
     ADD_TAGS: ["details", "summary", "span"],
   };
 

@@ -73,14 +73,16 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
     3) 退化为最后一条含内容的 assistant 消息（极少情况下 output / 元数据未写）
     """
     err = result.get("error")
+    meta: Dict[str, Any] = result.get("metadata") or {}
+
     if err:
-        return f"**执行出错**\n\n```\n{err}\n```"
+        body = f"**执行出错**\n\n```\n{err}\n```"
+        return _append_artifact_download_links_to_reply(body, meta)
 
     out = str(result.get("output") or "").strip()
     if out:
-        return out
+        return _append_artifact_download_links_to_reply(out, meta)
 
-    meta: Dict[str, Any] = result.get("metadata") or {}
     order = meta.get("__execution_order__")
     if isinstance(order, list) and order:
         last_id = str(order[-1])
@@ -89,7 +91,7 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             if isinstance(node_data, dict):
                 r = str(node_data.get("result") or "").strip()
                 if r:
-                    return r
+                    return _append_artifact_download_links_to_reply(r, meta)
 
     messages: List[Any] = result.get("messages") or []
     for m in reversed(messages):
@@ -99,9 +101,51 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             continue
         content = str(m.get("content") or "").strip()
         if content:
-            return content
+            return _append_artifact_download_links_to_reply(content, meta)
 
-    return "（本轮无有效输出。）"
+    return _append_artifact_download_links_to_reply("（本轮无有效输出。）", meta)
+
+
+def _collect_artifact_download_links(metadata: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """从工作流 metadata 各节点中收集 offer_artifact_download 注册的下载项。"""
+    out: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+    meta = metadata or {}
+    for k, v in meta.items():
+        if str(k).startswith("__") or not isinstance(v, dict):
+            continue
+        inner = v.get("metadata")
+        if not isinstance(inner, dict):
+            continue
+        tm = inner.get("tool_metadata")
+        if not isinstance(tm, dict):
+            continue
+        tok = tm.get("download_token")
+        if not tok:
+            continue
+        ts = str(tok)
+        if ts in seen:
+            continue
+        seen.add(ts)
+        rel = str(tm.get("relative_url") or f"/api/download/artifact?token={ts}")
+        fn = str(tm.get("download_filename") or "download")
+        out.append((fn, rel))
+    return out
+
+
+def _append_artifact_download_links_to_reply(text: str, metadata: Dict[str, Any]) -> str:
+    """在终局回复末尾附加 Markdown 下载列表（与工具输出互补，防止 LLM 省略链接）。"""
+    links = _collect_artifact_download_links(metadata)
+    if not links:
+        return text or ""
+    block_lines = ["", "---", "**附件下载**", ""]
+    for fn, url in links:
+        block_lines.append(f"* [{fn}]({url})")
+    block = "\n".join(block_lines)
+    base = (text or "").rstrip()
+    if not base:
+        return block.strip()
+    return base + block
 
 
 class TeXAgentWebUI(TeXAgentCLI):
@@ -783,6 +827,32 @@ def create_app() -> FastAPI:
             p,
             media_type=file_storage.media_type_for_path(p),
             filename=p.name,
+        )
+
+    @app.get("/api/download/artifact")
+    async def download_artifact_ep(
+        token: str = Query(..., min_length=8, description="offer_artifact_download 工具返回的 download_token"),
+    ) -> FileResponse:
+        """工作流生成的文件经令牌登记后，供浏览器本地下载。"""
+
+        def _resolve_path() -> Optional[Path]:
+            from utils.web_artifact_registry import get_file_path
+
+            raw = get_file_path(token)
+            if not raw:
+                return None
+            return Path(raw)
+
+        p = await anyio.to_thread.run_sync(_resolve_path)
+        if p is None:
+            raise HTTPException(status_code=404, detail="下载链接无效或已过期")
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="文件已不存在")
+        return FileResponse(
+            str(p),
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
+            content_disposition_type="attachment",
         )
 
     @app.post("/api/chat")
