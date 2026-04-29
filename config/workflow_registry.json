@@ -59,6 +59,14 @@
     "checklist_annotate_v3": {
       "type": "file",
       "path": "config/workflow_checklist_annotate_v3.json"
+    },
+    "checklist_multi_v1": {
+      "type": "file",
+      "path": "config/workflow_checklist_multi_v1.json"
+    },
+    "checklist_multi_v2": {
+      "type": "file",
+      "path": "config/workflow_checklist_multi_v2.json"
     }
   }
 }

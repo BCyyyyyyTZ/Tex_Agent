@@ -1,0 +1,254 @@
+{
+    "_comment": "checklist 多路并行审查 v1（无 docling，直接 Gemini PDF 理解）",
+    "nodes": [
+        {
+            "node_id": "register_inputs",
+            "node_type": "tool",
+            "tool_name": "register_inputs",
+            "config": {
+                "tool_input": "${input}",
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "load_checklist",
+            "node_type": "tool",
+            "tool_name": "file_loading",
+            "config": {
+                "tool_input": "${metadata.register_inputs.metadata.tool_metadata.checklist_abs_path}",
+                "depends_on": [
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "gemini_upload_pdf",
+            "node_type": "tool",
+            "tool_name": "gemini_upload_pdf",
+            "config": {
+                "tool_input": "${metadata.register_inputs.metadata.tool_metadata.pdf_abs_path}",
+                "depends_on": [
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "abstract_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【摘要与导言】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 文件以及 Checklist 全文，专门检查摘要与导言的问题。要求：1. 精准定位：'text_quote' 必须一字不差地摘录 PDF 中的错误原句（不要包含换行符），以便工具高亮定位。2. 依据明确：'comment' 必须全中文输出，且必须直接引用或说明违背了 Checklist 中的哪一条具体要求。3. 编码规范：直接输出中文字符，严禁使用 \\uXXXX 形式的 Unicode 转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "structure_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【结构与逻辑】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 文件以及 Checklist 全文，专门检查章节结构、层级与逻辑衔接问题。要求：1. 精准定位：'text_quote' 必须一字不差地摘录 PDF 中的问题原句或标题。2. 依据明确：'comment' 必须全中文输出，明确指出违背了 Checklist 中的哪一条结构要求。3. 编码规范：直接输出汉字，严禁使用 \\uXXXX 形式转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "abstract_checker",
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "language_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【语言规范】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 文件以及 Checklist 全文，检查术语一致性、表达清晰度及语法问题。要求：1. 精准定位：'text_quote' 必须一字不差地摘录 PDF 中的错误原句。2. 依据明确：'comment' 必须全中文输出，明确指出违背了 Checklist 的哪一条语言规范。3. 编码规范：直接输出汉字，严禁使用 \\uXXXX 转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "structure_checker",
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "content_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【内容完整性】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 文件以及 Checklist 全文，专门检查方法、实验、数据或定义是否缺失与矛盾。要求：1. 精准定位：'text_quote' 必须一字不差地摘录涉及内容缺陷的 PDF 原句。2. 依据明确：'comment' 必须全中文输出，明确说明违背了 Checklist 的哪一项内容要求。3. 编码规范：直接输出汉字，严禁 Unicode 转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "language_checker",
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "figure_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【图表与引用】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 文件及 Checklist 全文，检查图表编号、图文一致性与文献引用问题。要求：1. 精准定位：'text_quote' 必须一字不差地摘录问题图表标题或错误引用处原句。2. 依据明确：'comment' 必须全中文输出，并明确指出违背了 Checklist 的哪一条图表/引用规范。3. 编码规范：直接输出汉字，严禁 Unicode 转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "content_checker",
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "layout_checker",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文【排版规范】审查专家。你的任务是严格依据用户提供的 Checklist 标准，对上传的 PDF 进行审查，精准定位问题并给出有理有据的修改建议。",
+                "subtask": "请仔细阅读已上传的 PDF 及 Checklist 全文，专门检查公式、排版缩进、标题格式等问题。要求：1. 精准定位：'text_quote' 必须一字不差摘录排版错误处的原句或公式标识。2. 依据明确：'comment' 必须全中文输出，写明违背了 Checklist 的哪一条排版要求。3. 编码规范：直接输出汉字，严禁 Unicode 转义！输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。无问题则 result=\"[]\"。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "figure_checker",
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "annotation_formatter",
+            "node_type": "agent",
+            "agent_name": "SimpleAgent",
+            "config": {
+                "system_prompt": "你是论文审查结果的数据清洗与 JSON 格式化专家。",
+                "subtask": "请合并前面六个维度的审查 result。要求：1. 数据完整：去重但绝对禁止遗漏，保留所有独立的检查结果，按 severity (high > medium > low) 排序。2. 字段映射：将提取的 'text_quote' 字段值无损映射为 'text' 字段。3. 净化数据：所有的 'comment' 必须保持纯中文，自动修复乱码，严禁在输出中包含任何 \\uXXXX 转义符，确保批注内容清晰可读。输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。注意：result 必须是合法的 JSON 字符串供下游直接解析，内部双引号必须正确转义为 \\\"。",
+                "depends_on": [
+                    "abstract_checker",
+                    "structure_checker",
+                    "language_checker",
+                    "content_checker",
+                    "figure_checker",
+                    "layout_checker"
+                ],
+                "temperature": 0.05,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "pdf_annotator",
+            "node_type": "tool",
+            "tool_name": "pdf_comment",
+            "config": {
+                "tool_input": {
+                    "pdf_path": "${metadata.register_inputs.metadata.tool_metadata.pdf_abs_path}",
+                    "output_path": "${metadata.register_inputs.metadata.tool_metadata.output_pdf_abs_path}",
+                    "question_list": "${metadata.annotation_formatter.result}"
+                },
+                "depends_on": [
+                    "annotation_formatter",
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "final_report",
+            "node_type": "agent",
+            "agent_name": "SimpleAgent",
+            "config": {
+                "system_prompt": "你是审查结果总结助手。",
+                "subtask": "根据 annotation_formatter 与 pdf_annotator 的结果，给用户一段简明总结：总问题数、主要问题类型、已生成的带标注 PDF 路径。不要再做 PDF 理解。",
+                "depends_on": [
+                    "annotation_formatter",
+                    "pdf_annotator",
+                    "register_inputs"
+                ],
+                "temperature": 0.15,
+                "history_mode": "minimal",
+                "single_turn_contract_mode": "always"
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from_node": "register_inputs",
+            "to_node": "load_checklist",
+            "condition": null
+        },
+        {
+            "from_node": "register_inputs",
+            "to_node": "gemini_upload_pdf",
+            "condition": null
+        },
+        {
+            "from_node": "load_checklist",
+            "to_node": "abstract_checker",
+            "condition": null
+        },
+        {
+            "from_node": "gemini_upload_pdf",
+            "to_node": "abstract_checker",
+            "condition": null
+        },
+        {
+            "from_node": "abstract_checker",
+            "to_node": "structure_checker",
+            "condition": null
+        },
+        {
+            "from_node": "structure_checker",
+            "to_node": "language_checker",
+            "condition": null
+        },
+        {
+            "from_node": "language_checker",
+            "to_node": "content_checker",
+            "condition": null
+        },
+        {
+            "from_node": "content_checker",
+            "to_node": "figure_checker",
+            "condition": null
+        },
+        {
+            "from_node": "figure_checker",
+            "to_node": "layout_checker",
+            "condition": null
+        },
+        {
+            "from_node": "layout_checker",
+            "to_node": "annotation_formatter",
+            "condition": null
+        },
+        {
+            "from_node": "annotation_formatter",
+            "to_node": "pdf_annotator",
+            "condition": null
+        },
+        {
+            "from_node": "pdf_annotator",
+            "to_node": "final_report",
+            "condition": null
+        }
+    ]
+}

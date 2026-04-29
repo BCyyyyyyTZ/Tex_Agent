@@ -21,6 +21,8 @@ from tools.rag_retrieve_tool import RAGRetrieveTool
 from tools.ref_checker_tool import RefCheckerTool
 from tools.user_persona_tools import build_user_persona_tools
 from utils.logger import get_logger
+from tools.gemini_upload_pdf_tool import GeminiUploadPdfTool
+from tools.register_inputs_tool import RegisterInputsTool
 
 logger = get_logger(__name__)
 _shared_pm = get_shared_user_persona_memory()
@@ -50,6 +52,8 @@ def _build_base_tools() -> List:
         ("ref_checker", lambda: RefCheckerTool()),
         ("figure_ref_checker", lambda: FigureRefCheckerTool()),
         ("rag_retrieve", lambda: RAGRetrieveTool()),
+        ("register_inputs", lambda: RegisterInputsTool()),
+        ("gemini_upload_pdf", lambda: GeminiUploadPdfTool()),
     ]
     out = []
     for label, factory in specs:

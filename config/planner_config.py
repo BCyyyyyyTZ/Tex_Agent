@@ -150,7 +150,12 @@ COMPLEXITY_COMPLEX_KEYWORDS: List[str] = [
 COMPLEXITY_MEDIUM_KEYWORDS: List[str] = [
     "分析", "比较", "评估", "检索", "推理", "多步", "综合", "归纳",
 ]
-AGENT_TYPE_NAMES: List[str] = ["SimpleAgent", "SimpleAgent_new", "ReActAgent", "PlanAndSolveAgent"]
+AGENT_TYPE_NAMES: List[str] = [
+    "SimpleAgent", "SimpleAgent_new", 
+    "MultiSimpleAgent",
+    "ReActAgent", 
+    "PlanAndSolveAgent"
+]
 
 
 # ------------------------------------------------------------------

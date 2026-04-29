@@ -22,7 +22,6 @@ import re
 import shutil
 import tempfile
 import traceback
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from tools.base_tool import BaseTool
@@ -103,29 +102,236 @@ def _infer_color(comment: str, color_hint: Optional[str] = None) -> Tuple[float,
 # 内部工具函数
 # ---------------------------------------------------------------------------
 
-_ANCHOR_POSITIONS = {
-    "top":    (30, 40),
-    "bottom": (30, -60),    # 相对于页面底部（在 _add_margin_note 中特殊处理）
-    "margin": (-20, 200),   # 页面左侧页边
-    "right":  (1000, 200),  # 页面右侧（大数值，会被 _add_margin_note 修正到页面右边）
-}
+def _has_cjk(s: str) -> bool:
+    if not s:
+        return False
+    return any("\u4e00" <= c <= "\u9fff" for c in s)
 
 
-def _add_margin_note(page, comment: str, anchor: str = "top", idx: int = 0) -> None:
-    """在页面边角/空白处添加文本便签（不含高亮）。"""
-    pw, ph = page.rect.width, page.rect.height
+def _rects_overlap(a: fitz.Rect, b: fitz.Rect) -> bool:
+    return not (a.x1 <= b.x0 or a.x0 >= b.x1 or a.y1 <= b.y0 or a.y0 >= b.y1)
+
+
+def _inflate_rect(r: fitz.Rect, pad: float) -> fitz.Rect:
+    return fitz.Rect(r.x0 - pad, r.y0 - pad, r.x1 + pad, r.y1 + pad)
+
+
+def _clamp_rect_on_page(page: fitz.Page, r: fitz.Rect, margin: float = 6.0) -> fitz.Rect:
+    pr = page.rect
+    x0, y0, x1, y1 = r
+    bw, bh = x1 - x0, y1 - y0
+    bw = min(bw, pr.width - 2 * margin)
+    bh = min(bh, pr.height - 2 * margin)
+    x0 = max(margin, min(x0, pr.width - margin - bw))
+    y0 = max(margin, min(y0, pr.height - margin - bh))
+    return fitz.Rect(x0, y0, x0 + bw, y0 + bh)
+
+
+def _freetext_font_for_body(text: str) -> str:
+    return "china-s" if _has_cjk(text) else "helv"
+
+
+def _margin_column_width(page: fitz.Page) -> float:
+    """正文与纸边之间的窄条宽度（批注只放在此宽度内）。"""
+    pr = page.rect
+    return min(300.0, max(130.0, pr.width * 0.17))
+
+
+def _estimate_freetext_height(text: str, box_w: float, fontsize: float) -> float:
+    if box_w <= 0:
+        return 40.0
+    cjk = _has_cjk(text)
+    char_w = fontsize * (1.02 if cjk else 0.48)
+    cpl = max(5, int(box_w / char_w))
+    lines = 0
+    for block in text.split("\n"):
+        b = block.strip()
+        if not b:
+            lines += 1
+            continue
+        lines += max(1, (len(b) + cpl - 1) // cpl)
+    return max(26.0, lines * fontsize * 1.36 + 10.0)
+
+
+class _MarginLayout:
+    """记录每页已占用的页边批注框，避免互相遮挡。"""
+
+    def __init__(self) -> None:
+        self._occupied: Dict[int, List[fitz.Rect]] = {}
+
+    def _lst(self, page_0: int) -> List[fitz.Rect]:
+        if page_0 not in self._occupied:
+            self._occupied[page_0] = []
+        return self._occupied[page_0]
+
+    def register(self, page_0: int, rect: fitz.Rect, gap: float = 5.0) -> None:
+        self._lst(page_0).append(_inflate_rect(rect, gap))
+
+    def conflicts(self, page_0: int, rect: fitz.Rect) -> bool:
+        ir = _inflate_rect(rect, 2.0)
+        for o in self._lst(page_0):
+            if _rects_overlap(ir, o):
+                return True
+        return False
+
+
+def _hl_avoid_rect(hl: Optional[fitz.Rect]) -> Optional[fitz.Rect]:
+    """与高亮保持间距，批注框不得与此矩形相交。"""
+    if hl is None:
+        return None
+    if (hl.x1 - hl.x0) < 0.5 or (hl.y1 - hl.y0) < 0.5:
+        return None
+    return _inflate_rect(hl, 6.0)
+
+
+def _allocate_margin_freetext_rect(
+    page: fitz.Page,
+    layout: _MarginLayout,
+    page_0: int,
+    body: str,
+    hl_union: Optional[fitz.Rect],
+    preferred_y: float,
+    slot_index: int,
+) -> Tuple[fitz.Rect, float]:
+    """
+    在左或右页边留白处分配 FreeText 矩形，不压高亮、不与已有页边批注重叠。
+    返回 (rect, fontsize)。
+    """
+    pr = page.rect
+    m = 8.0
+    bw = _margin_column_width(page)
+    bw = min(bw, pr.width * 0.22)
+    avoid = _hl_avoid_rect(hl_union)
+
+    center_left = hl_union is not None and hl_union.x0 + hl_union.width * 0.5 < pr.width * 0.48
+    sides = ("right", "left") if center_left else ("left", "right")
+    if slot_index % 2 == 1:
+        sides = (sides[1], sides[0])
+
+    fontsize = 8.6
+    for _fs_round in range(14):
+        bh = min(pr.height - 2 * m, _estimate_freetext_height(body, bw, fontsize))
+        bh = max(bh, 28.0)
+
+        def try_side(side: str) -> Optional[fitz.Rect]:
+            x0 = m if side == "left" else pr.width - m - bw
+
+            def bad(r: fitz.Rect) -> bool:
+                if layout.conflicts(page_0, r):
+                    return True
+                if avoid is not None and _rects_overlap(r, avoid):
+                    return True
+                return False
+
+            y0 = max(m, min(preferred_y, pr.height - m - bh))
+            order: List[float] = [y0]
+            step = 11.0
+            for k in range(1, 100):
+                order.append(min(pr.height - m - bh, y0 + k * step))
+            for k in range(1, 60):
+                yy = y0 - k * step
+                if yy >= m:
+                    order.append(yy)
+
+            seen_y = set()
+            for y in order:
+                y = round(max(m, min(y, pr.height - m - bh)), 2)
+                if y in seen_y:
+                    continue
+                seen_y.add(y)
+                r = fitz.Rect(x0, y, x0 + bw, y + bh)
+                r = _clamp_rect_on_page(page, r, margin=m)
+                if not bad(r):
+                    return r
+            return None
+
+        for side in sides:
+            got = try_side(side)
+            if got is not None:
+                return got, fontsize
+        fontsize -= 0.55
+        if fontsize < 6.0:
+            break
+
+    x0 = m if sides[0] == "left" else pr.width - m - bw
+    y0 = m + (slot_index % 7) * 18.0
+    r = _clamp_rect_on_page(page, fitz.Rect(x0, y0, x0 + bw, min(bh, pr.height - m - y0)), margin=m)
+    return r, max(6.0, fontsize)
+
+
+def _draw_freetext_in_rect(page: fitz.Page, rect: fitz.Rect, body: str, fontsize: float) -> None:
+    """在矩形内写入可见批注（FreeText + china-s；失败则 insert_textbox）。"""
+    if not (body or "").strip():
+        return
+    fontname = _freetext_font_for_body(body)
+    try:
+        annot = page.add_freetext_annot(
+            rect,
+            body,
+            fontsize=fontsize,
+            fontname=fontname,
+            text_color=(0.06, 0.06, 0.06),
+            fill_color=(0.97, 0.97, 0.82),
+            border_width=0.45,
+            align=fitz.TEXT_ALIGN_LEFT,
+        )
+        annot.set_border(width=0.45)
+        annot.update()
+        return
+    except Exception as e:
+        logger.warning("add_freetext_annot 失败，尝试 insert_textbox: %s", e)
+    try:
+        page.draw_rect(rect, color=(0.32, 0.32, 0.32), fill=(0.97, 0.97, 0.82), width=0.4)
+        pad = fitz.Rect(rect.x0 + 2, rect.y0 + 2, rect.x1 - 2, rect.y1 - 2)
+        page.insert_textbox(
+            pad,
+            body,
+            fontname=fontname,
+            fontsize=fontsize,
+            color=(0.06, 0.06, 0.06),
+            align=fitz.TEXT_ALIGN_LEFT,
+        )
+    except Exception as e2:
+        logger.warning("insert_textbox 回退失败: %s", e2)
+
+
+def _add_margin_freetext(
+    page: fitz.Page,
+    layout: _MarginLayout,
+    page_0: int,
+    body: str,
+    hl_union: Optional[fitz.Rect],
+    preferred_y: float,
+    slot_index: int,
+) -> None:
+    if not (body or "").strip():
+        return
+    r, fs = _allocate_margin_freetext_rect(
+        page, layout, page_0, body, hl_union, preferred_y, slot_index
+    )
+    _draw_freetext_in_rect(page, r, body, fs)
+    layout.register(page_0, r)
+
+
+def _add_margin_note(
+    page: fitz.Page,
+    layout: _MarginLayout,
+    page_0: int,
+    comment: str,
+    anchor: str,
+    idx: int,
+) -> None:
+    """无高亮：批注写在页边留白，纵向错开。"""
+    ph = page.rect.height
     if anchor == "bottom":
-        x, y = 30, ph - 60
+        py = max(40.0, ph * 0.62)
     elif anchor == "margin":
-        x, y = 8, min(200 + idx * 25, ph - 30)
+        py = 48.0 + idx * 36.0
     elif anchor == "right":
-        x, y = pw - 30, min(200 + idx * 25, ph - 30)
-    else:  # top
-        x, y = 30, min(40 + idx * 20, ph // 2)
-    pt = fitz.Point(x, y)
-    note = page.add_text_annot(pt, comment, icon="Comment")
-    note.set_info(content=comment)
-    note.update()
+        py = 52.0 + idx * 36.0
+    else:
+        py = 36.0 + idx * 32.0
+    _add_margin_freetext(page, layout, page_0, comment, None, py, idx)
 
 
 def _fuzzy_search(page, target_text: str) -> list:
@@ -273,6 +479,109 @@ class PdfCommentTool(BaseTool):
             }
         )
 
+    # 辅助函数
+    def _coerce_question_list(self, question_list):
+        """
+        兼容：
+        - list[dict]
+        - JSON 字符串（数组或 {"result":[...]} 或 {"result":"[...]"}）
+        - Python 字面量字符串（兜底 ast.literal_eval）
+        并将 text_quote 自动映射到 text。
+        """
+        data = question_list
+
+        def _try_parse_obj(raw):
+            try:
+                return json.loads(raw)
+            except Exception:
+                try:
+                    return ast.literal_eval(raw)
+                except Exception:
+                    return None
+
+        def _clean_comment(c):
+            if c is None:
+                return ""
+            s = str(c).strip()
+            if not s:
+                return ""
+
+            # 整条 comment 被二次 JSON 编码成字符串时，优先 json.loads
+            if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+                try:
+                    dec = json.loads(s)
+                    if isinstance(dec, str):
+                        s = dec.strip()
+                except json.JSONDecodeError:
+                    s = s[1:-1].strip()
+
+            # 仅当尚无 CJK 且含字面量 \\u 转义时再 unicode_escape，避免误伤已是 UTF-8 的中文
+            if "\\u" in s and not _has_cjk(s):
+                try:
+                    s = s.encode("utf-8").decode("unicode_escape")
+                except Exception:
+                    pass
+
+            s = s.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
+            s = s.replace("\x00", "")
+            return s.strip()
+
+        # 1) 首轮解析
+        if isinstance(data, str):
+            raw = data.strip()
+            if not raw:
+                return []
+            parsed = _try_parse_obj(raw)
+            if parsed is None:
+                return []
+            data = parsed
+
+        # 2) 若是 dict，优先取 result 字段
+        if isinstance(data, dict):
+            data = data.get("result", [])
+
+        # 3) result 可能仍是字符串化数组，再解析一次
+        if isinstance(data, str):
+            parsed2 = _try_parse_obj(data.strip())
+            if parsed2 is None:
+                return []
+            data = parsed2
+
+        if not isinstance(data, list):
+            return []
+
+        normalized = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            page_idx = item.get("page_idx")
+            text = item.get("text")
+            if text is None:
+                text = item.get("text_quote")
+            comment = _clean_comment(item.get("comment"))
+
+            if page_idx is None or text is None:
+                continue
+
+            try:
+                page_idx = int(page_idx)
+            except Exception:
+                continue
+
+            text = str(text).strip()
+            if not text and not comment:
+                continue
+
+            normalized.append(
+                {
+                    "page_idx": page_idx,
+                    "text": text,
+                    "comment": comment,
+                }
+            )
+        return normalized
+
     # ------------------------------------------------------------------
     # 公开接口（workflow tool 节点 / 直接调用 均可用）
     # ------------------------------------------------------------------
@@ -280,44 +589,52 @@ class PdfCommentTool(BaseTool):
     def run(
         self,
         pdf_path: str,
-        annotations: Union[str, List[Dict]],
         output_path: Optional[str] = None,
+        question_list=None,
+        author=None,
+        annotations: Union[str, List[Dict]] = None,
     ) -> ToolResult:
         """
         批量高亮 PDF 文本并添加注释。
 
         Args:
             pdf_path:    原始 PDF 路径。
-            annotations: JSON 数组或 Python 列表，每项 {page_idx, text, comment}。
-                         page_idx 从 1 开始。
+            question_list: 与 annotations 二选一或同时提供；字符串/列表，每项含 page_idx、text/text_quote、comment。
+            annotations: 同上；工作流里可只传 question_list，此时仅用 coerce 结果标注。
+            page_idx 从 1 开始。
             output_path: 输出路径，None 表示覆盖原文件。
 
         Returns:
             ToolResult，output 包含成功/失败统计和输出路径。
         """
         logger.info(f"PdfCommentTool 执行 | pdf={pdf_path!r}")
-
-        # 1. 解析 annotations
-        items, parse_err = _parse_annotations(annotations)
-        if parse_err:
+        if question_list is None and annotations is not None:
+            question_list = annotations
+        coerced = self._coerce_question_list(question_list)
+        if not coerced:
             return ToolResult(
                 success=False,
-                output="",
-                error=f"annotations 解析失败: {parse_err}",
-                metadata={"pdf_path": pdf_path},
+                output="处理失败",
+                error="question_list 为空或格式非法，期望为列表或可解析 JSON",
             )
+        items: List[Dict] = []
+        if annotations is not None:
+            parsed, parse_err = _parse_annotations(annotations)
+            if not parse_err and parsed:
+                items = self._coerce_question_list(parsed)
+        if not items:
+            items = coerced
         if not items:
             return ToolResult(
                 success=False,
-                output="",
-                error="annotations 为空列表，无需处理",
+                output="处理失败",
+                error="无法得到有效的标注列表",
                 metadata={"pdf_path": pdf_path},
             )
-
         if not output_path:
             output_path = pdf_path
 
-        # 2. 执行批量注释
+        # 执行批量注释
         return self._batch_annotate(pdf_path, output_path, items)
 
     # ------------------------------------------------------------------
@@ -344,7 +661,7 @@ class PdfCommentTool(BaseTool):
 
             doc = fitz.open(pdf_path)
             total_pages = len(doc)
-            now = datetime.now()
+            layout = _MarginLayout()
             success_count = 0
             errors: List[str] = []
             # page_idx → [comments] for unfound texts
@@ -372,9 +689,9 @@ class PdfCommentTool(BaseTool):
                     color_hint = item.get("color") or item.get("color_hint")
                     hl_color = _infer_color(comment, color_hint)
 
-                    # ── 空文本：直接添加页边便签（不需要高亮）──────────────
+                    # ── 空文本：页边 FreeText（不需要高亮）──────────────────
                     if not text:
-                        _add_margin_note(page, comment, anchor, i)
+                        _add_margin_note(page, layout, page_0, comment, anchor, i)
                         success_count += 1
                         continue
 
@@ -383,32 +700,52 @@ class PdfCommentTool(BaseTool):
                     # 剔除 docling 生成的 Markdown 标记（## / # / ** / * / ` 等）
                     clean_text = re.sub(r'^#{1,6}\s*', '', norm_text)  # 行首 # 标题
                     clean_text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', clean_text)  # **bold** / *italic*
-                    clean_text = re.sub(r'`[^`]*`', '', clean_text)  # `code`
-                    clean_text = clean_text.strip()
+                    clean_text = re.sub(r'`[^`]*`', '', clean_text).strip()  # `code`
+                    
                     # 如果剔除后文本变短，取最长可搜索的核心片段
-                    search_text = clean_text if clean_text else norm_text
+                    base_text = clean_text if clean_text else norm_text
+                    base_text = re.sub(r'\s+', ' ', base_text).strip()
 
                     # ── 文本搜索（先精确，再模糊）─────────────────────────
-                    instances = page.search_for(search_text)
-                    if not instances and search_text != norm_text:
-                        instances = page.search_for(norm_text)
-                    if not instances and norm_text != text:
-                        instances = page.search_for(text)   # 原始文本兜底
-                    if not instances:
-                        instances = _fuzzy_search(page, search_text)
-                    if not instances and search_text != norm_text:
-                        instances = _fuzzy_search(page, norm_text)
+                    # 候选策略：整句 + 按标点切分 + 中间片段，减少跨行导致的失败
+                    segs = [base_text]
+                    segs.extend([s.strip() for s in re.split(r"[，。；：,.!?！？\n]", base_text) if s.strip()])
+                    candidates = []
+                    for s in segs:
+                        if len(s) >= 8:
+                            candidates.append(s)
+                            # 超长文本截取中段更容易命中
+                            if len(s) > 80:
+                                mid = len(s) // 2
+                                candidates.append(s[max(0, mid - 35): mid + 35])
+                    # 去重且按长度降序（先试信息量大的）
+                    seen = set()
+                    final_candidates = []
+                    for c in sorted(candidates, key=len, reverse=True):
+                        key = normalize_for_search(c)
+                        if key and key not in seen:
+                            seen.add(key)
+                            final_candidates.append(c)
+                    instances = []
+                    for cand in final_candidates[:8]:
+                        instances = page.search_for(cand)
+                        if not instances:
+                            instances = _fuzzy_search(page, cand)
+                        if instances:
+                            search_text = cand  # 仅用于日志
+                            break
 
                     if instances:
+                        # 全部命中处高亮；说明合并为一条页边 FreeText，避免重复且不占正文区。
+                        note_text = f"[{i}] {comment}".strip() or f"[{i}] 发现潜在问题，建议复核。"
+                        hl_union: Optional[fitz.Rect] = None
                         for rect in instances:
                             hl = page.add_highlight_annot(rect)
                             hl.set_colors(stroke=hl_color)
-                            hl.set_info(content=f"[{i}] {comment}")
                             hl.update()
-                            note_pt = fitz.Point(rect.x1 + 8, rect.y0)
-                            note = page.add_text_annot(note_pt, comment, icon="Note")
-                            note.set_info(content=comment)
-                            note.update()
+                            hl_union = rect if hl_union is None else (hl_union | rect)
+                        pref_y = hl_union.y0 if hl_union is not None else 40.0
+                        _add_margin_freetext(page, layout, page_0, note_text, hl_union, pref_y, i)
                         logger.debug(f"[{i}] 高亮({hl_color}) '{norm_text[:30]}' @ page {raw_page}")
                     else:
                         # 文本未找到 → 收集到 fallback，页面边角集中注释
@@ -423,13 +760,10 @@ class PdfCommentTool(BaseTool):
                     errors.append(f"[{i}] 处理异常: {e}")
 
             # 为找不到文本的条目在页面右上角统一添加汇总便签
-            for page_0, comments in page_fallback.items():
+            for fb_i, (page_0, comments) in enumerate(page_fallback.items()):
                 page = doc[page_0]
                 combined = "\n\n".join(comments)
-                # 摆在右上角，避免遮挡正文
-                pt = fitz.Point(page.rect.width - 30, 40)
-                note = page.add_text_annot(pt, combined, icon="Note")
-                note.set_info(content=combined)
+                _add_margin_freetext(page, layout, page_0, combined, None, 32.0, 900 + fb_i)
 
             doc.save(save_path, garbage=4, deflate=True, clean=True)
             doc.close()
@@ -441,9 +775,10 @@ class PdfCommentTool(BaseTool):
             else:
                 final_path = output_path
 
+            unfound_total = sum(len(v) for v in page_fallback.values())
             summary = (
                 f"已处理 {success_count}/{len(items)} 条注释，"
-                f"{len(page_fallback)} 条文本未精确定位（已添加汇总便签），"
+                f"{unfound_total} 条文本未精确定位（已添加页边汇总批注），"
                 f"{len(errors)} 条跳过。\n"
                 f"输出文件: {final_path}"
             )
@@ -457,7 +792,7 @@ class PdfCommentTool(BaseTool):
                     "output_path": final_path,
                     "total": len(items),
                     "success_count": success_count,
-                    "unfound_count": sum(len(v) for v in page_fallback.values()),
+                    "unfound_count": unfound_total,
                     "error_count": len(errors),
                     "errors": errors[:10],   # 最多返回前10条
                 },

@@ -57,6 +57,7 @@ def load_workflow_graph_config(workflow_name: str = "default") -> Tuple[list, li
 def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     """根据 agent_type 实例化对应 Agent。"""
     from agents.simple_agent import SimpleAgent as _SimpleAgent
+    from agents.multi_simple_agent import MultiSimpleAgent as _MultiSimpleAgent
     from config.planner_config import AGENT_TYPE_NAMES, NODE_DEFAULT_TEMPERATURE
 
     system_prompt = node_config.get("system_prompt", f"你是 {node_id} 专家。")
@@ -65,9 +66,19 @@ def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     alias = str(agent_type or "").strip() or "SimpleAgent"
     if alias not in AGENT_TYPE_NAMES:
         logger.warning(f"[DynamicGraph] 未知 Agent 类型 '{alias}'，降级为 SimpleAgent")
-    elif alias not in ("SimpleAgent", "SimpleAgent_new"):
-        logger.warning(f"[DynamicGraph] '{alias}' 尚未实现，降级为 SimpleAgent")
+        alias = "SimpleAgent"
+    
+    if alias == "MultiSimpleAgent":
+        return _MultiSimpleAgent(
+            name=node_id,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            tools=[],
+        )
 
+    # 兼容旧实现
+    if alias not in ("SimpleAgent", "SimpleAgent_new"):
+        logger.warning(f"[DynamicGraph] '{alias}' 尚未实现，降级为 SimpleAgent")
     return _SimpleAgent(
         name=node_id,
         system_prompt=system_prompt,

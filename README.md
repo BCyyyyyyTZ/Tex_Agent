@@ -21,13 +21,14 @@ pip install -r requirements.txt
 # 3. 配置环境变量
 cp .env.example .env
 # 编辑 .env，填写 OPENAI_API_KEY 等
+```
 
 **启动服务：**
 
 ```bash
 # 方式 A：模块入口（常用）
 python -m ui.web.server
-
+```
 
 默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。
 

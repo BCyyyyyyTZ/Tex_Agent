@@ -535,8 +535,22 @@ def make_agent_node(
 
         run_dir = meta.get("__run_output_dir__")
 
+        # 支持 agent 附件（如 Gemini 文件引用 / 本地路径）
+        attachment_cfg = node_config.get("attachment", None)
+        attachment_val = _resolve_tool_payload(attachment_cfg, state) if attachment_cfg is not None else None
+
         try:
-            raw_resp = agent.run(prompt)
+            if attachment_val is not None:
+                agent_input = {
+                    "role": "user",
+                    "source_type": "user",
+                    "source_id": "workflow_agent_node",
+                    "content": prompt,
+                    "metadata": {"attachment": attachment_val},
+                }
+                raw_resp = agent.run(agent_input)
+            else:
+                raw_resp = agent.run(prompt)
             resp = _ensure_agent_message(
                 raw_resp,
                 role="assistant",
