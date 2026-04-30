@@ -489,6 +489,16 @@ class BranchSwitchBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
 
 
+class BranchHistoryMsgOut(BaseModel):
+    role: str
+    content: str
+
+
+class BranchHistoryOut(BaseModel):
+    branch: str
+    messages: List[BranchHistoryMsgOut]
+
+
 def _augment_message_with_active_files(message: str, body: "ChatRequest") -> str:
     """将各 storage 子目录中已勾选文件解析为绝对路径，置于用户消息前。"""
     parts: List[str] = []
@@ -656,6 +666,39 @@ def create_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="无此分支")
         return await get_branches()
+
+    @app.get("/api/branches/history", response_model=BranchHistoryOut)
+    async def get_branch_history_ep(
+        branch: Optional[str] = Query(
+            None,
+            description="分支名；省略时为当前活动分支",
+        ),
+    ) -> BranchHistoryOut:
+        """返回指定分支的服务端对话历史，供切换分支后刷新聊天区。"""
+
+        def _work() -> BranchHistoryOut:
+            cli = get_cli()
+            name_q = (branch or cli.current_branch or "main").strip()
+            if not _BR_NAME.match(name_q):
+                raise ValueError("分支名无效")
+            raw = cli.get_branch_chat_history_for_api(name_q)
+            msgs = raw.get("messages") or []
+            return BranchHistoryOut(
+                branch=str(raw.get("branch") or name_q),
+                messages=[
+                    BranchHistoryMsgOut(
+                        role=str(m.get("role") or "user"),
+                        content=str(m.get("content") or ""),
+                    )
+                    for m in msgs
+                    if isinstance(m, dict)
+                ],
+            )
+
+        try:
+            return await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.get("/api/workflow/draft", response_model=WorkflowDraftIn)
     async def get_workflow_draft() -> WorkflowDraftIn:

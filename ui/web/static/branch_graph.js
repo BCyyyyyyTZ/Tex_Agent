@@ -232,6 +232,26 @@
       if (currentLbl) currentLbl.textContent = "当前分支: " + (lastTree.current || "main");
     }
 
+    function reloadChatForBranch(bid) {
+      var q = encodeURIComponent(bid || "main");
+      fetch(API_BASE + "branches/history?branch=" + q, { method: "GET" })
+        .then(function (r) {
+          if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || r.statusText); });
+          return r.json();
+        })
+        .then(function (j) {
+          if (typeof window.texAgentReplaceChatFromHistory === "function") {
+            window.texAgentReplaceChatFromHistory(j.messages || []);
+          }
+        })
+        .catch(function (_e) {
+          /* 分支历史加载失败时不打断切换；界面保留清空或由用户重试 */
+          if (typeof window.texAgentReplaceChatFromHistory === "function") {
+            window.texAgentReplaceChatFromHistory([]);
+          }
+        });
+    }
+
     function doSwitch(bid) {
       if (bid === lastTree.current) {
         setStatus(status, "已在 " + bid, false);
@@ -253,6 +273,7 @@
           renderSvg(mount, j, doSwitch);
           syncLabel();
           setStatus(status, "已切到 " + (j.current || bid), false);
+          reloadChatForBranch(j.current || bid);
         })
         .catch(function (e) {
           setStatus(status, (e && e.message) || String(e), true);
@@ -272,6 +293,7 @@
           renderSvg(mount, j, doSwitch);
           syncLabel();
           setStatus(status, "点击节点切换；下方可从所选父节点拉出新分支", false);
+          reloadChatForBranch(j.current || "main");
         })
         .catch(function (e) {
           setStatus(status, "无法加载分支: " + ((e && e.message) || String(e)), true);

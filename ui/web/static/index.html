@@ -150,6 +150,7 @@
                 </label>
                 <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
               </div>
+              <span id="composer-pending-name" class="file-pending-label" aria-live="polite"></span>
               <span id="composer-upload-status" class="composer-upload-status" role="status"></span>
             </div>
             <textarea
@@ -193,6 +194,7 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
+          <p id="skill-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
           <p id="skill-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="skill-list" aria-live="polite"></ul>
         </div>
@@ -214,12 +216,16 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
+          <p id="checklist-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
           <p id="checklist-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
         </div>
 
-        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="已上传的 PDF 与其它文档">
-          <h3 class="uploaded-files-title">已上传文件列表</h3>
+        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="服务器已存储的全部上传文件">
+          <h3 class="uploaded-files-title">已上传文件（汇总）</h3>
+          <p class="uploaded-files-desc">
+            含底部上传的 PDF/文档与右侧 Skill、Checklist；勾选后发送时会附带路径。
+          </p>
           <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
         </div>

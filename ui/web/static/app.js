@@ -112,6 +112,36 @@
     return wrap;
   }
 
+  /**
+   * 切换分支后由 branch_graph 调用：用服务端该分支的对话记录重建聊天区。
+   */
+  function replaceChatFromHistory(messages) {
+    const scroll = document.getElementById("chat-scroll") || chat;
+    if (!scroll) return;
+    scroll.querySelectorAll(".msg").forEach(function (n) {
+      n.remove();
+    });
+    const emptyEl = document.getElementById("chat-empty");
+    const arr = Array.isArray(messages) ? messages : [];
+    if (arr.length === 0) {
+      if (emptyEl) emptyEl.hidden = false;
+      return;
+    }
+    if (emptyEl) emptyEl.hidden = true;
+    for (let i = 0; i < arr.length; i++) {
+      const m = arr[i];
+      if (!m || typeof m !== "object") continue;
+      const role = m.role === "user" ? "user" : "assistant";
+      const raw = m.content != null ? String(m.content) : "";
+      if (!raw.trim()) continue;
+      appendMessage(role, renderMd(raw));
+    }
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+
+  window.texAgentRenderMd = renderMd;
+  window.texAgentReplaceChatFromHistory = replaceChatFromHistory;
+
   function setBusy(b) {
     if (send) send.disabled = b;
     if (input) input.readOnly = b;

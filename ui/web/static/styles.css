@@ -1098,6 +1098,31 @@ select {
   width: 100%;
   box-sizing: border-box;
 }
+
+.file-pending-label {
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1 1 140px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-pending-label.file-pending--active {
+  color: var(--accent);
+}
+
+.file-pending-label--right {
+  margin: 4px 0 0;
+}
+
+.uploaded-files-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 8px;
+  line-height: 1.45;
+}
 /* 选择文件：隐藏原生 input，用样式化 label 触发 */
 .composer-upload-group {
   position: relative;

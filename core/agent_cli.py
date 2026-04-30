@@ -471,6 +471,43 @@ class TeXAgentCLI:
         print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
         return True
 
+    def get_branch_chat_history_for_api(self, branch_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        供 Web：返回某分支在 ContextManager 中的对话摘要（user / assistant 文本）。
+        不自动新建未知分支；分支须在记忆系统中已存在（与 switch_branch 一致）。
+        """
+        name = str(branch_name or self.current_branch).strip()
+        if self.use_branch:
+            sh = self.memory_system.get("shared")
+            if sh is not None and hasattr(sh, "list_branches"):
+                branches = sh.list_branches()
+                if name not in branches:
+                    raise ValueError(f"无此分支: {name}")
+
+        ctx = self.contexts.get(name)
+        if ctx is None:
+            return {"branch": name, "messages": []}
+
+        messages_out: List[Dict[str, Any]] = []
+        for msg in ctx.load():
+            if hasattr(msg, "to_dict"):
+                d = msg.to_dict()
+            else:
+                d = ensure_message(
+                    msg,
+                    default_role="assistant",
+                    default_source_type="system",
+                    default_source_id="context",
+                ).to_dict()
+            role = str(d.get("role") or "assistant")
+            if role not in ("user", "assistant"):
+                continue
+            body = str(d.get("content") or "").strip()
+            if not body:
+                continue
+            messages_out.append({"role": role, "content": body})
+        return {"branch": name, "messages": messages_out}
+
     def get_branch_tree_for_api(self) -> Dict[str, Any]:
         """
         供 Web：当前活动分支、树节点 id/parent/记忆条数/对话条数。
