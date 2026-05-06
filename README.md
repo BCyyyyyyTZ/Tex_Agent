@@ -46,64 +46,43 @@ python -m ui.web.server
 
 **启动后打开浏览器：** 默认尝试**系统默认浏览器**（WSL 常见为调 Windows 侧打开，见 `ui/web/browser_open.py`）。可设置 `TEX_AGENT_NO_OPEN_BROWSER=1` 不自动打开；`TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1` 在打开系统浏览器后**再**尝试 Simple Browser。详见 `ui/web/ide_launch.py` 与 `scripts/start_texagent_web.py` 文头说明。
 
+## 论文审查功能的使用说明
 
+### 如何运行
 
-## 在现有架构基础上进行修改的说明
+```bash
+# 1. 克隆项目
+git clone https://github.com/BCyyyyyyTZ/Tex_Agent.git
+cd TeX_Agent
 
-**注意：当前版本已统一为动态工作流链路。默认、自定义、plan 都走同一套动态构图与执行器。**
+# 2. 安装依赖
+pip install -r requirements.txt
 
-### 统一工作流设计（推荐按此理解与修改）
+# 3. 配置环境变量
+cp .env.example .env
 
-**现在 `task` 与 `plan` 的底层执行方式一致，差异只在前置步骤（是否先规划）。**
+# 4. 运行web-ui
+python -m ui.web.server
 
-#### 入口调用链
+# 5. 选择带multi的三个工作流之一（v1、v2、v3）
+#    v1 6个检查节点并行，同时多个并发的gemini API请求可能会出现请求失败的问题
+#    v2 6个检查节点串行，相对稳定，但比较慢
+#    v3 只保留一个检查节点（干六个节点的活），理论上速度最快、最稳定，但效果可能略差
 
-`task`：`main.py` -> `core/agent_cli.py` `run_task()` -> `_execute_with_app()`  
-`plan`：`main.py` -> `core/agent_cli.py` `run_plan_task()` -> `_execute_with_app()`
+# 7. 构造输出，直接输在对话框中，例如：
+"pdf_path": "./storage/pdfs/paper1.pdf",
+"checklist_path": "./storage/checklists/thesis-checklists.md",
+"output_path": "./storage/documents/paper1-checked.pdf"
+# 路径可以使用绝对路径或相对Tex_Agent的相对路径
 
-#### 核心代码
+# 8. 如果正常就可以看到输出了，输出的文档点击链接下载，也会同时保存在"output_path"路径下
+```
 
-##### 1. workflow/graph_builder.py 动态配置装配
+### 一些说明
 
-- `build_app_from_workflow(workflow_name, ...)`：统一构建入口；可选参数 **`config_dict`** 时直接解析内存中的 `nodes/edges`（JSON），用于 Web 左侧「自定义」工作流，无需写注册表文件
-- `load_workflow_graph_config(workflow_name)`：从 `workflow_registry` 读取配置
-- `build_dynamic_graph(nodes, edges, ...)`：根据配置构图并执行
-
-当前不再维护硬编码 `design/think/execute` 构图逻辑，默认工作流也走配置文件驱动：
-- `config/workflow_registry.json` 中的 `default`
-- 对应配置文件 `config/workflow_default_dynamic.json`
-
-##### 2. workflow/workflow_registry.py 工作流注册
-
-- `workflows.<name>` 支持 `file` 类型配置
-- `task --wf <name> ...` 即按名称加载对应配置
-
-##### 3. workflow/nodes.py 节点执行逻辑
-
-当前动态节点统一使用 `make_agent_node()`：
-- 从节点配置读取 `system_prompt/subtask/depends_on`
-- 统一注入 JSON 输出约束
-- 解析结构化输出并写入 `state["metadata"]`
-- 支持将结果写入共享记忆
-
-##### 4. config/agent_config.py 的角色
-
-`agent_config.py` 仍可作为提示词模板来源，但当前默认执行路径优先读取  
-`config/workflow_default_dynamic.json` 中的节点配置。建议以 workflow 配置为准进行维护。
-
-#### 修改时应遵守的规约
-
-+ 不要破坏状态契约：core/state.py 的 WorkflowState 字段名保持兼容（messages/current_node/input/output/error/metadata）。
-+ 所有 workflow 修改都以配置为主（registry + workflow json/yaml），避免再引入硬编码图路径。
-+ 节点返回格式统一：每个节点返回 dict，至少保证 current_node、error 语义一致；messages 继续走可合并列表。
-+ Agent 接口不改签名：遵守 BaseAgent 的 run/reset/ainvoke 约束，避免影响其他实现。
-+ 目前RAG开发不太成熟，请忽略RAG相关的接口和内容
-
-### 动态planner
-
-**plan 命令当前会先执行规划，然后复用与 task 相同的底层执行器。**
-
-这部分是让planner agent自动生成流程的路线，目前不太能支持亲自设计图结构和agent的要求，相关说明后续补充
+1. Gemini API可能连接不够稳定，并发执行大概率会有的连接失败，串行执行也有小概率失败某一个节点 —— 一个节点失败理论上有的时候不影响正常输出标注pdf，但会在UI显示有错误（有些情况下一些节点请求API失败，但Agent会根据请求成功的API输出进行工作，仍然在"output_path"下保存结果）
+2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
+3. 目前项目可以更方便地自定义工作流，可以参考`checklist_multi_v1`设计节点和边的关系，保存在Tex_Agent/config路径下，并在`config/workflow_registry.json`中参考前面的样子注册就能看到（关于自定义工作流的详细说明之后可以补充）
 
 ---
 
