@@ -74,6 +74,7 @@ python -m ui.web.server
 "checklist_path": "./storage/checklists/thesis-checklists.md",
 "output_path": "./storage/documents/paper1-checked.pdf"
 # 路径可以使用绝对路径或相对Tex_Agent的相对路径
+# 可以不用手动上传文件，直接在输入注入文件路径即可
 
 # 8. 如果正常就可以看到输出了，输出的文档点击链接下载，也会同时保存在"output_path"路径下
 ```
