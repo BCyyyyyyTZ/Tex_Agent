@@ -145,6 +145,23 @@
     sync();
   }
 
+  function parseErrorResponse(r) {
+    if (!r.ok) {
+      return r
+        .json()
+        .then(function (d) {
+          var de = d && d.detail;
+          if (typeof de === "string" && de.trim()) throw new Error(de);
+          throw new Error(r.statusText || "上传失败");
+        })
+        .catch(function (e) {
+          if (e instanceof Error) throw e;
+          throw new Error(r.statusText || "上传失败");
+        });
+    }
+    return r.json();
+  }
+
   function renderGlobalUploadedSummary(ul, status) {
     if (!ul) return;
     return Promise.all([
@@ -423,9 +440,15 @@
     var skillFile = document.getElementById("skill-file");
     var skillStatus = document.getElementById("skill-panel-status");
     var skillList = document.getElementById("skill-list");
+    var skillSubmitBtn = skillForm
+      ? skillForm.querySelector('button[type="submit"]')
+      : null;
     if (skillForm && skillFile) {
-      skillForm.addEventListener("submit", function (ev) {
-        ev.preventDefault();
+      function doSkillUpload(ev) {
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
         var f = skillFile.files && skillFile.files[0];
         if (!f) {
           setAssetStatus(skillStatus, "请选择文件", true);
@@ -435,16 +458,7 @@
         var fd = new FormData();
         fd.append("file", f, f.name);
         fetch(API + "storage/skills", { method: "POST", body: fd })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().then(function (d) {
-                var de = d.detail;
-                if (typeof de === "string") throw new Error(de);
-                throw new Error(r.statusText);
-              });
-            }
-            return r.json();
-          })
+          .then(parseErrorResponse)
           .then(function () {
             skillFile.value = "";
             try {
@@ -465,16 +479,24 @@
           .catch(function (e) {
             setAssetStatus(skillStatus, (e && e.message) || String(e), true);
           });
-      });
+      }
+      skillForm.addEventListener("submit", doSkillUpload, false);
+      if (skillSubmitBtn) {
+        skillSubmitBtn.addEventListener("click", doSkillUpload, true);
+      }
     }
 
     var cf = document.getElementById("checklist-upload-form");
     var cfile = document.getElementById("checklist-file");
     var cstatus = document.getElementById("checklist-panel-status");
     var clist = document.getElementById("checklist-list");
+    var checklistSubmitBtn = cf ? cf.querySelector('button[type="submit"]') : null;
     if (cf && cfile) {
-      cf.addEventListener("submit", function (ev) {
-        ev.preventDefault();
+      function doChecklistUpload(ev) {
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
         var f2 = cfile.files && cfile.files[0];
         if (!f2) {
           setAssetStatus(cstatus, "请选择文件", true);
@@ -484,16 +506,7 @@
         var fd2 = new FormData();
         fd2.append("file", f2, f2.name);
         fetch(API + "storage/checklists", { method: "POST", body: fd2 })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().then(function (d) {
-                var de = d.detail;
-                if (typeof de === "string") throw new Error(de);
-                throw new Error(r.statusText);
-              });
-            }
-            return r.json();
-          })
+          .then(parseErrorResponse)
           .then(function () {
             cfile.value = "";
             try {
@@ -514,7 +527,11 @@
           .catch(function (e) {
             setAssetStatus(cstatus, (e && e.message) || String(e), true);
           });
-      });
+      }
+      cf.addEventListener("submit", doChecklistUpload, false);
+      if (checklistSubmitBtn) {
+        checklistSubmitBtn.addEventListener("click", doChecklistUpload, true);
+      }
     }
 
     return fetchList("skills")
