@@ -8,11 +8,94 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=rag-query-unified-2" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
     <div class="app-layout" id="app-layout">
+      <div class="layout-col layout-col--rag" id="col-rag">
+      <aside class="sidebar-rag" aria-label="RAG 管理">
+        <h2 class="sidebar-rag-title">RAG 管理</h2>
+        <p class="sidebar-rag-desc">
+          支持上传文本文件入库、手动查询 top-K、按 metadata 条件筛选记录并定向删除。
+        </p>
+
+        <section class="rag-block" id="rag-upload-block">
+          <h3 class="rag-block-title">录入</h3>
+          <form id="rag-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
+            <div class="right-upload-group">
+              <input
+                type="file"
+                id="rag-file"
+                name="file"
+                class="composer-file-input-native"
+                aria-label="选择要上传到 RAG 的文件"
+              />
+              <label class="composer-file-btn composer-file-btn--compact" for="rag-file">
+                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
+                <span class="composer-file-btn__text">选择文件</span>
+              </label>
+              <button type="submit" class="btn-secondary btn-upload-tight">上传并入库</button>
+            </div>
+            <label class="rag-inline-label">
+              Source（可选）
+              <input type="text" id="rag-source" class="branch-input" placeholder="默认使用文件名" />
+            </label>
+            <label class="rag-inline-label">
+              metadata JSON（可选）
+              <textarea id="rag-metadata-json" rows="3" class="wf-ta" placeholder='例如: {"tag":"intro","author":"alice"}'></textarea>
+            </label>
+          </form>
+          <p id="rag-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+          <p id="rag-upload-status" class="asset-panel-status" role="status"></p>
+        </section>
+
+        <section class="rag-block rag-block--query" id="rag-query-block">
+          <div class="rag-block-head">
+            <h3 class="rag-block-title">查询</h3>
+            <button type="submit" form="rag-query-form" class="btn-secondary btn-rag-run">执行查询</button>
+          </div>
+          <form id="rag-query-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                查询方式
+                <select id="rag-query-mode" class="branch-select">
+                  <option value="semantic" selected>语义查询（Top-K）</option>
+                  <option value="metadata">按 Metadata 查询</option>
+                </select>
+              </label>
+            </div>
+            <label class="rag-inline-label" id="rag-query-text-wrap">
+              查询文本
+              <textarea id="rag-query-input" rows="2" class="wf-ta" placeholder="输入检索问题..."></textarea>
+            </label>
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small" id="rag-top-k-wrap">
+                Top-K
+                <input type="number" id="rag-top-k" class="branch-input" min="1" max="20" value="5" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-meta-key-wrap">
+                字段名
+                <input type="text" id="rag-meta-key" class="branch-input" placeholder="如 source / tag" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-meta-value-wrap">
+                字段值（可空）
+                <input type="text" id="rag-meta-value" class="branch-input" placeholder="可留空仅按字段筛选" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-record-limit-wrap">
+                条数
+                <input type="number" id="rag-record-limit" class="branch-input" min="1" max="50" value="20" />
+              </label>
+            </div>
+          </form>
+          <p id="rag-query-status" class="asset-panel-status" role="status"></p>
+          <ul id="rag-result-list" class="asset-list asset-list--rag-results" aria-live="polite"></ul>
+        </section>
+      </aside>
+      </div>
+
+      <div class="layout-gutter" id="gutter-right-rag" title="拖动调整列宽" role="separator" aria-label="调整 RAG 与工作流列之间宽度"></div>
+
       <div class="layout-col layout-col--wf" id="col-wf">
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
@@ -241,6 +324,7 @@
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
     <script src="web_assets.js"></script>
+    <script src="rag_assets.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

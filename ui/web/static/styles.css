@@ -44,7 +44,7 @@ body {
   overflow: hidden;
 }
 
-/* 主区：最左工作流 | 分支 | 聊天 | 最右资料 */
+/* 主区：DOM 顺序为最左 RAG | 工作流 | 分支 | 聊天 | 最右资料 */
 .app-layout {
   display: flex;
   flex-direction: row;
@@ -77,6 +77,11 @@ body {
 .layout-col--right {
   flex: 0 0 300px;
   width: 300px;
+  background: #252526;
+}
+.layout-col--rag {
+  flex: 0 0 340px;
+  width: 340px;
   background: #252526;
 }
 
@@ -121,6 +126,30 @@ body {
   background: rgba(61, 110, 168, 0.35);
 }
 
+/* RAG 与工作流之间的分隔（复用原 id） */
+#gutter-right-rag {
+  flex: 0 0 8px;
+  width: 8px;
+  min-width: 8px;
+  margin: 0;
+  z-index: 8;
+  touch-action: none;
+}
+#gutter-right-rag::after {
+  left: 0;
+  width: 8px;
+}
+#gutter-right-rag::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #3b3b3b;
+  pointer-events: none;
+}
+
 .sidebar-right {
   flex: 1 1 0;
   min-height: 0;
@@ -129,6 +158,115 @@ body {
   padding: 10px 12px 20px;
   overflow-x: hidden;
   overflow-y: auto;
+}
+.sidebar-rag {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  background: transparent;
+  padding: 8px 10px 10px;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sidebar-rag-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sidebar-rag-desc {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.rag-block {
+  margin-bottom: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+.rag-block:last-of-type {
+  border-bottom: none;
+}
+.rag-block--query {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rag-block-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.rag-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.btn-rag-run {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.rag-inline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 6px;
+}
+.rag-inline-label--small {
+  flex: 1 1 0;
+  margin-bottom: 0;
+}
+.rag-query-form {
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+.rag-query-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.asset-list--rag-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+.rag-item-title {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: #c9d1d9;
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.rag-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rag-item-content {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #d0d7de;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.rag-item-actions {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
 }
 .uploaded-files-block {
   margin-top: 4px;

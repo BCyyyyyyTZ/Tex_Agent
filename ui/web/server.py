@@ -20,7 +20,7 @@ from collections import deque
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Set, Tuple
 
 import anyio
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -468,6 +468,58 @@ class ChatResponse(BaseModel):
     )
 
 
+class RAGIndexResponse(BaseModel):
+    ok: bool = True
+    indexed_chunks: int
+    total_chunks: int
+    source: str = ""
+
+
+class RAGTextIndexRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    source: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RAGHitOut(BaseModel):
+    content: str
+    source: str = ""
+    score: float = 0.0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RAGQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class RAGQueryResponse(BaseModel):
+    query: str
+    top_k: int
+    hits: List[RAGHitOut] = Field(default_factory=list)
+
+
+class RAGRecordOut(BaseModel):
+    id: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    document: Optional[str] = None
+
+
+class RAGRecordsResponse(BaseModel):
+    items: List[RAGRecordOut] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_next: bool = False
+
+
+class RAGDeleteResponse(BaseModel):
+    ok: bool = True
+    deleted: int = 0
+    total: int = 0
+    record_id: Optional[str] = None
+
+
 class BranchNodeOut(BaseModel):
     id: str
     parent: Optional[str] = None
@@ -574,6 +626,7 @@ async def _upload_to_category(
 _BR_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _cli: Optional[TeXAgentWebUI] = None
+_rag_pipeline: Optional[Any] = None
 
 
 def get_cli() -> TeXAgentWebUI:
@@ -581,6 +634,43 @@ def get_cli() -> TeXAgentWebUI:
     if _cli is None:
         _cli = TeXAgentWebUI(use_branch=True)
     return _cli
+
+
+def get_rag_pipeline() -> Any:
+    global _rag_pipeline
+    if _rag_pipeline is None:
+        from rag.rag_pipeline import RAGPipeline
+
+        _rag_pipeline = RAGPipeline()
+    return _rag_pipeline
+
+
+def _parse_rag_metadata_json(raw: str) -> Dict[str, Any]:
+    txt = (raw or "").strip()
+    if not txt:
+        return {}
+    try:
+        obj = json.loads(txt)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"metadata_json 不是合法 JSON: {e}") from e
+    if not isinstance(obj, dict):
+        raise ValueError("metadata_json 必须是 JSON 对象")
+    return obj
+
+
+def _record_matches_metadata(
+    metadata: Dict[str, Any], key: str, value: str
+) -> bool:
+    if not key:
+        return True
+    if key not in metadata:
+        return False
+    if not value:
+        return True
+    raw = metadata.get(key)
+    if raw is None:
+        return False
+    return value.lower() in str(raw).lower()
 
 
 @asynccontextmanager
@@ -610,6 +700,224 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/api/rag/index-text", response_model=RAGIndexResponse)
+    async def rag_index_text_ep(body: RAGTextIndexRequest) -> RAGIndexResponse:
+        def _work() -> Tuple[int, int, str]:
+            p = get_rag_pipeline()
+            src = (body.source or "").strip()
+            md = body.metadata if isinstance(body.metadata, dict) else {}
+            indexed = p.index_text(body.text, source=src, metadata=md)
+            return indexed, p.document_count(), src
+
+        try:
+            indexed, total, src = await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGIndexResponse(
+            indexed_chunks=indexed,
+            total_chunks=total,
+            source=src,
+        )
+
+    @app.post("/api/rag/index-file", response_model=RAGIndexResponse)
+    async def rag_index_file_ep(
+        file: UploadFile = File(..., description="待注入 RAG 的文本文件"),
+        source: str = Form("", description="可选 source 覆盖值"),
+        metadata_json: str = Form("{}", description="可选 metadata JSON 对象"),
+    ) -> RAGIndexResponse:
+        try:
+            metadata = _parse_rag_metadata_json(metadata_json)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        if len(raw) > file_storage.MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件过大，单文件上限 {file_storage.MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+            )
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail="仅支持 UTF-8 文本文件上传到 RAG",
+            ) from e
+        src = (source or "").strip() or str(file.filename or "upload_text")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            indexed = p.index_text(text, source=src, metadata=metadata)
+            return indexed, p.document_count()
+
+        try:
+            indexed, total = await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGIndexResponse(
+            indexed_chunks=indexed,
+            total_chunks=total,
+            source=src,
+        )
+
+    @app.post("/api/rag/query", response_model=RAGQueryResponse)
+    async def rag_query_ep(body: RAGQueryRequest) -> RAGQueryResponse:
+        q = body.query.strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="query 不能为空")
+
+        def _work() -> List[Any]:
+            p = get_rag_pipeline()
+            return p.retrieve_documents(q, k=body.top_k)
+
+        try:
+            docs = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        hits = [
+            RAGHitOut(
+                content=str(getattr(d, "content", "") or ""),
+                source=str(getattr(d, "source", "") or ""),
+                score=float(getattr(d, "score", 0.0) or 0.0),
+                metadata=(getattr(d, "metadata", {}) or {}),
+            )
+            for d in docs
+        ]
+        return RAGQueryResponse(query=q, top_k=body.top_k, hits=hits)
+
+    @app.get("/api/rag/records", response_model=RAGRecordsResponse)
+    async def rag_records_ep(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=50),
+        metadata_key: str = Query("", description="metadata 字段名"),
+        metadata_value: str = Query("", description="metadata 字段值（可留空）"),
+        include_document: bool = Query(False, description="是否附带文档片段文本"),
+    ) -> RAGRecordsResponse:
+        from rag.store_listing import MAX_LIST_PAGE_SIZE, StoreField
+
+        key = (metadata_key or "").strip()
+        val = (metadata_value or "").strip()
+        fetch_fields = StoreField.DEFAULT
+        if include_document:
+            fetch_fields |= StoreField.DOCUMENT
+
+        def _work() -> RAGRecordsResponse:
+            p = get_rag_pipeline()
+            if not key:
+                scan_offset = offset
+                total = 0
+                raw_items: List[Any] = []
+                while len(raw_items) < limit:
+                    page = p.list_stored_page(
+                        offset=scan_offset,
+                        limit=min(limit - len(raw_items), MAX_LIST_PAGE_SIZE),
+                        fetch_fields=fetch_fields,
+                    )
+                    total = int(page.total)
+                    raw_items.extend(page.items)
+                    if not page.has_next:
+                        break
+                    if len(page.items) <= 0:
+                        break
+                    scan_offset += len(page.items)
+                items = [
+                    RAGRecordOut(
+                        id=str(getattr(rec, "id", "") or ""),
+                        metadata=(getattr(rec, "metadata", {}) or {}),
+                        document=(
+                            str(getattr(rec, "document", "") or "")
+                            if include_document
+                            else None
+                        ),
+                    )
+                    for rec in raw_items
+                ]
+                return RAGRecordsResponse(
+                    items=items,
+                    total=total,
+                    offset=int(offset),
+                    limit=int(limit),
+                    has_next=(offset + len(items) < total),
+                )
+
+            scan_offset = 0
+            filtered: List[RAGRecordOut] = []
+            while True:
+                page = p.list_stored_page(
+                    offset=scan_offset,
+                    limit=MAX_LIST_PAGE_SIZE,
+                    fetch_fields=fetch_fields,
+                )
+                for rec in page.items:
+                    md = getattr(rec, "metadata", {}) or {}
+                    if not isinstance(md, dict):
+                        md = {}
+                    if _record_matches_metadata(md, key, val):
+                        filtered.append(
+                            RAGRecordOut(
+                                id=str(getattr(rec, "id", "") or ""),
+                                metadata=md,
+                                document=(
+                                    str(getattr(rec, "document", "") or "")
+                                    if include_document
+                                    else None
+                                ),
+                            )
+                        )
+                if not page.has_next:
+                    break
+                if len(page.items) <= 0:
+                    break
+                scan_offset += len(page.items)
+
+            total = len(filtered)
+            sliced = filtered[offset : offset + limit]
+            return RAGRecordsResponse(
+                items=sliced,
+                total=total,
+                offset=int(offset),
+                limit=int(limit),
+                has_next=(offset + len(sliced) < total),
+            )
+
+        try:
+            return await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.delete("/api/rag/records/{record_id}", response_model=RAGDeleteResponse)
+    async def rag_delete_record_ep(record_id: str) -> RAGDeleteResponse:
+        rid = (record_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="record_id 不能为空")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            deleted = p.delete_chunks_by_ids([rid])
+            return deleted, p.document_count()
+
+        try:
+            deleted, total = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGDeleteResponse(deleted=deleted, total=total, record_id=rid)
 
     @app.get("/api/branches", response_model=BranchTreeOut)
     async def get_branches() -> BranchTreeOut:
