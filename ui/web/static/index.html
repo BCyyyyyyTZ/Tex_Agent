@@ -258,6 +258,15 @@
                   <span class="composer-file-btn__text">选择文件</span>
                 </label>
                 <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
+                <button
+                  type="button"
+                  id="composer-clear-file-btn"
+                  class="btn-tiny file-clear-btn"
+                  title="取消当前已选文件"
+                  aria-label="取消当前已选文件"
+                >
+                  -
+                </button>
               </div>
               <span id="composer-pending-name" class="file-pending-label" aria-live="polite"></span>
               <span id="composer-upload-status" class="composer-upload-status" role="status"></span>
@@ -303,7 +312,18 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
-          <p id="skill-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+          <div class="file-pending-row file-pending-row--right">
+            <p id="skill-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button
+              type="button"
+              id="skill-clear-file-btn"
+              class="btn-tiny file-clear-btn"
+              title="取消当前已选文件"
+              aria-label="取消当前已选文件"
+            >
+              -
+            </button>
+          </div>
           <p id="skill-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="skill-list" aria-live="polite"></ul>
         </div>
@@ -325,7 +345,18 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
-          <p id="checklist-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+          <div class="file-pending-row file-pending-row--right">
+            <p id="checklist-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button
+              type="button"
+              id="checklist-clear-file-btn"
+              class="btn-tiny file-clear-btn"
+              title="取消当前已选文件"
+              aria-label="取消当前已选文件"
+            >
+              -
+            </button>
+          </div>
           <p id="checklist-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
         </div>

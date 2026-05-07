@@ -134,14 +134,27 @@
     saveSel(lsKey, nextSel);
   }
 
-  function wirePendingFileLabel(inputEl, labelEl, emptyText) {
+  function wirePendingFileLabel(inputEl, labelEl, clearBtn, emptyText) {
     if (!inputEl || !labelEl) return;
     function sync() {
       var f = inputEl.files && inputEl.files[0];
       labelEl.textContent = f ? "已选：" + f.name : emptyText || "";
       labelEl.classList.toggle("file-pending--active", !!f);
+      if (clearBtn) {
+        clearBtn.style.display = f ? "inline-flex" : "none";
+      }
     }
     inputEl.addEventListener("change", sync);
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        inputEl.value = "";
+        try {
+          inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (_e) {
+          /* empty */
+        }
+      });
+    }
     sync();
   }
 
@@ -423,16 +436,19 @@
     wirePendingFileLabel(
       document.getElementById("composer-file"),
       document.getElementById("composer-pending-name"),
+      document.getElementById("composer-clear-file-btn"),
       ""
     );
     wirePendingFileLabel(
       document.getElementById("skill-file"),
       document.getElementById("skill-pending-name"),
+      document.getElementById("skill-clear-file-btn"),
       ""
     );
     wirePendingFileLabel(
       document.getElementById("checklist-file"),
       document.getElementById("checklist-pending-name"),
+      document.getElementById("checklist-clear-file-btn"),
       ""
     );
 

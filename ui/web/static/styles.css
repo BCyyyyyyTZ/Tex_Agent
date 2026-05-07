@@ -246,6 +246,7 @@ body {
   gap: 6px;
   margin-top: 2px;
 }
+.file-clear-btn,
 .rag-clear-file-btn {
   flex: 0 0 auto;
   display: none;
@@ -1327,6 +1328,14 @@ select {
 
 .file-pending-label--right {
   margin: 4px 0 0;
+}
+.file-pending-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.file-pending-row--right {
+  margin-top: 4px;
 }
 
 .uploaded-files-desc {

@@ -39,3 +39,4 @@
 
 + 在web-ui中添加对RAG的支持（包括增加、查询、删除）
 + web-ui支持上传Skill和Checklist
++ 支持选择的文件撤销
