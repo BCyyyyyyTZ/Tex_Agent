@@ -482,6 +482,7 @@ class RAGTextIndexRequest(BaseModel):
 
 
 class RAGHitOut(BaseModel):
+    id: str = ""
     content: str
     source: str = ""
     score: float = 0.0
@@ -789,6 +790,7 @@ def create_app() -> FastAPI:
 
         hits = [
             RAGHitOut(
+                id=str(((getattr(d, "metadata", {}) or {}).get("_id") or "")),
                 content=str(getattr(d, "content", "") or ""),
                 source=str(getattr(d, "source", "") or ""),
                 score=float(getattr(d, "score", 0.0) or 0.0),
@@ -918,6 +920,28 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
         return RAGDeleteResponse(deleted=deleted, total=total, record_id=rid)
+
+    @app.delete("/api/rag/records/by-source", response_model=RAGDeleteResponse)
+    @app.delete("/api/rag/records/delete-by-source", response_model=RAGDeleteResponse)
+    async def rag_delete_by_source_ep(
+        source: str = Query(..., min_length=1, description="按 metadata.source 删除"),
+    ) -> RAGDeleteResponse:
+        src = source.strip()
+        if not src:
+            raise HTTPException(status_code=400, detail="source 不能为空")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            deleted = p.delete_by_source(src)
+            return deleted, p.document_count()
+
+        try:
+            deleted, total = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGDeleteResponse(deleted=deleted, total=total, record_id=src)
 
     @app.get("/api/branches", response_model=BranchTreeOut)
     async def get_branches() -> BranchTreeOut:

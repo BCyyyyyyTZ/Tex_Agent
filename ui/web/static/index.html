@@ -8,7 +8,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css?v=rag-query-unified-2" />
+    <link rel="stylesheet" href="styles.css?v=rag-delete-5" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
@@ -17,7 +17,7 @@
       <aside class="sidebar-rag" aria-label="RAG 管理">
         <h2 class="sidebar-rag-title">RAG 管理</h2>
         <p class="sidebar-rag-desc">
-          支持上传文本文件入库、手动查询 top-K、按 metadata 条件筛选记录并定向删除。
+          RAG库相关录入、查询、删除
         </p>
 
         <section class="rag-block" id="rag-upload-block">
@@ -43,11 +43,37 @@
             </label>
             <label class="rag-inline-label">
               metadata JSON（可选）
-              <textarea id="rag-metadata-json" rows="3" class="wf-ta" placeholder='例如: {"tag":"intro","author":"alice"}'></textarea>
+              <textarea id="rag-metadata-json" rows="1" class="wf-ta wf-ta--compact-json" placeholder='例如: {"tag":"intro","author":"alice"}'></textarea>
             </label>
           </form>
-          <p id="rag-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+          <div class="rag-pending-row">
+            <p id="rag-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button type="button" id="rag-clear-file-btn" class="btn-tiny rag-clear-file-btn" title="取消当前已选文件" aria-label="取消当前已选文件">-</button>
+          </div>
           <p id="rag-upload-status" class="asset-panel-status" role="status"></p>
+        </section>
+
+        <section class="rag-block" id="rag-delete-block">
+          <h3 class="rag-block-title">删除</h3>
+          <form id="rag-delete-id-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                按记录 ID 删除
+                <input type="text" id="rag-delete-id-input" class="branch-input" placeholder="输入完整记录 id" />
+              </label>
+              <button type="submit" class="btn-secondary btn-rag-del">按 ID 删除</button>
+            </div>
+          </form>
+          <form id="rag-delete-source-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                按 source 删除全部
+                <input type="text" id="rag-delete-source-input" class="branch-input" placeholder="输入 source 值" />
+              </label>
+              <button type="submit" class="btn-secondary btn-rag-del">按 source 删除</button>
+            </div>
+          </form>
+          <p id="rag-delete-status" class="asset-panel-status" role="status"></p>
         </section>
 
         <section class="rag-block rag-block--query" id="rag-query-block">
@@ -65,11 +91,11 @@
                 </select>
               </label>
             </div>
-            <label class="rag-inline-label" id="rag-query-text-wrap">
-              查询文本
-              <textarea id="rag-query-input" rows="2" class="wf-ta" placeholder="输入检索问题..."></textarea>
-            </label>
-            <div class="rag-query-row">
+            <div class="rag-query-row rag-query-row--main">
+              <label class="rag-inline-label rag-inline-label--query" id="rag-query-text-wrap">
+                查询文本
+                <textarea id="rag-query-input" rows="1" class="wf-ta wf-ta--query-one-line" placeholder="输入检索问题..."></textarea>
+              </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-top-k-wrap">
                 Top-K
                 <input type="number" id="rag-top-k" class="branch-input" min="1" max="20" value="5" />
@@ -324,7 +350,7 @@
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
     <script src="web_assets.js"></script>
-    <script src="rag_assets.js"></script>
+    <script src="rag_assets.js?v=rag-delete-5"></script>
     <script src="app.js"></script>
   </body>
 </html>

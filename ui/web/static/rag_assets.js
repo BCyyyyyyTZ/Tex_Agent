@@ -15,14 +15,27 @@
     el.className = "asset-panel-status" + (isErr ? " asset-panel-status--err" : "");
   }
 
-  function wirePendingFileLabel(inputEl, labelEl, emptyText) {
+  function wirePendingFileLabel(inputEl, labelEl, clearBtn, emptyText) {
     if (!inputEl || !labelEl) return;
     function sync() {
       var f = inputEl.files && inputEl.files[0];
       labelEl.textContent = f ? "已选：" + f.name : emptyText || "";
       labelEl.classList.toggle("file-pending--active", !!f);
+      if (clearBtn) {
+        clearBtn.style.display = f ? "inline-flex" : "none";
+      }
     }
     inputEl.addEventListener("change", sync);
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        inputEl.value = "";
+        try {
+          inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (_e) {
+          /* empty */
+        }
+      });
+    }
     sync();
   }
 
@@ -79,6 +92,8 @@
       li.innerHTML =
         '<div class="rag-item-title">#' +
         (idx + 1) +
+        " | id: " +
+        esc(hit && hit.id ? String(hit.id) : "—") +
         " | source: " +
         esc(source) +
         " | score: " +
@@ -138,6 +153,7 @@
     var ragSource = document.getElementById("rag-source");
     var ragMetadataJson = document.getElementById("rag-metadata-json");
     var ragPending = document.getElementById("rag-pending-name");
+    var ragClearBtn = document.getElementById("rag-clear-file-btn");
     var uploadStatus = document.getElementById("rag-upload-status");
 
     var queryForm = document.getElementById("rag-query-form");
@@ -154,11 +170,131 @@
     var metaKeyWrap = document.getElementById("rag-meta-key-wrap");
     var metaValueWrap = document.getElementById("rag-meta-value-wrap");
     var limitWrap = document.getElementById("rag-record-limit-wrap");
+    var deleteIdForm = document.getElementById("rag-delete-id-form");
+    var deleteIdInput = document.getElementById("rag-delete-id-input");
+    var deleteSourceForm = document.getElementById("rag-delete-source-form");
+    var deleteSourceInput = document.getElementById("rag-delete-source-input");
+    var deleteStatus = document.getElementById("rag-delete-status");
 
     if (!uploadForm || !queryForm || !queryMode) return;
 
-    wirePendingFileLabel(ragFile, ragPending, "");
+    wirePendingFileLabel(ragFile, ragPending, ragClearBtn, "");
     renderEmpty(resultList, "请选择查询方式并执行查询。");
+
+    function deleteById(rid) {
+      var id = (rid || "").trim();
+      if (!id) {
+        setStatus(deleteStatus, "请输入要删除的记录 id", true);
+        return Promise.resolve();
+      }
+      setStatus(deleteStatus, "删除中...", false);
+      return fetch(API + "rag/records/" + encodeURIComponent(id), {
+        method: "DELETE",
+      })
+        .then(function (r) {
+          if (!r.ok) {
+            return r.json().then(function (d) {
+              throw new Error((d && d.detail) || r.statusText);
+            });
+          }
+          return r.json();
+        })
+        .then(function (res) {
+          setStatus(
+            deleteStatus,
+            "已按 id 删除 " + ((res && res.deleted) || 0) + " 条，当前总数 " + ((res && res.total) || 0),
+            false
+          );
+        })
+        .catch(function (e) {
+          setStatus(deleteStatus, (e && e.message) || String(e), true);
+        });
+    }
+
+    function deleteBySource(srcRaw) {
+      var src = (srcRaw || "").trim();
+      if (!src) {
+        setStatus(deleteStatus, "请输入 source", true);
+        return Promise.resolve();
+      }
+      setStatus(deleteStatus, "检索 source 对应记录中...", false);
+      var pageSize = 50;
+      var offset = 0;
+      var allIds = [];
+
+      function collectAllIds() {
+        var params = new URLSearchParams();
+        params.set("offset", String(offset));
+        params.set("limit", String(pageSize));
+        params.set("include_document", "false");
+        params.set("metadata_key", "source");
+        params.set("metadata_value", src);
+        return fetch(API + "rag/records?" + params.toString(), { method: "GET" })
+          .then(function (r) {
+            if (!r.ok) {
+              return r.json().then(function (d) {
+                throw new Error((d && d.detail) || r.statusText);
+              });
+            }
+            return r.json();
+          })
+          .then(function (data) {
+            var items = (data && data.items) || [];
+            items.forEach(function (it) {
+              var md = (it && it.metadata) || {};
+              var sourceVal = md && md.source != null ? String(md.source) : "";
+              if (sourceVal === src && it && it.id) {
+                allIds.push(String(it.id));
+              }
+            });
+            if (data && data.has_next) {
+              offset += pageSize;
+              return collectAllIds();
+            }
+            return null;
+          });
+      }
+
+      function deleteAllIds(ids) {
+        var uniq = Array.from(new Set(ids.filter(function (x) { return !!x; })));
+        if (uniq.length === 0) {
+          setStatus(deleteStatus, "未找到该 source 的记录（需精确匹配 source）。", true);
+          return Promise.resolve();
+        }
+        setStatus(deleteStatus, "删除中...", false);
+        var idx = 0;
+        var deleted = 0;
+        function runOne() {
+          if (idx >= uniq.length) {
+            setStatus(deleteStatus, "已按 source 删除 " + deleted + " 条。", false);
+            return Promise.resolve();
+          }
+          var rid = uniq[idx++];
+          return fetch(API + "rag/records/" + encodeURIComponent(rid), { method: "DELETE" })
+            .then(function (r) {
+              if (!r.ok) {
+                return r.json().then(function (d) {
+                  throw new Error((d && d.detail) || r.statusText);
+                });
+              }
+              return r.json();
+            })
+            .then(function (res) {
+              deleted += Number((res && res.deleted) || 0);
+              return runOne();
+            });
+        }
+        return runOne();
+      }
+
+      return collectAllIds()
+        .then(function () {
+          return deleteAllIds(allIds);
+        })
+        .catch(function (e) {
+          setStatus(deleteStatus, (e && e.message) || String(e), true);
+        });
+    }
 
     function syncModeUI() {
       var mode = queryMode.value || "semantic";
@@ -205,23 +341,8 @@
           renderRecords(resultList, items, function (rec) {
             if (!rec || !rec.id) return;
             setStatus(queryStatus, "删除中...", false);
-            fetch(API + "rag/records/" + encodeURIComponent(rec.id), {
-              method: "DELETE",
-            })
-              .then(function (r) {
-                if (!r.ok) {
-                  return r.json().then(function (d) {
-                    throw new Error((d && d.detail) || r.statusText);
-                  });
-                }
-                return r.json();
-              })
+            deleteById(rec.id)
               .then(function (res) {
-                setStatus(
-                  queryStatus,
-                  "已删除 1 条记录，当前总数 " + ((res && res.total) || 0),
-                  false
-                );
                 return fetchRecordsByFilter();
               })
               .catch(function (e) {
@@ -341,6 +462,29 @@
 
     queryMode.addEventListener("change", syncModeUI);
     syncModeUI();
+
+    if (deleteIdForm && deleteIdInput) {
+      deleteIdForm.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        deleteById(deleteIdInput.value || "").then(function () {
+          if ((queryMode.value || "semantic") === "metadata") {
+            return fetchRecordsByFilter();
+          }
+          return null;
+        });
+      });
+    }
+    if (deleteSourceForm && deleteSourceInput) {
+      deleteSourceForm.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        deleteBySource(deleteSourceInput.value || "").then(function () {
+          if ((queryMode.value || "semantic") === "metadata") {
+            return fetchRecordsByFilter();
+          }
+          return null;
+        });
+      });
+    }
   }
 
   if (document.readyState === "loading") {

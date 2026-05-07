@@ -164,7 +164,7 @@ body {
   min-height: 0;
   width: 100%;
   background: transparent;
-  padding: 8px 10px 10px;
+  padding: 6px 8px 8px;
   overflow-x: hidden;
   overflow-y: hidden;
   overscroll-behavior: contain;
@@ -185,7 +185,7 @@ body {
 }
 .rag-block {
   margin-bottom: 0;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
   border-bottom: 1px solid #333;
   flex-shrink: 0;
 }
@@ -208,33 +208,107 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .btn-rag-run {
-  padding: 5px 10px;
-  font-size: 12px;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 .rag-inline-label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
+  gap: 3px;
+  font-size: 11px;
   color: #aaa;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .rag-inline-label--small {
   flex: 1 1 0;
   margin-bottom: 0;
 }
+.rag-inline-label--query {
+  flex: 2 1 0;
+  margin-bottom: 0;
+}
 .rag-query-form {
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   flex-shrink: 0;
 }
 .rag-query-row {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.rag-pending-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.rag-clear-file-btn {
+  flex: 0 0 auto;
+  display: none;
+  width: 16px;
+  height: 16px;
+  line-height: 12px;
+  padding: 0;
+  text-align: center;
+  font-weight: 700;
+}
+.btn-rag-del {
+  white-space: nowrap;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.asset-panel-status#rag-delete-status {
+  margin-top: 1px;
+  margin-bottom: 1px;
+}
+.rag-query-row--main .rag-inline-label--small {
+  flex: 0 0 auto;
+}
+#rag-top-k-wrap {
+  width: 66px;
+}
+#rag-meta-key-wrap,
+#rag-meta-value-wrap {
+  min-width: 92px;
+}
+#rag-record-limit-wrap {
+  width: 64px;
+}
+.sidebar-rag .btn-secondary {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.sidebar-rag .btn-upload-tight {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.sidebar-rag .composer-file-btn--compact {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+.wf-ta--compact-json {
+  min-height: 24px;
+  height: 24px;
+  max-height: 24px;
+  overflow-y: auto;
+  resize: none;
+  line-height: 1.4;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.wf-ta--query-one-line {
+  min-height: 24px;
+  height: 24px;
+  max-height: 24px;
+  overflow-y: auto;
+  resize: none;
+  line-height: 1.4;
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 .asset-list--rag-results {
   flex: 1 1 auto;
