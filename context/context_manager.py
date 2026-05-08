@@ -185,9 +185,11 @@ class ContextManager(BaseContext):
             mem_str = "\n".join(f"- {str(it)}" for it in mem_items)
             parts.append(f"<context type='memory'>\n{mem_str}\n</context>")
         if history_mode == "minimal":
-            chain = format_metadata_chain_for_prompt(state)
-            if chain.strip():
-                parts.append(f"<context type='metadata_chain'>\n{chain}\n</context>")
+            # 终节点等场景可关闭，避免与「上游节点输出」块重复注入整图 metadata 导致超长上下文
+            if bool(cfg.get("include_metadata_chain", True)):
+                chain = format_metadata_chain_for_prompt(state)
+                if chain.strip():
+                    parts.append(f"<context type='metadata_chain'>\n{chain}\n</context>")
         else:
             limit = cfg.get("conv_limit", self.max_messages or 20)
             window = msgs[-limit:] if limit else msgs

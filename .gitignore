@@ -40,6 +40,16 @@ dist/
 build/
 *.egg-info/
 
+# ---- check.py 工作目录（保留 .gitkeep）----
+files/input/*
+!files/input/.gitkeep
+files/checklist/*
+!files/checklist/.gitkeep
+files/checked/*
+!files/checked/.gitkeep
+files/output/*
+!files/output/.gitkeep
+
 # ---- 日志文件 ----
 *.log
 logs/

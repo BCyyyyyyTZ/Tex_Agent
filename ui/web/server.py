@@ -350,7 +350,7 @@ class ChatRequest(BaseModel):
 
 
 class WorkflowDraftIn(BaseModel):
-    """与 ``config/workflow_*.json`` 同构的 ``nodes`` / ``edges``。"""
+    """与 ``config/workflow/workflow_*.json`` 同构的 ``nodes`` / ``edges``。"""
 
     nodes: List[Dict[str, Any]] = Field(default_factory=list)
     edges: List[Dict[str, Any]] = Field(default_factory=list)

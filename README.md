@@ -1,5 +1,37 @@
 # TeX_Agent —— 基于多智能体架构的 LaTeX 论文写作增强系统
 
+## 命令行批量审查：`check.py`（checklist_multi v1 / v2 / v3）
+
+用于不经过 Web UI、按配置文件顺序跑多份 PDF 的 checklist 审查。
+
+1. **论文文件组织结构**
+   - `files/input/`：待审PDF原件（还在这里面的就是没审查的，审查完的会移动到checked下面）
+   - `files/checklist/`：checklist 文件
+   - `files/output/`：批注后的 PDF（脚本自动生成，无需在配置里写路径，同一个论文多次批注的结果会在后面标版本的）
+   - `files/checked/`：已审PDF原件
+
+
+2. **配置文件**：仓库中config/run_config.json
+   - `version`：`"v1"`、`"v2"` 或 `"v3"`（对应三套并行/串行/单节点审查策略）
+   - `checklist_path`：绝对路径 or 相对于 `files/checklist/` 的相对路径
+   - `pdf_path`（单个）或 `pdf_paths`（列表）：绝对路径 or 相对于 `files/input/` 的相对路径  
+   - 不用写输出路径
+
+3. **运行**：
+
+   ```bash
+   python check.py
+   ```
+
+4. **行为说明**
+   - 启动前会探测 **Gemini** 与 **OpenAI 兼容 API**；**连不上模型则直接退出**，不跑任何 PDF。
+   - 某个 **PDF 或 checklist 路径不存在**：**跳过该条**（若共享的 checklist 不存在则整批跳过）。
+   - 某一 PDF **执行失败（非连接类错误）**：打印错误并**继续**下一个。
+   - 运行中出现 **连接类错误**：**立即停止**，不再处理后续文件。
+   - **成功**：在 `files/output/` 生成批注 PDF，并把**原稿**归档到 `files/checked/`；**失败**：原文件仍留在原位置（例如仍在 `files/input/`）。
+
+5. **退出码**：`0` 表示本批全部成功；`1` 表示存在失败项、配置错误或没有任何可处理文件；`2` 表示模型连通性检查失败或运行中出现连接类错误并已中止。
+
 ## 项目简介
 
 TeX_Agent 是一个基于 **LangGraph + 多智能体（Multi-Agent System）** 架构的学术论文写作智能辅助系统。
@@ -83,7 +115,7 @@ python -m ui.web.server
 
 1. Gemini API可能连接不够稳定，并发执行大概率会有的连接失败，串行执行也有小概率失败某一个节点 —— 一个节点失败理论上有的时候不影响正常输出标注pdf，但会在UI显示有错误（有些情况下一些节点请求API失败，但Agent会根据请求成功的API输出进行工作，仍然在"output_path"下保存结果）
 2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
-3. 目前项目可以更方便地自定义工作流，可以参考`checklist_multi_v1`设计节点和边的关系，保存在Tex_Agent/config路径下，并在`config/workflow_registry.json`中参考前面的样子注册就能看到（关于自定义工作流的详细说明之后可以补充）
+3. 目前项目可以更方便地自定义工作流，可以参考 `checklist_multi_v1` 设计节点和边的关系，将 JSON 保存在 `config/workflow/` 下，并在 `config/workflow_registry.json` 中注册（关于自定义工作流的详细说明之后可以补充）
 
 ---
 
@@ -95,6 +127,8 @@ TeX_Agent/
 ├── requirements.txt             # 项目依赖（含 FastAPI、uvicorn、python-multipart 等）
 ├── .env.example                 # 环境变量示例（OPENAI_API_KEY 等，复制为 .env 使用）
 ├── README.md                    # 本文件
+├── check.py                     # 无 UI：按 config/run_config.json 批量跑 checklist_multi
+├── files/                       # check.py 推荐目录：input / checklist / output / checked（见文首说明）
 ├── storage/pdfs/                # Web 上传的 PDF 存放目录（用户文件默认被 .gitignore 忽略）
 ├── ui/web/                      # FastAPI Web UI：server.py、静态页、pdf_storage、ide_launch 等
 │   └── static/                  # index.html、app.js、分支/工作流/PDF 相关 JS 与样式
@@ -106,9 +140,10 @@ TeX_Agent/
 ├── config/                      # 统一配置层（开发者只需关注此目录即可完成大部分配置）
 │   ├── settings.py              # 全局配置：LLM 模型、API Key、RAG 分块参数、超时、重试
 │   ├── agent_config.py          # 各 Agent 的 system prompt、temperature 等行为参数
-│   ├── workflow_registry.json   # 工作流注册表（name -> file path）
-│   ├── workflow_default_dynamic.json     # 默认工作流动态配置
-│   ├── workflow_five_nodes_example.json  # 5 节点示例工作流配置
+│   ├── run_config.json          # check.py 运行配置（纳入版本库）
+│   ├── run_config.example.json  # 配置模板备份/参考
+│   ├── workflow_registry.json   # 工作流注册表（name -> config/workflow/*.json）
+│   ├── workflow/                # 各工作流 JSON（如 workflow_default_dynamic.json、workflow_checklist_multi_v*.json）
 │   ├── planner_config.py        # 动态规划：温度、轮数、JSON 输出约束、parse_llm_json 等
 │   └── logging_config.py        # 日志级别、格式、输出目标配置
 │

@@ -1,0 +1,9 @@
+{
+    "_comment": "复制为同目录 run_config.json。pdf 可为绝对路径，或相对于 files/input；checklist 相对于 files/checklist。",
+    "version": "v1",
+    "checklist_path": "my-checklist.md",
+    "pdf_paths": [
+        "paper-a.pdf",
+        "paper-b.pdf"
+    ]
+}

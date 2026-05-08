@@ -97,7 +97,9 @@
                 ],
                 "temperature": 0.15,
                 "history_mode": "minimal",
-                "single_turn_contract_mode": "always"
+                "single_turn_contract_mode": "always",
+                "include_metadata_chain": false,
+                "upstream_result_max_chars": 3000
             }
         }
     ],

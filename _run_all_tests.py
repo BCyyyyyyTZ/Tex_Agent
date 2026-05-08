@@ -102,7 +102,7 @@ def run_test_a():
     try:
         from workflow.workflow_parser import YAMLWorkflowParser
         parser = YAMLWorkflowParser()
-        cfg = parser.load_config("config/workflow_arxiv_research_user.json")
+        cfg = parser.load_config("config/workflow/workflow_arxiv_research_user.json")
         nodes = parser.parse_nodes(cfg)
         edges = parser.parse_edges(cfg)
         from context.context_manager import ContextManager
@@ -168,7 +168,7 @@ def run_test_b():
 
     parser = YAMLWorkflowParser()
     try:
-        cfg = parser.load_config("config/workflow_file_analysis.json")
+        cfg = parser.load_config("config/workflow/workflow_file_analysis.json")
         nodes = parser.parse_nodes(cfg)
         edges = parser.parse_edges(cfg)
         ctx = ContextManager(max_messages=50, default_limit=10)

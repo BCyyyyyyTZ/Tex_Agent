@@ -7,7 +7,7 @@
       "node_type": "tool",
       "tool_name": "file_loading",
       "config": {
-        "tool_input": "E:\\agent_ai\\main_work_version2\\Tex_Agent-main\\config\\workflow_parallel_conditional_demo.json",
+        "tool_input": "config/workflow/workflow_parallel_conditional_demo.json",
         "history_mode": "minimal"
       }
     },

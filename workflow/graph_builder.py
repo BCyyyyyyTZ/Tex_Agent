@@ -379,6 +379,7 @@ def build_app_from_workflow(
 
     - 若传入 ``config_dict``（含 ``nodes`` / ``edges``），从内存 JSON 解析，不再读注册表文件。
     - 否则按 ``workflow_name`` 从 ``workflow_registry.json`` 加载文件。
+    - 名称以 ``checklist_multi`` / ``checklist_annotate`` 开头时，不使用 ``persona_memory`` / ``runtime_memory`` 注入。
     """
     if config_dict is not None:
         from workflow.workflow_parser import YAMLWorkflowParser
@@ -388,13 +389,23 @@ def build_app_from_workflow(
         edges = parser.parse_edges(config_dict)
     else:
         nodes, edges = load_workflow_graph_config(workflow_name)
+
+    wf_label = workflow_name or "default"
+    eff_persona = persona_memory
+    eff_runtime = runtime_memory
+    # 论文批注类工作流：不注入会话 memory 检索与用户画像，避免无关上下文进入各节点 prompt
+    _wl = str(wf_label)
+    if _wl.startswith("checklist_multi") or _wl.startswith("checklist_annotate"):
+        eff_persona = None
+        eff_runtime = None
+
     return build_dynamic_graph(
         nodes=nodes,
         edges=edges,
         context_manager=context_manager,
-        persona_memory=persona_memory,
-        runtime_memory=runtime_memory,
-        default_workflow_name=workflow_name,
+        persona_memory=eff_persona,
+        runtime_memory=eff_runtime,
+        default_workflow_name=wf_label,
         default_history_mode=default_history_mode,
         human_input_provider=human_input_provider,
     )

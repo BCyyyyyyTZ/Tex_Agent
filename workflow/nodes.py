@@ -379,7 +379,12 @@ def _build_tool_structured_output(
     ).to_dict()
 
 
-def _upstream_blocks(meta: dict, depends_on: list) -> str:
+def _upstream_blocks(
+    meta: dict,
+    depends_on: list,
+    *,
+    max_result_chars: Optional[int] = None,
+) -> str:
     """
     从 metadata 提取 depends_on 节点的完整产出注入上游上下文。
 
@@ -408,8 +413,13 @@ def _upstream_blocks(meta: dict, depends_on: list) -> str:
         if summary:
             block_lines.append(f"摘要: {summary}")
         if result:
-            # 完整传递上游 result（UPSTREAM_RESULT_MAX_CHARS 为上限，默认 8192 字符）
-            compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
+            cap = (
+                max_result_chars
+                if max_result_chars is not None and max_result_chars > 0
+                else UPSTREAM_RESULT_MAX_CHARS
+            )
+            # 完整传递上游 result（默认 UPSTREAM_RESULT_MAX_CHARS；节点可覆盖以控制终节点 prompt 体积）
+            compact_result = _truncate_text(result, cap)
             block_lines.append(f"完整输出:\n{compact_result}")
 
         # 附加工具节点的关键元数据字段（如文件路径、查询词等）
@@ -510,9 +520,12 @@ def make_agent_node(
                 "max_tokens": int(node_config.get("max_tokens", 8000)),
                 "format": node_config.get("format", "plain"),
                 "history_mode": mode_norm,
+                "include_metadata_chain": bool(node_config.get("include_metadata_chain", True)),
             },
         )
-        upstream_ctx = _upstream_blocks(meta, depends_on)
+        urc = node_config.get("upstream_result_max_chars")
+        upstream_max = int(urc) if urc is not None else None
+        upstream_ctx = _upstream_blocks(meta, depends_on, max_result_chars=upstream_max)
 
         # 提示词顺序：任务 → 上游结果（最相关） → 原始背景 → 历史 → 格式约束（放最后方便 LLM 直接按格式生成）
         prompt = (
