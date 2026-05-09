@@ -78,8 +78,10 @@ def test_redo_true_bypasses_cache_even_if_present(tool: DoclingParseTool, monkey
 
     calls: list[tuple[str, str]] = []
 
-    def fake_parse(source: str, output_root=None, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append((str(source), str(output_root) if output_root else ""))
+    def fake_parse(source: str, output_root=None, output_dir=None, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(
+            (str(source), str(output_root) if output_root else "", str(output_dir) if output_dir else "")
+        )
         from rag.document_parse import DoclingParseResult
 
         out_dir = Path(parsed_root) / "fake_hmvlm_9999999999"

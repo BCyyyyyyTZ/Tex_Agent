@@ -117,6 +117,24 @@ python -m ui.web.server
 2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
 3. 目前项目可以更方便地自定义工作流，可以参考 `checklist_multi_v1` 设计节点和边的关系，将 JSON 保存在 `config/workflow/` 下，并在 `config/workflow_registry.json` 中注册（关于自定义工作流的详细说明之后可以补充）
 
+
+## Docling解析文（pdf -> md + json）
+
+### 命令行直接调用工具
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置环境变量
+cp .env.example .env
+
+# 3. 直接运行document_parse
+#    必填的参数是待解析的pdf路径
+#    可选参数：-o 保存结果的路径；不填会默认保存在Tex_Agent/storage/documents路径下   
+python -m rag.document_parse "D:\papers\my.pdf" -o "D:\output\my_parse_folder"
+```
+
 ---
 
 ## 项目目录树结构与文件说明

@@ -2,7 +2,8 @@
 使用 Docling 将本地文档解析为全文 Markdown + Docling JSON，并写入磁盘。
 
 输出目录由环境变量 PARSED_DOC_DIR 或 Settings.parsed_doc_dir 决定；
-每次解析在输出根下创建独立子目录，避免多次解析互相覆盖。
+默认在输出根下按「净化后的源文件名」创建子目录并写入 document.md / document.json，
+同名再次解析时覆盖该目录内文件（不使用时间戳子目录）。
 """
 from __future__ import annotations
 
@@ -85,10 +86,10 @@ def _sanitize_stem(stem: str) -> str:
 
 
 def _pick_output_dir(root: Path, stem: str) -> Path:
-    """在 root 下生成不冲突的子目录：{stem}_{unix_ts}。"""
+    """在 root 下使用固定子目录名 {净化stem}，存在则复用（覆盖写入）。"""
     safe = _sanitize_stem(stem)
-    out = root / f"{safe}_{int(time.time())}"
-    out.mkdir(parents=True, exist_ok=False)
+    out = root / safe
+    out.mkdir(parents=True, exist_ok=True)
     return out
 
 
@@ -693,6 +694,7 @@ def parse_document_to_dir(
     source: str | Path,
     output_root: Optional[str | Path] = None,
     *,
+    output_dir: Optional[str | Path] = None,
     allowed_suffixes: Optional[Iterable[str]] = None,
 ) -> DoclingParseResult:
     """
@@ -700,7 +702,10 @@ def parse_document_to_dir(
 
     Args:
         source: 源文件路径（绝对或相对项目根）。
-        output_root: 输出根目录；默认使用 settings.parsed_doc_dir。
+        output_root: 在未指定 output_dir 时使用的输出根目录；默认 settings.parsed_doc_dir。
+            实际写入路径为 output_root / <净化后的源文件名>/。
+        output_dir: 若指定，则直接在该目录下写入 document.md / document.json（同名覆盖），
+            不再追加 stem 子目录。
         allowed_suffixes: 允许的后缀集合（含点、小写），None 使用内置默认列表。
 
     Returns:
@@ -758,7 +763,11 @@ def parse_document_to_dir(
     root = Path(output_root).resolve() if output_root else Path(settings.parsed_doc_dir)
     root.mkdir(parents=True, exist_ok=True)
 
-    out_dir = _pick_output_dir(root, src.stem)
+    if output_dir is not None:
+        out_dir = Path(output_dir).expanduser().resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        out_dir = _pick_output_dir(root, src.stem)
     artifacts = out_dir / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
 
@@ -845,13 +854,29 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument(
         "-o",
+        "--output-dir",
+        dest="output_dir",
+        default=None,
+        help=(
+            "可选：直接在该目录下生成 document.md 与 document.json（同名覆盖）。"
+            "省略则写入 PARSED_DOC_DIR/<净化后的文件名>/"
+        ),
+    )
+    parser.add_argument(
         "--output-root",
         default=None,
-        help="输出根目录（可选）；默认使用环境变量 PARSED_DOC_DIR / settings.parsed_doc_dir",
+        help=(
+            "可选：解析根目录（在未指定 -o 时生效）；默认环境变量 PARSED_DOC_DIR / settings.parsed_doc_dir。"
+            "输出路径为 <output-root>/<净化后的文件名>/document.md"
+        ),
     )
     args = parser.parse_args(argv)
 
-    r = parse_document_to_dir(args.source, output_root=args.output_root)
+    r = parse_document_to_dir(
+        args.source,
+        output_root=args.output_root,
+        output_dir=args.output_dir,
+    )
     if r.success:
         print("解析成功")
         print("路由:", r.route, "| 页数:", r.page_count, "| 旁路阶段:", r.bypass_stage)

@@ -22,10 +22,10 @@ def _resolve_rag_persist_dir(raw: str) -> str:
     return str((_project_root / p).resolve())
 
 def _resolve_parsed_doc_dir(raw: str) -> str:
-    """解析结果输出根目录：空则默认 doc/parsed_doc；相对路径相对于项目根。"""
+    """解析结果输出根目录：空则默认 storage/documents；相对路径相对于项目根。"""
     text = (raw or "").strip()
     if not text:
-        text = "doc/parsed_doc"
+        text = "storage/documents"
     p = Path(text)
     if p.is_absolute():
         return str(p.resolve())

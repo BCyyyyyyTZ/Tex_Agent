@@ -1,7 +1,8 @@
 """
 DoclingParseTool：使用 Docling 将文档（PDF/DOCX 等）解析为 Markdown + JSON。
 
-支持缓存：若 redo=False（默认），会先在 PARSED_DOC_DIR 下查找已存在的解析结果（按文件名 stem 匹配），
+支持缓存：若 redo=False（默认），会先在 PARSED_DOC_DIR 下查找已存在的解析结果
+（子目录名为净化后的源文件名，内含 document.md / document.json），
 存在有效结果则直接复用，避免重复解析。
 """
 
@@ -28,29 +29,22 @@ def _sanitize_stem(stem: str) -> str:
 
 def _find_existing_parse(root: Path, source_stem: str) -> Optional[Path]:
     """
-    在 parsed_doc_dir 下查找与输入文件名 stem 匹配的最新解析目录。
-    目录命名格式为 {sanitized_stem}_{timestamp}。
-    返回第一个包含有效 document.md 和 document.json 的目录（优先最新）。
+    在 parsed_doc_dir 下查找与输入文件名 stem 对应的解析目录。
+    目录命名格式为 {sanitized_stem}（与 parse_document_to_dir 默认输出一致）。
+    若目录内存在有效 document.md 与 document.json 则返回该路径。
     """
     if not root.exists():
         return None
 
     safe_stem = _sanitize_stem(source_stem)
-    candidates = []
-
-    for item in root.iterdir():
-        if item.is_dir() and item.name.startswith(f"{safe_stem}_"):
-            md_path = item / "document.md"
-            json_path = item / "document.json"
-            if md_path.exists() and json_path.exists() and md_path.stat().st_size > 100:  # 非空检查
-                candidates.append(item)
-
-    if not candidates:
+    cand = root / safe_stem
+    if not cand.is_dir():
         return None
-
-    # 按修改时间倒序，取最新的
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0]
+    md_path = cand / "document.md"
+    json_path = cand / "document.json"
+    if md_path.is_file() and json_path.is_file() and md_path.stat().st_size > 100:
+        return cand
+    return None
 
 
 _DEFAULT_MD_PREVIEW_CHARS = 4000   # 默认在 output 中附带的 Markdown 预览字符数
@@ -79,7 +73,11 @@ class DoclingParseTool(BaseTool):
             input_schema={
                 "doc_path": "必填，要解析的文档绝对或相对路径（支持 PDF、DOCX、MD、TXT 等）",
                 "redo": "可选，是否强制重新解析（true/false，默认为 false）。若为 false 则优先复用缓存结果。",
-                "md_preview_chars": "可选，在 output 中附带的 Markdown 预览字符数，默认 4000，0 表示不附带正文。"
+                "md_preview_chars": "可选，在 output 中附带的 Markdown 预览字符数，默认 4000，0 表示不附带正文。",
+                "output_dir": (
+                    "可选，解析结果目录：若指定则直接在该目录下生成 document.md / document.json（同名覆盖）；"
+                    "省略则使用 PARSED_DOC_DIR/<净化文件名>/"
+                ),
             }
         )
 
@@ -97,7 +95,13 @@ class DoclingParseTool(BaseTool):
             logger.warning(f"读取 Markdown 预览失败: {e}")
             return ""
 
-    def run(self, doc_path: str, redo: bool = False, md_preview_chars: int = _DEFAULT_MD_PREVIEW_CHARS) -> ToolResult:
+    def run(
+        self,
+        doc_path: str,
+        redo: bool = False,
+        md_preview_chars: int = _DEFAULT_MD_PREVIEW_CHARS,
+        output_dir: Optional[str] = None,
+    ) -> ToolResult:
         """
         执行文档解析。
 
@@ -108,16 +112,18 @@ class DoclingParseTool(BaseTool):
         Returns:
             ToolResult，output 中包含解析结果路径和摘要信息
         """
-        logger.info(f"DoclingParseTool 执行 | doc_path={doc_path!r}, redo={redo}")
+        logger.info(
+            f"DoclingParseTool 执行 | doc_path={doc_path!r}, redo={redo}, output_dir={output_dir!r}"
+        )
 
         try:
             parsed_root = Path(settings.parsed_doc_dir)
             source_path = Path(doc_path)
             stem = source_path.stem
 
-            # 1. 检查缓存（redo=False 时）
+            # 1. 检查缓存（redo=False 且未指定自定义输出目录时）
             existing_dir = None
-            if not redo:
+            if not redo and not (output_dir or "").strip():
                 existing_dir = _find_existing_parse(parsed_root, stem)
                 if existing_dir:
                     md_path = existing_dir / "document.md"
@@ -153,9 +159,11 @@ class DoclingParseTool(BaseTool):
 
             # 2. 执行解析
             logger.info(f"开始 Docling 解析: {doc_path} (redo={redo})")
+            od = (output_dir or "").strip() or None
             result: DoclingParseResult = parse_document_to_dir(
                 source=doc_path,
-                output_root=str(parsed_root)
+                output_root=str(parsed_root),
+                output_dir=od,
             )
 
             if not result.success:
@@ -221,6 +229,8 @@ if __name__ == "__main__":
     print("  from tools.docling_tool import DoclingParseTool")
     print("  tool = DoclingParseTool()")
     print('  result = tool.run("path/to/document.pdf", redo=False)')
+    print('  result = tool.run("path/to/document.pdf", output_dir="D:/out/my_parse")')
     print("  print(result.output)")
     print("\n工具名称: docling_parse")
-    print("输入参数: doc_path (必填), redo=False (可选)")
+    print("输入参数: doc_path (必填), redo=False (可选), output_dir 可选")
+    print("命令行（推荐）: python -m rag.document_parse <源文件> [-o 输出目录]")
