@@ -24,6 +24,7 @@ from utils.logger import get_logger
 from tools.gemini_upload_pdf_tool import GeminiUploadPdfTool
 from tools.register_inputs_tool import RegisterInputsTool
 from tools.offer_artifact_download_tool import OfferArtifactDownloadTool
+from tools.preflight_inputs_tool import PreflightInputsTool
 
 logger = get_logger(__name__)
 _shared_pm = get_shared_user_persona_memory()
@@ -54,6 +55,7 @@ def _build_base_tools() -> List:
         ("figure_ref_checker", lambda: FigureRefCheckerTool()),
         ("rag_retrieve", lambda: RAGRetrieveTool()),
         ("register_inputs", lambda: RegisterInputsTool()),
+        ("preflight_inputs", lambda: PreflightInputsTool()),
         ("gemini_upload_pdf", lambda: GeminiUploadPdfTool()),
         ("offer_artifact_download", lambda: OfferArtifactDownloadTool()),
     ]

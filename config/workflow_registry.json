@@ -71,6 +71,10 @@
     "checklist_multi_v3": {
       "type": "file",
       "path": "config/workflow/workflow_checklist_multi_v3.json"
+    },
+    "checklist_multi_v4": {
+      "type": "file",
+      "path": "config/workflow/workflow_checklist_multi_v4.json"
     }
   }
 }
