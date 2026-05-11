@@ -59,6 +59,18 @@ class PdfCommentTool(BaseTool):
                 
         return results
 
+    def find_in_document(self, doc, target_text: str, skip_page_idx: Optional[int] = None):
+        for idx in range(len(doc)):
+            if skip_page_idx is not None and idx == skip_page_idx:
+                continue
+            page = doc[idx]
+            rects = page.search_for(target_text)
+            #if not rects:
+                #rects = self.fuzzy_search(page, target_text)
+            if rects:
+                return idx, rects
+        return None, None
+
     def run_single(self, pdf_path, output_path, page_idx, text, comment, author = None):
         """
         高亮 PDF 中的文本并添加注释
@@ -99,12 +111,32 @@ class PdfCommentTool(BaseTool):
             text_instances = page.search_for(text)
             
             if not text_instances:
-                doc.close()
-                return ToolResult(
-                    success=False,
-                    output=None,
-                    error=f"未找到要高亮注释的文本: '{text}'，在页码{page_idx}未找到",
-                )
+                text_instances = self.fuzzy_search(page, text)
+
+            used_page_idx = page_idx
+            if not text_instances:
+                found_page_idx, found_rects = self.find_in_document(doc, text, skip_page_idx=page_idx)
+                if found_page_idx is not None and found_rects:
+                    used_page_idx = found_page_idx
+                    page = doc[used_page_idx]
+                    text_instances = found_rects
+                else:
+                    first_page = doc[0]
+                    annot_point = fitz.Point(50, 50)
+                    comment_content = f"未在全文找到文本:\n{text}\n\n注释:\n{comment}"
+                    sticky_note = first_page.add_text_annot(annot_point, comment_content, icon="Note")
+                    sticky_note.set_info(
+                        content=comment_content,
+                    )
+                    doc.save(save_path, garbage=4, deflate=True, clean=True)
+                    doc.close()
+                    if same_file:
+                        os.replace(temp_path, output_path)
+                    print("✅ 未找到文本，已在第 0 页左上角添加注释")
+                    return ToolResult(
+                        success=True,
+                        output=f"未找到文本，已在第 0 页左上角添加注释 '{comment}'",
+                    )
             
             # 格式化时间
             now = datetime.now()
@@ -142,7 +174,7 @@ class PdfCommentTool(BaseTool):
             #print(f"   标注者：{author}，时间：{now.strftime('%Y-%m-%d %H:%M:%S')}")
             return ToolResult(
                 success=True,
-                output= f"已高亮第 {page_idx} 页的 '{text}' 并添加注释 '{comment}'",
+                output= f"已高亮第 {used_page_idx} 页的 '{text}' 并添加注释 '{comment}'",
             )
         except Exception as e:
             traceback.print_exc()
@@ -218,34 +250,45 @@ class PdfCommentTool(BaseTool):
                     # 查找要高亮的文本
                     text_instances = page.search_for(text)
                     
+                    #if not text_instances:
+                        #text_instances = self.fuzzy_search(page, text)
+
+                    used_page_idx = page_idx
+                    used_page = page
                     if not text_instances:
-                        text_instances = self.fuzzy_search(page, text)
-                        if not text_instances:
-                            # 记录找不到文本的注释
-                            if page_idx not in page_not_found_comments:
-                                page_not_found_comments[page_idx] = []
-                            page_not_found_comments[page_idx].append(f"问题 {i+1}:\n文本:'{text}'\n注释: {comment}")
+                        found_page_idx, found_rects = self.find_in_document(doc, text, skip_page_idx=page_idx)
+                        if found_page_idx is not None and found_rects:
+                            used_page_idx = found_page_idx
+                            used_page = doc[used_page_idx]
+                            text_instances = found_rects
+                        else:
+                            #if page_idx not in page_not_found_comments:
+                            #    page_not_found_comments[page_idx] = []
+                            #page_not_found_comments[page_idx].append(f"问题 {i+1}:\n文本:'{text}'\n注释: {comment}")
+                            if 0 not in page_not_found_comments:
+                                page_not_found_comments[0] = []
+                            page_not_found_comments[0].append(f"问题 {i+1}:\n文本:'{text}'\n注释: {comment}")
                             success_count += 1
-                            print(f"✅ 已处理问题 {i+1}")
+                            print(f"✅ 已处理问题 {i+1}，但未找到文本")
                             continue
                     
                     # 为每个找到的文本实例添加高亮和注释
                     for inst in text_instances:
                         # 添加高亮
-                        highlight = page.add_highlight_annot(inst)
+                        highlight = used_page.add_highlight_annot(inst)
                         highlight.set_info(
                             content=f"问题 {i+1}: {comment}",
                         )
                         
                         # 在高亮旁边添加一个便签注释
                         annot_point = fitz.Point(inst.x1 + 10, inst.y0)
-                        sticky_note = page.add_text_annot(annot_point, comment, icon="Note")
+                        sticky_note = used_page.add_text_annot(annot_point, comment, icon="Note")
                         sticky_note.set_info(
                             content=comment,
                         )
                     
                     success_count += 1
-                    commented_pages.add(page_idx + 1)
+                    commented_pages.add(used_page_idx + 1)
                     print(f"✅ 已处理问题 {i+1}")
                     
                 except Exception as e:

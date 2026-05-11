@@ -88,11 +88,20 @@ def build_section_prompt(section: ChecklistSection) -> str:
         "或（没有任何问题时）：\n"
         "TOOL_CALL none []\n\n"
         "要求：\n"
-        "1. page_idx 为问题在论文中的页码，从 1 开始。\n"
-        "2. text 必须在字符串层面严格匹配 PDF 原文内容，尽量选择不包含特殊格式（上标/下标/角标/公式）的短片段。\n"
-        "3. comment 为不符合原因，表述简洁明确。\n"
-        "4. 输出必须是可被 json.loads 直接解析的 JSON。\n"
-        "5. 不要输出除 TOOL_CALL 格式外的任何内容。\n"
+        "1. page_idx 为问题在论文中的页数，注意不是pdf中标注的页码，而是从pdf第一页开始问题所在的页数（不论一页pdf是否标注页码，均计算在页数中），从 1 开始。\n"
+        "2. text 字段确定的方法：\n"
+        "   1）找到问题所在的片段。\n"
+        "   2）在问题附近找出一段不含有任何标点符号，英文字符（如单词），数字，特殊格式（如角标）且在全文具有唯一性的中文文字片段。\n"
+        "   3）再次检查选取的片段，确保不包含标点符号，英文字符（如单词），数字，特殊格式（如角标），只包含中文文字内容，且在全文具有唯一性。\n"
+        "   4）确保文字片段与原文在字符串意义上完全相同后作为 text 字段。\n"
+        "3. text 字段要求：\n"
+        "   1）text 必须在字符串层面严格匹配 PDF 原文内容。\n"
+        "   2）text 字段不包含标点符号，英文字符（如单词），数字，特殊格式（如角标），只包含中文文字内容，且在全文具有唯一性\n"
+        "   3）text 字段在保证标识性的前提下尽可能短，但不要太短（如一个词语）导致全文多次匹配\n"
+        "4. comment 为不符合原因，表述简洁明确。\n"
+        "5. 输出必须是可被 json.loads 直接解析的 JSON。\n"
+        "6. 不要输出除 TOOL_CALL 格式外的任何内容。\n"
+        "7. 不要输出论文要求中没有提到的问题，保证每个问题在检查项中均存在。\n"
     )
 
 
@@ -104,9 +113,10 @@ class ThesisChecklistWorkflow:
         llm_client: Optional[LlmClientLike] = None,
         pdf_comment_tool: Optional[PdfCommentTool] = None,
         #model_name: str = "gemini-3.1-flash-lite-preview",
-        model_name: str = "gemini-3-flash-preview",
-        #model_name: str = "gemini-2.5-flash",
+        #model_name: str = "gemini-3-flash-preview",
+        model_name: str = "qwen-long-2025-01-25",
         api_key: str = "",
+        base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature: float = 0.2,
     ):
         self.checklist_path = str(Path(checklist_path).resolve())
@@ -117,9 +127,18 @@ class ThesisChecklistWorkflow:
 
 
         if llm_client is None:
-            from agents.base_agent import GeminiClient
+            m = (model_name or "").lower()
+            from agents.base_agent import QwenClient
 
-            llm_client = GeminiClient(model_name=model_name, api_key=api_key, temperature=temperature)
+            llm_client = QwenClient(
+                model_name=model_name,
+                api_key=api_key,
+                temperature=temperature,
+                base_url=base_url,
+            )
+            #from agents.base_agent import GeminiClient
+            #llm_client = GeminiClient(model_name=model_name, api_key=api_key, temperature=temperature)
+        
         self.llm_client = llm_client
 
         self.pdf_comment_tool = pdf_comment_tool or PdfCommentTool()

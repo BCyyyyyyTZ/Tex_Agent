@@ -1,1 +1,1 @@
-MODE = "release"
+MODE = "debug"

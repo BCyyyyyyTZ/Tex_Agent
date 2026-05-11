@@ -9,6 +9,7 @@ import openai
 
 from core.message import AgentMessage, ToolResult
 from tools.base_tool import BaseTool
+from tools.file_loading_tool import FileLoadingTool
 from utils.utils import set_nested_value
 
 import os
@@ -49,8 +50,16 @@ class LlmClient:
 		self.api_key = api_key
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 		self.temperature = temperature
+		self._file_loader = FileLoadingTool()
 		
-	def response(self, prompt: str, attachments: Optional[List[dict]] = None) -> str:
+	def response(
+		self,
+		prompt: str,
+		attachments: Optional[List[dict]] = None,
+		file_paths: Union[str, List[str], None] = None,
+		*,
+		max_file_chars: int = 200000,
+	) -> str:
 		"""
 		生成LLM响应，支持上传附件
 		
@@ -59,10 +68,35 @@ class LlmClient:
 		    attachments: 附件列表，每个附件为包含type和相关信息的字典
 		                例如: [{"type": "image_url", "image_url": {"url": "..."}}]
 		                或: [{"type": "file", "file": {"file_id": "..."}}]
+		    file_paths: 本地文件路径（用于不支持上传文件的 API；会抽取文本并注入 prompt）
 		
 		Returns:
 		    LLM生成的文本响应
 		"""
+		if file_paths is not None:
+			if isinstance(file_paths, str):
+				file_paths = [file_paths]
+
+			buf: List[str] = []
+			buf.append(prompt)
+			buf.append("\n\n以下为本地文件抽取的文本内容（按文件分隔）：\n")
+
+			used = 0
+			for p in file_paths:
+				r = self._file_loader.run(str(p))
+				if not r.success:
+					continue
+				text = r.output or ""
+				remain = max_file_chars - used
+				if remain <= 0:
+					break
+				if len(text) > remain:
+					text = text[:remain]
+				used += len(text)
+				buf.append(f"\n--- FILE: {os.path.basename(str(p))} ---\n{text}\n")
+
+			prompt = "".join(buf)
+
 		# 构建消息内容
 		message_content = []
 		
@@ -173,6 +207,99 @@ class GeminiClient:
         return response.text.strip()
 
 
+class QwenClient:
+    def __init__(
+        self,
+        model_name: str,
+        api_key: str,
+        temperature: float,
+        *,
+        base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        file_purpose: str = "file-extract",
+        max_file_chars: int = 200000,
+        upload_wait_seconds: int = 99999999,
+    ):
+        self.model_name = model_name
+        self.api_key = api_key
+        self.base_url = base_url
+        self.temperature = temperature
+        self.file_purpose = file_purpose
+        self.max_file_chars = int(max_file_chars or 0)
+        self.upload_wait_seconds = int(upload_wait_seconds or 0)
+        self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        self.files: dict[str, Any] = {}
+        self._file_loader = FileLoadingTool()
+
+    def _upload_files(self, file_paths: List[str]) -> List[Any]:
+        uploaded: List[Any] = []
+        for path in file_paths:
+            if not os.path.exists(path):
+                continue
+            if path in self.files:
+                uploaded.append(self.files[path])
+                continue
+            with open(path, "rb") as f:
+                file_obj = self.client.files.create(file=f, purpose=self.file_purpose)
+            self.files[path] = file_obj
+            uploaded.append(file_obj)
+        print(f"QwenClient: 上传 {len(uploaded)} 个文件")
+        return uploaded
+
+    def _wait_files_ready(self, uploaded: List[Any]) -> None:
+        if self.upload_wait_seconds <= 0 or not uploaded:
+            return
+        deadline = time.time() + self.upload_wait_seconds
+        pending: list[str] = []
+        for f in uploaded:
+            fid = getattr(f, "id", None) or getattr(f, "file_id", None)
+            if fid:
+                pending.append(str(fid))
+        if not pending:
+            return
+        remaining = set(pending)
+        while remaining and time.time() < deadline:
+            done: set[str] = set()
+            for fid in list(remaining):
+                try:
+                    info = self.client.files.retrieve(fid)
+                except Exception:
+                    continue
+                status = getattr(info, "status", None) or getattr(getattr(info, "state", None), "name", None) or getattr(info, "state", None)
+                if status is None:
+                    continue
+                s = str(status).upper()
+                if s in {"ACTIVE", "SUCCEEDED", "SUCCESS", "PROCESSED", "READY"}:
+                    done.add(fid)
+                if s in {"FAILED", "ERROR"}:
+                    done.add(fid)
+            remaining -= done
+            if remaining:
+                time.sleep(2)
+
+    def response(self, prompt: str, file_paths: Union[str, List[str], None] = None, **_: Any) -> str:
+        if file_paths is not None and isinstance(file_paths, str):
+            file_paths = [file_paths]
+
+        messages: List[dict[str, Any]] = []
+        if file_paths:
+            uploaded = self._upload_files(file_paths)
+            self._wait_files_ready(uploaded)
+            for f in uploaded:
+                fid = getattr(f, "id", None) or getattr(f, "file_id", None)
+                if fid:
+                    messages.append({"role": "system", "content": f"fileid://{fid}"})
+                    print(f"QwenClient: 上传文件 {fid} 完成")
+        messages.append({"role": "user", "content": prompt})
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            temperature=self.temperature,
+            max_tokens=4096,
+        )
+        return response.choices[0].message.content.strip()
+
+
+
 class BaseAgent(ABC):
     """
     Agent 标准抽象基类。
@@ -209,6 +336,14 @@ class BaseAgent(ABC):
 
     def set_gemini(self, llm_name: str, model_name: str, api_key: str, temperature: float) -> None:
         self.llms[llm_name] = GeminiClient(model_name, api_key, temperature)    
+
+    def set_qwen(self, llm_name: str, model_name: str, api_key: str, temperature: float, base_url: str = "") -> None:
+        self.llms[llm_name] = QwenClient(
+            model_name=model_name,
+            api_key=api_key,
+            temperature=temperature,
+            base_url=base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        )
 
     def set_tool_args(self, args: dict) -> None:
         for tool_name, tool_args in args.items():
