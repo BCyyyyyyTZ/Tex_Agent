@@ -40,3 +40,8 @@
 + 在web-ui中添加对RAG的支持（包括增加、查询、删除）
 + web-ui支持上传Skill和Checklist
 + 支持选择的文件撤销
+
+#### [2026-05-12](./2026-05-12.md)
+
++ `preflight_inputs_tool` 支持用户更自由的输入（自然语言 + 路径混写、严格校验、OpenAI 语义抽取等）
++ 建立 checklist 多路并行审查 **v4** 工作流（`checklist_multi_v4`，首节点 preflight）
