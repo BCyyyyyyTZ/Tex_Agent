@@ -75,6 +75,10 @@
     "checklist_multi_v4": {
       "type": "file",
       "path": "config/workflow/workflow_checklist_multi_v4.json"
+    },
+    "thesis_chapter_extract": {
+      "type": "file",
+      "path": "config/workflow/workflow_thesis_chapter_extract.json"
     }
   }
 }

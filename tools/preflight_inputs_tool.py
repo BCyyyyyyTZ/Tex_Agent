@@ -26,7 +26,7 @@ class PreflightInputsTool(BaseTool):
 
     _TEMPLATE_PATTERN = re.compile(r"\$\{([^}]+)\}")
     _KEYVAL_PATTERN = re.compile(
-        r'["\']?([a-zA-Z0-9_.-]*(?:path|file|pdf|checklist|output)[a-zA-Z0-9_.-]*)["\']?\s*[:=]\s*'
+        r'["\']?([a-zA-Z0-9_.-]*(?:path|file|pdf|checklist|output|chapter|chapters|section)[a-zA-Z0-9_.-]*)["\']?\s*[:=]\s*'
         r'(?:"([^"]+)"|\'([^\']+)\'|([^\n\r]+))',
         flags=re.IGNORECASE,
     )
@@ -47,6 +47,31 @@ class PreflightInputsTool(BaseTool):
     _PDF_EXT = {".pdf"}
     _CHECKLIST_EXT = {".md", ".txt", ".json", ".yaml", ".yml"}
     _PATH_HINT_KEYS = ("path", "file", "pdf", "checklist", "output", "attachment")
+    _VALUE_HINT_KEYS = ("chapter", "chapters", "section")
+    _CHAPTER_KEYVAL_PATTERN = re.compile(
+        r'["\']?(chapter_selection|chapter|chapters|section|sections)["\']?\s*[:=]\s*'
+        r'(?:"([^"]+)"|\'([^\']+)\'|([^\n\r]+))',
+        flags=re.IGNORECASE,
+    )
+    _CHAPTER_TOKEN_PATTERN = re.compile(
+        r"(第\s*[一二三四五六七八九十百千万零两\d]+\s*[章节篇]|"
+        r"chapter\s+\d+(?:\.\d+)*|"
+        r"\d+(?:\.\d+)*(?:\s*[-~到至]\s*\d+(?:\.\d+)*)?)",
+        flags=re.IGNORECASE,
+    )
+    _CHAPTER_KEYWORD_PATTERN = re.compile(
+        r"(摘要|中文摘要|英文摘要|abstract|参考文献|references|bibliography|致谢|鸣谢|"
+        r"acknowledgements|acknowledgments|引言|绪论|结论|附录)",
+        flags=re.IGNORECASE,
+    )
+    _QUOTED_SECTION_PATTERN = re.compile(
+        r"[\"“”'‘’]([^\"“”'‘’\n\r]{1,80})[\"“”'‘’]\s*(?:这一|这)?(?:章节|小节|节|部分)",
+        flags=re.IGNORECASE,
+    )
+    _SUFFIX_SECTION_PATTERN = re.compile(
+        r"(?:^|[，。；;,\n\s])([A-Za-z0-9\u4e00-\u9fa5\.\- ]{2,40})\s*(?:这一|这)?(?:章节|小节|节|部分)",
+        flags=re.IGNORECASE,
+    )
     _USER_EXPR_PREFIXES = (
         "input",
         "last_message",
@@ -142,11 +167,18 @@ class PreflightInputsTool(BaseTool):
                 current_node_id=current_node_id,
             )
             extracted = self._extract_paths_from_text(combined_text)
+            extracted_values = self._extract_values_from_text(combined_text)
             user_slots = analysis.get("user_required_slots", [])
             slot_contract = self._build_slot_contract(user_slots)
             slot_values = self._map_paths_to_slots(
                 slots=slot_contract,
                 extracted=extracted,
+            )
+            slot_values.update(
+                self._map_values_to_slots(
+                    slots=slot_contract,
+                    extracted_values=extracted_values,
+                )
             )
 
             llm_info: Dict[str, Any] = {"enabled": False, "used": False, "error": ""}
@@ -155,20 +187,23 @@ class PreflightInputsTool(BaseTool):
                 llm_slot_values, llm_error = self._extract_paths_with_llm(
                     user_input=combined_text,
                     slots=slot_contract,
-                    extracted=extracted,
+                    extracted={**extracted, **extracted_values},
                     llm_provider=llm_provider,
                     llm_model=llm_model,
                 )
                 if llm_slot_values:
                     llm_info["used"] = True
-                    slot_values = self._merge_slot_values(slot_values, llm_slot_values)
+                    slot_values = self._merge_slot_values(slot_values, llm_slot_values, slot_contract)
                 if llm_error:
                     llm_info["error"] = llm_error
 
             self._apply_slot_defaults(slot_values, slot_contract)
             normalized_inputs = self._to_normalized_inputs(slot_values, extracted)
+            extra_slots = self._to_extra_slots(slot_values, slot_contract)
+            required_view = dict(normalized_inputs)
+            required_view.update(extra_slots)
             missing_required_slots = self._find_missing_required_slots(
-                slot_values=normalized_inputs,
+                slot_values=required_view,
                 slot_contract=slot_contract,
             )
             payload_for_register_inputs: Union[str, Dict[str, Any]]
@@ -187,7 +222,7 @@ class PreflightInputsTool(BaseTool):
             if not extracted.get("all_paths"):
                 warnings.append("未从合并文本中提取到明确路径。")
             if missing_required_slots:
-                warnings.append(f"缺失必填路径槽位：{', '.join(missing_required_slots)}")
+                warnings.append(f"缺失必填槽位：{', '.join(missing_required_slots)}")
             if llm_info.get("error"):
                 warnings.append(f"LLM 抽取未生效：{llm_info['error']}")
 
@@ -197,7 +232,9 @@ class PreflightInputsTool(BaseTool):
                 "analysis": analysis,
                 "slot_contract": slot_contract,
                 "extracted_paths": extracted,
+                "extracted_values": extracted_values,
                 "resolved_user_paths": slot_values,
+                "extra_slots": extra_slots,
                 "normalized_inputs": normalized_inputs,
                 "payload_for_register_inputs": payload_for_register_inputs,
                 "context_text_used": bool(context_text.strip()),
@@ -212,9 +249,9 @@ class PreflightInputsTool(BaseTool):
             if strict_mode and missing_required_slots:
                 final_success = False
                 final_error = (
-                    "缺少工作流必填路径参数："
+                    "缺少工作流必填参数："
                     + ", ".join(missing_required_slots)
-                    + "。请在输入中补充这些路径后重试。"
+                    + "。请在输入中补充这些参数后重试。"
                 )
             if run_register:
                 reg_tool = RegisterInputsTool()
@@ -246,7 +283,9 @@ class PreflightInputsTool(BaseTool):
                 "workflow_path": workflow_path,
                 "analysis": {},
                 "extracted_paths": self._extract_paths_from_text(combined_fb.strip() or user_input),
+                "extracted_values": self._extract_values_from_text(combined_fb.strip() or user_input),
                 "resolved_user_paths": {},
+                "extra_slots": {},
                 "normalized_inputs": {},
                 "payload_for_register_inputs": combined_fb or user_input,
                 "warnings": [f"preflight_inputs 降级：{e}"],
@@ -450,7 +489,8 @@ class PreflightInputsTool(BaseTool):
 
         templates = [m.group(1).strip() for m in self._TEMPLATE_PATTERN.finditer(value)]
         is_path_like = self._looks_path_related(path, value)
-        if not templates and not is_path_like:
+        is_value_like = self._looks_value_related(path, value)
+        if not templates and not is_path_like and not is_value_like:
             return
 
         source_types: List[str] = []
@@ -464,7 +504,7 @@ class PreflightInputsTool(BaseTool):
             if user_flag:
                 user_required = True
 
-        if not templates and is_path_like:
+        if not templates and (is_path_like or is_value_like):
             source_types.append("literal")
             user_required = False
 
@@ -543,10 +583,12 @@ class PreflightInputsTool(BaseTool):
             )
             entry = slots.get(slot_name)
             if entry is None:
+                slot_kind = self._infer_slot_kind(slot_name)
                 entry = {
                     "slot": slot_name,
                     "from_nodes": [],
                     "field_paths": [],
+                    "slot_kind": slot_kind,
                     "suggested_extensions": self._suggest_extensions(slot_name),
                 }
                 slots[slot_name] = entry
@@ -566,14 +608,24 @@ class PreflightInputsTool(BaseTool):
             default_strategy = self._DEFAULTABLE_SLOT_RULES.get(name, "")
             required = not bool(default_strategy)
             entry = dict(slot)
+            if not entry.get("slot_kind"):
+                entry["slot_kind"] = self._infer_slot_kind(name)
             entry["required"] = required
             entry["default_strategy"] = default_strategy
             contract.append(entry)
         return contract
 
+    def _infer_slot_kind(self, slot_name: str) -> str:
+        name = str(slot_name or "").strip().lower()
+        if "chapter" in name or "section" in name:
+            return "value"
+        return "path"
+
     def _to_slot_name(self, *, field_path: str, value_preview: str, templates: List[str]) -> str:
         fp = (field_path or "").lower()
         merged = " ".join([fp, (value_preview or "").lower(), " ".join(str(t).lower() for t in templates)])
+        if "chapter_selection" in merged or "chapters" in merged or "chapter" in merged or "section" in merged:
+            return "chapter_selection"
         if "pdf" in merged:
             return "pdf_path"
         if "checklist" in merged:
@@ -590,6 +642,8 @@ class PreflightInputsTool(BaseTool):
 
     def _suggest_extensions(self, slot_name: str) -> List[str]:
         s = (slot_name or "").lower()
+        if "chapter" in s or "section" in s:
+            return []
         if "pdf" in s:
             return [".pdf"]
         if "checklist" in s:
@@ -612,6 +666,17 @@ class PreflightInputsTool(BaseTool):
         if "/" in text or "\\" in text:
             return True
         if re.search(r"\.(pdf|md|txt|json|ya?ml|docx?|csv|xlsx?|pptx?)\b", text, re.IGNORECASE):
+            return True
+        return False
+
+    def _looks_value_related(self, field_path: str, value: str) -> bool:
+        fp = (field_path or "").lower()
+        if any(k in fp for k in self._VALUE_HINT_KEYS):
+            return True
+        text = (value or "").strip().lower()
+        if not text:
+            return False
+        if any(k in text for k in self._VALUE_HINT_KEYS):
             return True
         return False
 
@@ -662,6 +727,95 @@ class PreflightInputsTool(BaseTool):
             "pdf_candidates": pdf_candidates,
             "checklist_candidates": checklist_candidates,
         }
+
+    def _extract_values_from_text(self, text: str) -> Dict[str, Any]:
+        raw = str(text or "")
+        kv: Dict[str, str] = {}
+        chapter_tokens: List[str] = []
+
+        for m in self._CHAPTER_KEYVAL_PATTERN.finditer(raw):
+            key = str(m.group(1) or "").strip().lower()
+            val = m.group(2) or m.group(3) or m.group(4) or ""
+            cleaned = self._normalize_chapter_value(val)
+            if not cleaned:
+                continue
+            if key not in kv:
+                kv[key] = cleaned
+            chapter_tokens.extend(self._split_chapter_tokens(cleaned))
+
+        for m in self._CHAPTER_TOKEN_PATTERN.finditer(raw):
+            token = self._normalize_chapter_value(m.group(1) or "")
+            if token:
+                chapter_tokens.extend(self._split_chapter_tokens(token))
+
+        for m in self._CHAPTER_KEYWORD_PATTERN.finditer(raw):
+            token = self._normalize_chapter_value(m.group(1) or "")
+            if token:
+                chapter_tokens.append(token)
+
+        for m in self._QUOTED_SECTION_PATTERN.finditer(raw):
+            token = self._normalize_chapter_value(m.group(1) or "")
+            if token:
+                chapter_tokens.append(token)
+
+        for m in self._SUFFIX_SECTION_PATTERN.finditer(raw):
+            token = self._normalize_chapter_value(m.group(1) or "")
+            if token:
+                chapter_tokens.append(token)
+
+        chapter_tokens = self._dedupe([t for t in chapter_tokens if t])
+        chapter_selection = ";".join(chapter_tokens)
+        return {
+            "key_values": kv,
+            "chapter_tokens": chapter_tokens,
+            "chapter_selection": chapter_selection,
+        }
+
+    def _split_chapter_tokens(self, text: str) -> List[str]:
+        parts = re.split(r"[,\n;；、+]+", str(text or ""))
+        out: List[str] = []
+        for p in parts:
+            token = self._normalize_chapter_value(p)
+            if token:
+                out.append(token)
+        return out
+
+    def _normalize_chapter_value(self, value: str) -> str:
+        s = str(value or "").strip()
+        if not s:
+            return ""
+        s = s.strip().strip('"').strip("'").strip("“").strip("”").strip("‘").strip("’")
+        s = s.rstrip("。；，,;")
+        s = s.replace("～", "-").replace("—", "-")
+        s = re.sub(r"\s*到\s*", "-", s)
+        s = re.sub(r"\s*至\s*", "-", s)
+        s = re.sub(r"(?:这一|这)?(?:章节|小节|节|部分)\s*$", "", s, flags=re.IGNORECASE)
+        s = s.rstrip("的")
+        s = re.sub(
+            r"^(?:请|麻烦|帮我|帮忙|只|仅|请你|解析|提取|查看|看|定位|分析|处理)\s+",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
+        s = re.sub(
+            r"^(?:我(?:想|希望)?|请|麻烦|帮我|帮忙)?(?:想要|希望)?(?:只|仅)?(?:解析|提取|查看|看|定位|分析|处理)",
+            "",
+            s,
+            flags=re.IGNORECASE,
+        )
+        s = s.strip()
+        lower = s.lower()
+        alias_map = {
+            "abstract": "英文摘要",
+            "references": "参考文献",
+            "bibliography": "参考文献",
+            "acknowledgements": "致谢",
+            "acknowledgments": "致谢",
+        }
+        if lower in alias_map:
+            s = alias_map[lower]
+        s = re.sub(r"\s+", " ", s)
+        return s.strip()
 
     def _map_paths_to_slots(
         self,
@@ -716,11 +870,56 @@ class PreflightInputsTool(BaseTool):
 
         return {k: v for k, v in values.items() if isinstance(v, str)}
 
-    def _merge_slot_values(self, rule_values: Dict[str, str], llm_values: Dict[str, str]) -> Dict[str, str]:
+    def _map_values_to_slots(
+        self,
+        *,
+        slots: List[Dict[str, Any]],
+        extracted_values: Dict[str, Any],
+    ) -> Dict[str, str]:
+        values: Dict[str, str] = {}
+        key_values = extracted_values.get("key_values", {}) or {}
+        chapter_selection = str(extracted_values.get("chapter_selection", "") or "")
+
+        for slot in slots:
+            slot_name = str(slot.get("slot", "") or "").strip()
+            if not slot_name:
+                continue
+            if str(slot.get("slot_kind", "path")) != "value":
+                continue
+            if slot_name == "chapter_selection":
+                picked = (
+                    key_values.get("chapter_selection")
+                    or key_values.get("chapters")
+                    or key_values.get("chapter")
+                    or key_values.get("section")
+                    or key_values.get("sections")
+                    or chapter_selection
+                )
+                values[slot_name] = self._normalize_chapter_value(picked)
+                continue
+            # 其他 value 类槽位兜底使用 chapter_selection 文本
+            values[slot_name] = self._normalize_chapter_value(chapter_selection)
+        return values
+
+    def _merge_slot_values(
+        self,
+        rule_values: Dict[str, str],
+        llm_values: Dict[str, str],
+        slot_contract: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
         merged = dict(rule_values or {})
+        slot_kind_map = {
+            str(s.get("slot", "")).strip(): str(s.get("slot_kind", "path")).strip().lower()
+            for s in (slot_contract or [])
+            if str(s.get("slot", "")).strip()
+        }
         for slot, value in (llm_values or {}).items():
             s = str(slot or "").strip()
-            v = self._normalize_token_path(str(value or ""))
+            kind = slot_kind_map.get(s, "path")
+            if kind == "value":
+                v = self._normalize_chapter_value(str(value or ""))
+            else:
+                v = self._normalize_token_path(str(value or ""))
             if not s or not v:
                 continue
             # LLM 负责语义判断；规则抽取保留兜底
@@ -780,6 +979,23 @@ class PreflightInputsTool(BaseTool):
         }
         return out
 
+    def _to_extra_slots(
+        self,
+        slot_values: Dict[str, str],
+        slot_contract: List[Dict[str, Any]],
+    ) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for slot in slot_contract:
+            name = str(slot.get("slot", "") or "").strip()
+            if not name:
+                continue
+            if str(slot.get("slot_kind", "path")).strip().lower() != "value":
+                continue
+            value = self._normalize_chapter_value(str(slot_values.get(name, "") or ""))
+            if value:
+                out[name] = value
+        return out
+
     # ----------------------------- llm assist -----------------------------
     def _extract_paths_with_llm(
         self,
@@ -824,22 +1040,23 @@ class PreflightInputsTool(BaseTool):
             slot_desc = json.dumps(slots, ensure_ascii=False)
             extracted_desc = json.dumps(extracted, ensure_ascii=False)
             system_prompt = (
-                "你是路径参数语义抽取器。"
-                "请根据槽位语义和路径类型，从用户自然语言中提取最匹配路径。"
-                "不能编造路径。"
+                "你是工作流参数语义抽取器。"
+                "请根据 slot_contract 中的 slot_kind 提取参数："
+                "slot_kind=path 时提取路径，slot_kind=value 时提取非路径值（如章节选择器）。"
+                "不能编造用户未提及的参数。"
             )
             user_prompt = (
                 "请仅输出 JSON。\n"
                 "规则：\n"
-                "1) 只能返回输入中真实出现过的路径；\n"
-                "2) 支持 Windows/Linux/相对路径、中文和空格；\n"
+                "1) slot_kind=path：只能返回输入中真实出现过的路径，支持 Windows/Linux/相对路径、中文和空格；\n"
+                "2) slot_kind=value：按用户意图归一化输出（如 chapters 用分号分隔），但不能虚构未提及内容；\n"
                 "3) 若某槽位无法判断，返回空字符串；\n"
-                "4) 优先做语义匹配，不按出现顺序盲选。\n\n"
+                "4) 优先语义匹配，不按出现顺序盲选。\n\n"
                 f"slots={slot_desc}\n"
                 f"rule_candidates={extracted_desc}\n"
                 f"user_input={user_input}\n\n"
                 "输出格式："
-                "{\"slot_values\":{\"pdf_path\":\"...\",\"checklist_path\":\"...\",\"output_path\":\"...\"}}"
+                "{\"slot_values\":{\"pdf_path\":\"...\",\"checklist_path\":\"...\",\"output_path\":\"...\",\"chapter_selection\":\"...\"}}"
             )
             text = self._call_openai_chat(
                 base_url=base_url,
@@ -854,12 +1071,21 @@ class PreflightInputsTool(BaseTool):
             raw_slots = obj.get("slot_values", {})
             if not isinstance(raw_slots, dict):
                 return {}, "OpenAI JSON 缺少 slot_values"
+            slot_kind_map = {
+                str(s.get("slot", "")).strip(): str(s.get("slot_kind", "path")).strip().lower()
+                for s in (slots or [])
+                if str(s.get("slot", "")).strip()
+            }
             cleaned: Dict[str, str] = {}
             for k, v in raw_slots.items():
                 key = str(k).strip()
                 if not key:
                     continue
-                val = self._normalize_token_path(str(v or ""))
+                kind = slot_kind_map.get(key, "path")
+                if kind == "value":
+                    val = self._normalize_chapter_value(str(v or ""))
+                else:
+                    val = self._normalize_token_path(str(v or ""))
                 if val:
                     cleaned[key] = val
             return cleaned, ""
@@ -936,15 +1162,15 @@ class PreflightInputsTool(BaseTool):
             slot_desc = json.dumps(slots, ensure_ascii=False)
             extracted_desc = json.dumps(extracted, ensure_ascii=False)
             prompt = (
-                "你是路径抽取助手。请从用户输入中提取文件路径，按给定 slot 映射。\n"
+                "你是工作流参数抽取助手。请从用户输入中提取参数，按给定 slot 映射。\n"
                 "要求：\n"
-                "1) 只能返回给定文本里出现过的路径，不要编造；\n"
-                "2) 支持 Windows/Linux 路径，允许中文和空格；\n"
+                "1) slot_kind=path 时，只能返回给定文本里出现过的路径，不要编造；\n"
+                "2) slot_kind=value 时允许语义规范化（如章节号列表），但不能虚构；\n"
                 "3) 仅输出 JSON，不要解释。\n\n"
                 f"slots={slot_desc}\n"
                 f"rule_candidates={extracted_desc}\n"
                 f"user_input={user_input}\n\n"
-                "输出格式：{\"slot_values\":{\"pdf_path\":\"...\",\"checklist_path\":\"...\"}}"
+                "输出格式：{\"slot_values\":{\"pdf_path\":\"...\",\"checklist_path\":\"...\",\"chapter_selection\":\"...\"}}"
             )
             resp = client.models.generate_content(
                 model=llm_model,
@@ -957,12 +1183,21 @@ class PreflightInputsTool(BaseTool):
             raw_slots = obj.get("slot_values", {})
             if not isinstance(raw_slots, dict):
                 return {}, "LLM JSON 缺少 slot_values"
+            slot_kind_map = {
+                str(s.get("slot", "")).strip(): str(s.get("slot_kind", "path")).strip().lower()
+                for s in (slots or [])
+                if str(s.get("slot", "")).strip()
+            }
             cleaned: Dict[str, str] = {}
             for k, v in raw_slots.items():
                 key = str(k).strip()
                 if not key:
                     continue
-                val = self._normalize_token_path(str(v or ""))
+                kind = slot_kind_map.get(key, "path")
+                if kind == "value":
+                    val = self._normalize_chapter_value(str(v or ""))
+                else:
+                    val = self._normalize_token_path(str(v or ""))
                 if val:
                     cleaned[key] = val
             return cleaned, ""

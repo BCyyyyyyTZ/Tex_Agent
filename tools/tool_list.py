@@ -17,6 +17,7 @@ from tools.file_loading_tool import FileLoadingTool
 from tools.markdown_section_tool import MarkdownSectionTool
 from tools.pdf_comment_tool import PdfCommentTool
 from tools.pymupdf_parse_tool import PyMuPDFParseTool
+from tools.thesis_outline_extract_tool import ThesisOutlineExtractTool
 from tools.rag_retrieve_tool import RAGRetrieveTool
 from tools.ref_checker_tool import RefCheckerTool
 from tools.user_persona_tools import build_user_persona_tools
@@ -50,6 +51,7 @@ def _build_base_tools() -> List:
         ("docling_search", lambda: DoclingSearchTool()),
         ("markdown_section", lambda: MarkdownSectionTool()),
         ("pymupdf_parse", lambda: PyMuPDFParseTool()),
+        ("thesis_outline_extract", lambda: ThesisOutlineExtractTool()),
         ("chapter_index", lambda: ChapterIndexTool()),
         ("ref_checker", lambda: RefCheckerTool()),
         ("figure_ref_checker", lambda: FigureRefCheckerTool()),

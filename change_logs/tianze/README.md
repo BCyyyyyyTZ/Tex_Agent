@@ -44,4 +44,7 @@
 #### [2026-05-12](./2026-05-12.md)
 
 + `preflight_inputs_tool` 支持用户更自由的输入（自然语言 + 路径混写、严格校验、OpenAI 语义抽取等）
++ 新增 `thesis_outline_extract` 工具（按 PDF 目录树抽取指定章节，支持 `outline/extract` 双模式）
++ `preflight_inputs_tool` 增强章节槽位抽取（`chapter_selection`）并支持传递到新工具
 + 建立 checklist 多路并行审查 **v4** 工作流（`checklist_multi_v4`，首节点 preflight）
+  新增示例工作流 `thesis_chapter_extract`

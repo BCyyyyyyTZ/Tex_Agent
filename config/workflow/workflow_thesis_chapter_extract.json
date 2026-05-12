@@ -1,0 +1,67 @@
+{
+  "_comment": "按目录树抽取指定章节：preflight 解析 pdf_path + chapter_selection，再调用 thesis_outline_extract",
+  "nodes": [
+    {
+      "node_id": "preflight_inputs",
+      "node_type": "tool",
+      "tool_name": "preflight_inputs",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "context_text": "${last_message_content}",
+          "workflow_name": "${metadata.workflow}",
+          "current_node_id": "preflight_inputs",
+          "use_llm": true,
+          "strict_mode": true,
+          "run_register": false
+        },
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "extract_chapters",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.normalized_inputs.pdf_path}",
+          "mode": "extract",
+          "chapters": "${metadata.preflight_inputs.metadata.tool_metadata.extra_slots.chapter_selection}",
+          "outline_source": "auto",
+          "strict_chapters": true
+        },
+        "depends_on": [
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_report",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是章节抽取结果汇总助手。",
+        "subtask": "根据上游 extract_chapters 的真实输出，向用户报告：命中的章节、输出目录、Markdown 路径、JSON 路径，以及未匹配章节（若有）。不要虚构内容。",
+        "depends_on": [
+          "extract_chapters"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "preflight_inputs",
+      "to_node": "extract_chapters",
+      "condition": null
+    },
+    {
+      "from_node": "extract_chapters",
+      "to_node": "final_report",
+      "condition": null
+    }
+  ]
+}
