@@ -10,6 +10,36 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def test_preflight_extracts_linux_posix_and_tilde_paths() -> None:
+    """Linux/POSIX：`/`、`~/`、`~其他用户/` 与 Windows 路径可同时出现在一段文本中并被抽出。"""
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_checklist_multi_v1.json"
+
+    user_input = (
+        "双路径对照:\n"
+        "- [PDF] /var/thesis/论文.pdf\n"
+        '- [Checklist] "~/checklists/review.md"\n'
+        "~alice/projects/paper.pdf 与 D:\\\\share\\\\draft.pdf\n"
+    )
+
+    result = tool.run(
+        {
+            "user_input": user_input,
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+        }
+    )
+    assert result.success is True
+    paths = result.metadata.get("extracted_paths") or {}
+    all_paths = paths.get("all_paths") or []
+    joined = "\n".join(all_paths)
+    assert "/var/thesis/论文.pdf" in joined
+    assert "~/checklists/review.md" in joined or "checklists/review.md" in joined
+    assert "alice/projects/paper.pdf" in joined or "~alice/projects/paper.pdf" in joined
+    assert "draft.pdf" in joined
+
+
 def test_preflight_extracts_cross_platform_paths_and_slots() -> None:
     tool = PreflightInputsTool()
     workflow_path = _repo_root() / "config" / "workflow" / "workflow_checklist_multi_v1.json"
@@ -180,3 +210,155 @@ def test_preflight_extracts_section_keywords_and_title_alias(tmp_path: Path) -> 
     assert "英文摘要" in chapter_sel
     assert "研究背景" in chapter_sel
     assert "1.1" in chapter_sel
+
+
+def test_preflight_extracts_full_text_request(tmp_path: Path) -> None:
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    for phrase in (
+        "帮我解析全文",
+        "请处理全篇",
+        "通篇都要",
+        "请处理整篇论文",
+        "我想看 full text",
+        "整本文档都要",
+    ):
+        result = tool.run(
+            {
+                "user_input": f'{phrase}，文件是 "{pdf}"。',
+                "workflow_path": str(workflow_path),
+                "current_node_id": "preflight_inputs",
+                "use_llm": False,
+                "strict_mode": True,
+            }
+        )
+        assert result.success is True, (phrase, result.error)
+        extra_slots = (result.metadata or {}).get("extra_slots", {})
+        chapter_sel = str(extra_slots.get("chapter_selection", ""))
+        assert chapter_sel == "全文", (phrase, chapter_sel)
+
+
+def test_preflight_user_chapter_overrides_context_memory(tmp_path: Path) -> None:
+    """记忆中是第3章，本轮明确说全文/通篇时，章节选择必须以本轮为准。"""
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf_new = tmp_path / "new.pdf"
+    pdf_new.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    context = f'之前让你解析第3章，文件是 "{pdf_new}"\n'
+    result = tool.run(
+        {
+            "user_input": "这次我要全文，不要第三章了。",
+            "context_text": context,
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+            "strict_mode": True,
+        }
+    )
+    assert result.success is True, result.error
+    mm = (result.metadata or {}).get("memory_merge") or {}
+    assert mm.get("chapter_priority_user") is True
+    extra_slots = (result.metadata or {}).get("extra_slots", {})
+    assert str(extra_slots.get("chapter_selection", "")) == "全文"
+
+
+def test_preflight_user_path_overrides_context_memory(tmp_path: Path) -> None:
+    """记忆中是文件 A，本轮给出另一路径时以本轮为准。"""
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf_old = tmp_path / "old.pdf"
+    pdf_new = tmp_path / "new.pdf"
+    pdf_old.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+    pdf_new.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    context = f'- [PDF] "{pdf_old}"\n'
+    result = tool.run(
+        {
+            "user_input": f'请解析这份 "{pdf_new}" 的第1章',
+            "context_text": context,
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+            "strict_mode": True,
+        }
+    )
+    assert result.success is True, result.error
+    mm = (result.metadata or {}).get("memory_merge") or {}
+    assert mm.get("path_priority_user") is True
+    normalized = (result.metadata or {}).get("normalized_inputs") or {}
+    assert Path(normalized.get("pdf_path", "")).resolve() == pdf_new.resolve()
+
+
+def test_preflight_uses_context_path_when_user_has_no_new_path(tmp_path: Path) -> None:
+    """本轮未贴路径时，仍可沿用记忆中的 PDF 路径。"""
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf_ctx = tmp_path / "ctx.pdf"
+    pdf_ctx.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    context = f'- [PDF] "{pdf_ctx}"\n'
+    result = tool.run(
+        {
+            "user_input": "按上文路径解析第2章即可。",
+            "context_text": context,
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+            "strict_mode": True,
+        }
+    )
+    assert result.success is True, result.error
+    mm = (result.metadata or {}).get("memory_merge") or {}
+    assert mm.get("path_priority_user") is False
+    normalized = (result.metadata or {}).get("normalized_inputs") or {}
+    assert Path(normalized.get("pdf_path", "")).resolve() == pdf_ctx.resolve()
+    extra_slots = (result.metadata or {}).get("extra_slots", {})
+    assert "2" in str(extra_slots.get("chapter_selection", ""))
+
+
+def test_preflight_windows_drive_not_extracted_as_chapter_token(tmp_path: Path) -> None:
+    """Windows 路径 C:\\ 中的 C 不应被当成罗马数字章节 token。"""
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    result = tool.run(
+        {
+            "user_input": f'请解析 "{pdf}"，路径示例 C:\\\\研究\\\\论文.pdf',
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+            "strict_mode": True,
+        }
+    )
+    assert result.success is True, result.error
+    ev = (result.metadata or {}).get("extracted_values") or {}
+    assert "C" not in (ev.get("chapter_tokens") or []), ev
+
+
+def test_preflight_extracts_roman_and_fullwidth_chapters(tmp_path: Path) -> None:
+    tool = PreflightInputsTool()
+    workflow_path = _repo_root() / "config" / "workflow" / "workflow_thesis_chapter_extract.json"
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.1\n%\xe2\xe3\xcf\xd3\n")
+
+    result = tool.run(
+        {
+            "user_input": f'解析 "{pdf}" 的 Chapter III、第Ⅳ章，再看 A. 引言。',
+            "workflow_path": str(workflow_path),
+            "current_node_id": "preflight_inputs",
+            "use_llm": False,
+            "strict_mode": True,
+        }
+    )
+    assert result.success is True, result.error
+    extra_slots = (result.metadata or {}).get("extra_slots", {})
+    chapter_sel = str(extra_slots.get("chapter_selection", ""))
+    assert chapter_sel, "应从混合编号中至少抽取到一个章节 token"
+    # 至少包含罗马数字或归一化后的章节信息之一
+    assert any(tok in chapter_sel for tok in ("III", "Ⅳ", "第Ⅳ章", "Chapter III", "A. 引言", "A"))

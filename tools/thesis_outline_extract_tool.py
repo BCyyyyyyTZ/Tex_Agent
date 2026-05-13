@@ -31,7 +31,7 @@ from utils.thesis_pdf_extract import (
 )
 
 logger = get_logger(__name__)
-_CACHE_VERSION = "v2"
+_CACHE_VERSION = "v3"
 
 
 def _sanitize_stem(stem: str) -> str:
@@ -279,11 +279,18 @@ class ThesisOutlineExtractTool(BaseTool):
                         "depth": n.depth,
                         "page_start": n.page + 1,
                         "page_end_exclusive": (n.end_page or n.page) + 1,
+                        "match_reason": n.match_reason or "",
+                        "match_input": n.match_input or "",
+                        "ordinal_path": list(n.ordinal_path) if n.ordinal_path else [],
                     }
                     for n in selected_roots
                 ],
             }
             sel_path.write_text(json.dumps(sel_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+            full_text_mode = any(n.match_reason == "all" for n in selected_roots)
+            ordinal_only = bool(selected_roots) and all(
+                n.match_reason == "ordinal" for n in selected_roots
+            )
 
             preview = md[: max(0, int(md_preview_chars or 0))]
             metadata = {
@@ -299,6 +306,8 @@ class ThesisOutlineExtractTool(BaseTool):
                 "outline_source": used_source,
                 "selected_chapters": sel_obj["selected_chapters"],
                 "unresolved_chapter_tokens": unresolved,
+                "full_text_mode": full_text_mode,
+                "ordinal_only": ordinal_only,
                 "route": "thesis_outline",
                 "from_cache": False,
             }
@@ -312,6 +321,10 @@ class ThesisOutlineExtractTool(BaseTool):
                 f"JSON: {json_path}\n"
                 f"Selection: {sel_path}\n"
             )
+            if full_text_mode:
+                out += "模式: 全文（已选中所有根章节）\n"
+            elif ordinal_only:
+                out += "提示: 当前 PDF 目录可能缺少明确编号，已按目录顺序数到对应章节。\n"
             if unresolved:
                 out += f"未匹配章节: {unresolved}\n"
             if preview:

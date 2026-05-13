@@ -34,10 +34,11 @@ class PreflightInputsTool(BaseTool):
         r"^\s*-\s*\[(PDF|Checklist|Output|File)\]\s+(.+?)\s*$",
         flags=re.IGNORECASE | re.MULTILINE,
     )
+    # 盘符/UNC/POSIX/~/~user/ 等；扫描器必须以南缀扩展名结束，避免在长 POSIX 路径内部反复最小匹配出 /v、/t 等碎片
     _GENERIC_PATH_PATTERN = re.compile(
-        r"((?:[A-Za-z]:[\\/]|\\\\|/|\.{1,2}[\\/]|~[\\/])"
-        r"[^\"'\n\r]*?"
-        r"(?:\.(?:pdf|md|txt|json|ya?ml|docx?|xlsx?|csv|pptx?))?)",
+        r"((?:[A-Za-z]:[\\/]|\\\\|/|\.{1,2}[\\/]|~(?:/|[^\s/]+/))"
+        r".+?"
+        r"\.(?:pdf|md|txt|json|ya?ml|docx?|xlsx?|csv|pptx?))",
         flags=re.IGNORECASE,
     )
     _QUOTED_PATH_PATTERN = re.compile(
@@ -55,13 +56,30 @@ class PreflightInputsTool(BaseTool):
     )
     _CHAPTER_TOKEN_PATTERN = re.compile(
         r"(第\s*[一二三四五六七八九十百千万零两\d]+\s*[章节篇]|"
-        r"chapter\s+\d+(?:\.\d+)*|"
-        r"\d+(?:\.\d+)*(?:\s*[-~到至]\s*\d+(?:\.\d+)*)?)",
+        r"第\s*[IVXLCDMivxlcdm\u2160-\u217F]+\s*[章节篇]|"
+        r"chapter\s+(?:\d+(?:\.\d+)*|[IVXLCDM]+)|"
+        r"\d+(?:\.\d+)*(?:\s*[-~到至]\s*\d+(?:\.\d+)*)?|"
+        # 避免把 Windows 盘符 C:\ 里的 C 当成罗马数字（C 后紧跟 :\）
+        r"(?<![A-Za-z])[IVXLCDM]{1,5}(?=(?:[\s\.\)、]|$|:(?![\\/])))|"
+        r"[\u2160-\u216F])",
         flags=re.IGNORECASE,
     )
     _CHAPTER_KEYWORD_PATTERN = re.compile(
         r"(摘要|中文摘要|英文摘要|abstract|参考文献|references|bibliography|致谢|鸣谢|"
         r"acknowledgements|acknowledgments|引言|绪论|结论|附录)",
+        flags=re.IGNORECASE,
+    )
+    # 全文/通篇意图：覆盖中英文口语；「全篇」「通篇」等单独出现时也要有较高召回
+    _FULLTEXT_PATTERN = re.compile(
+        r"(全文|全篇|通篇|尽全文|从头到尾|"
+        r"整篇(?:论文|文章)?|整本(?:论文|文档|书)?|整部(?:论文|文档)?|"
+        r"整份(?:论文|文档)?|整套(?:论文|文档)?|完整(?:的)?(?:论文|文档|PDF|pdf)?|"
+        r"整个(?:文档|论文)|全部章节|所有章节|全部内容|所有内容|全部段落|全文内容|"
+        r"每一章|各个章节|所有小节|整套论文|"
+        r"all\s+chapters|the\s+whole\s+document|the\s+entire\s+document|"
+        r"full\s+text|full\s+document|whole\s+document|entire\s+document|"
+        r"parse\s+(?:the\s+)?entire|every\s+chapter|the\s+complete\s+(?:document|thesis|paper)|"
+        r"everything)",
         flags=re.IGNORECASE,
     )
     _QUOTED_SECTION_PATTERN = re.compile(
@@ -92,9 +110,8 @@ class PreflightInputsTool(BaseTool):
                 "支持 Linux/Windows 路径与中文路径。"
             ),
             input_schema={
-                "user_input": "用户本轮输入文本（可与 context_text 合并后再抽取路径）",
-                "context_text": "可选：来自对话上下文的文本（如 ${last_message_content}），与 user_input 拼接后参与路径抽取；"
-                "若路径仅出现在上文，用户本轮不必重复粘贴。",
+                "user_input": "用户本轮输入文本；若本轮明确写出路径或章节/全文意图，将严格优先于 context_text。",
+                "context_text": "可选：对话记忆/上文（如 ${last_message_content}）。仅当本轮未给出路径或章节选择时，用于补全路径与章节。",
                 "workflow_name": "当前工作流名（可选，建议传 ${metadata.workflow}）",
                 "workflow_path": "工作流配置文件路径（可选，优先级高于 workflow_name）",
                 "current_node_id": "本 preflight 节点 node_id（可选，用于忽略自身）",
@@ -166,8 +183,26 @@ class PreflightInputsTool(BaseTool):
                 workflow_config=workflow_config,
                 current_node_id=current_node_id,
             )
-            extracted = self._extract_paths_from_text(combined_text)
-            extracted_values = self._extract_values_from_text(combined_text)
+
+            path_priority_user = self._paths_explicit_in_user_turn(user_input)
+            chapter_priority_user = self._chapter_intent_in_user_turn(user_input)
+
+            ctx_paths = self._extract_paths_from_text(context_text) if context_text.strip() else {}
+            usr_paths = self._extract_paths_from_text(user_input) if user_input.strip() else {}
+
+            if path_priority_user:
+                extracted = self._merge_extracted_paths_user_priority(ctx_paths, usr_paths)
+            else:
+                extracted = self._extract_paths_from_text(combined_text)
+
+            usr_values_only = (
+                self._extract_values_from_text(user_input) if user_input.strip() else {}
+            )
+            if chapter_priority_user:
+                extracted_values = usr_values_only
+            else:
+                extracted_values = self._extract_values_from_text(combined_text)
+
             user_slots = analysis.get("user_required_slots", [])
             slot_contract = self._build_slot_contract(user_slots)
             slot_values = self._map_paths_to_slots(
@@ -181,11 +216,21 @@ class PreflightInputsTool(BaseTool):
                 )
             )
 
-            llm_info: Dict[str, Any] = {"enabled": False, "used": False, "error": ""}
+            llm_scope_text = (
+                user_input
+                if (path_priority_user or chapter_priority_user)
+                else combined_text
+            )
+            llm_info: Dict[str, Any] = {
+                "enabled": False,
+                "used": False,
+                "error": "",
+                "input_scope": "user_turn" if (path_priority_user or chapter_priority_user) else "combined",
+            }
             if use_llm:
                 llm_info["enabled"] = True
                 llm_slot_values, llm_error = self._extract_paths_with_llm(
-                    user_input=combined_text,
+                    user_input=llm_scope_text,
                     slots=slot_contract,
                     extracted={**extracted, **extracted_values},
                     llm_provider=llm_provider,
@@ -197,10 +242,32 @@ class PreflightInputsTool(BaseTool):
                 if llm_error:
                     llm_info["error"] = llm_error
 
+            # 本轮明确写了章节或路径时，规则抽取优先于 LLM，避免模型沿用记忆中的旧章节/路径
+            if chapter_priority_user:
+                slot_values.update(
+                    self._map_values_to_slots(
+                        slots=slot_contract,
+                        extracted_values=usr_values_only,
+                    )
+                )
+            if path_priority_user:
+                path_updates = self._map_paths_to_slots(slots=slot_contract, extracted=extracted)
+                for slot in slot_contract:
+                    name = str(slot.get("slot", "") or "").strip()
+                    if not name:
+                        continue
+                    if str(slot.get("slot_kind", "path")).strip().lower() != "path":
+                        continue
+                    val = path_updates.get(name, "")
+                    if val:
+                        slot_values[name] = val
+
             self._apply_slot_defaults(slot_values, slot_contract)
             normalized_inputs = self._to_normalized_inputs(slot_values, extracted)
             extra_slots = self._to_extra_slots(slot_values, slot_contract)
-            required_view = dict(normalized_inputs)
+            # strict 校验须覆盖全部 contract 槽位（如 tool_input），不能只用 normalized_inputs 子集
+            required_view = dict(slot_values or {})
+            required_view.update(normalized_inputs)
             required_view.update(extra_slots)
             missing_required_slots = self._find_missing_required_slots(
                 slot_values=required_view,
@@ -216,7 +283,22 @@ class PreflightInputsTool(BaseTool):
             if scan_warning:
                 warnings.append(scan_warning)
             if context_text.strip():
-                warnings.append("已合并 context_text 与 user_input 做路径抽取（上文路径可补全本轮未重复给出的路径）。")
+                if path_priority_user and chapter_priority_user:
+                    warnings.append(
+                        "已合并记忆上下文：本轮同时给出明确路径与章节/全文意图，路径与章节均以本轮为准。"
+                    )
+                elif path_priority_user:
+                    warnings.append(
+                        "已合并记忆上下文：本轮给出明确路径，路径以本轮为准；未写章节时仍可沿用记忆中的章节选择。"
+                    )
+                elif chapter_priority_user:
+                    warnings.append(
+                        "已合并记忆上下文：本轮给出明确章节或全文/通篇意图，章节以本轮为准；未写文件路径时仍可沿用记忆中的路径。"
+                    )
+                else:
+                    warnings.append(
+                        "已合并 context_text 与 user_input 参与抽取；本轮未写路径与章节时，可沿用记忆中的路径与章节。"
+                    )
             if not user_slots:
                 warnings.append("未发现明确的用户路径输入槽位，已退化为纯路径抽取模式。")
             if not extracted.get("all_paths"):
@@ -238,6 +320,11 @@ class PreflightInputsTool(BaseTool):
                 "normalized_inputs": normalized_inputs,
                 "payload_for_register_inputs": payload_for_register_inputs,
                 "context_text_used": bool(context_text.strip()),
+                "memory_merge": {
+                    "path_priority_user": path_priority_user,
+                    "chapter_priority_user": chapter_priority_user,
+                    "llm_input_scope": llm_info.get("input_scope", "combined"),
+                },
                 "run_register": run_register,
                 "strict_mode": strict_mode,
                 "llm": llm_info,
@@ -323,13 +410,99 @@ class PreflightInputsTool(BaseTool):
     @staticmethod
     def _merge_context_and_user_input(context_text: str, user_input: str) -> str:
         """
-        上下文在前、本轮输入在后，便于同一 key（如 [PDF]）在上下文中已出现时优先被解析。
+        上下文在前、本轮输入在后；具体优先级由 _paths_explicit_in_user_turn /
+        _chapter_intent_in_user_turn 控制路径与章节抽取来源。
         """
         c = (context_text or "").strip()
         u = (user_input or "").strip()
         if c and u:
             return f"{c}\n{u}"
         return c or u
+
+    def _paths_explicit_in_user_turn(self, user_input: str) -> bool:
+        """本轮用户输入是否出现可解析的路径（文件 / PDF / Checklist 等）。"""
+        u = (user_input or "").strip()
+        if not u:
+            return False
+        ex = self._extract_paths_from_text(u)
+        if ex.get("labeled"):
+            return True
+        if ex.get("pdf_candidates") or ex.get("checklist_candidates"):
+            return True
+        kv = ex.get("key_values") or {}
+        for key in ("pdf", "pdf_path", "checklist", "checklist_path", "output", "output_path", "file", "file_path"):
+            if str(kv.get(key, "") or "").strip():
+                return True
+        return bool(ex.get("all_paths"))
+
+    def _chapter_intent_in_user_turn(self, user_input: str) -> bool:
+        """本轮是否表达章节选择或全文/通篇意图（优先于记忆中的章节）。"""
+        u = (user_input or "").strip()
+        if not u:
+            return False
+        if self._FULLTEXT_PATTERN.search(u):
+            return True
+        if self._CHAPTER_KEYVAL_PATTERN.search(u):
+            return True
+        ev = self._extract_values_from_text(u)
+        if ev.get("chapter_tokens"):
+            return True
+        return bool(str(ev.get("chapter_selection") or "").strip())
+
+    def _merge_extracted_paths_user_priority(
+        self,
+        ctx_extracted: Dict[str, Any],
+        user_extracted: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """路径抽取合并：本轮路径优先（列表顺序靠前），再并入上文中的其余路径。"""
+        ctx = ctx_extracted or {}
+        usr = user_extracted or {}
+
+        labeled: Dict[str, str] = {}
+        labeled.update(ctx.get("labeled") or {})
+        labeled.update(usr.get("labeled") or {})
+        # 本轮若出现 PDF/清单路径（含引号路径等），优先记入 labeled，避免仍沿用记忆中的 [PDF] 标签
+        u_pdf_c = list(usr.get("pdf_candidates") or [])
+        if u_pdf_c:
+            labeled["pdf"] = u_pdf_c[0]
+        u_cl_c = list(usr.get("checklist_candidates") or [])
+        if u_cl_c:
+            labeled["checklist"] = u_cl_c[0]
+
+        kv: Dict[str, str] = {}
+        kv.update(ctx.get("key_values") or {})
+        kv.update(usr.get("key_values") or {})
+
+        def _dedupe_user_first(user_list: List[str], ctx_list: List[str]) -> List[str]:
+            seen: Set[str] = set()
+            out: List[str] = []
+            for item in user_list + ctx_list:
+                key = item.strip()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                out.append(item)
+            return out
+
+        u_all = list(usr.get("all_paths") or [])
+        c_all = list(ctx.get("all_paths") or [])
+        all_paths = _dedupe_user_first(u_all, c_all)
+
+        u_pdf = list(usr.get("pdf_candidates") or [])
+        c_pdf = list(ctx.get("pdf_candidates") or [])
+        pdf_candidates = _dedupe_user_first(u_pdf, c_pdf)
+
+        u_cl = list(usr.get("checklist_candidates") or [])
+        c_cl = list(ctx.get("checklist_candidates") or [])
+        checklist_candidates = _dedupe_user_first(u_cl, c_cl)
+
+        return {
+            "labeled": labeled,
+            "key_values": kv,
+            "all_paths": all_paths,
+            "pdf_candidates": pdf_candidates,
+            "checklist_candidates": checklist_candidates,
+        }
 
     @staticmethod
     def _coerce_bool(v: Any) -> bool:
@@ -624,20 +797,31 @@ class PreflightInputsTool(BaseTool):
     def _to_slot_name(self, *, field_path: str, value_preview: str, templates: List[str]) -> str:
         fp = (field_path or "").lower()
         merged = " ".join([fp, (value_preview or "").lower(), " ".join(str(t).lower() for t in templates)])
+        # 配置路径最后一节优先，避免模板名 output_pdf_abs_path 含子串 "pdf" 误判为 pdf_path
+        raw_tail = fp.split(".")[-1].replace("[", "_").replace("]", "")
+        tail = re.sub(r"[^a-z0-9_]+", "_", raw_tail).strip("_")
+        if tail in ("chapter_selection", "chapters", "chapter", "section", "sections"):
+            return "chapter_selection"
+        if tail in ("output_path", "output_pdf_path"):
+            return "output_path"
+        if tail in ("pdf_path", "pdf"):
+            return "pdf_path"
+        if tail in ("checklist_path", "checklist"):
+            return "checklist_path"
         if "chapter_selection" in merged or "chapters" in merged or "chapter" in merged or "section" in merged:
             return "chapter_selection"
-        if "pdf" in merged:
-            return "pdf_path"
         if "checklist" in merged:
             return "checklist_path"
+        if "output_path" in fp or "output_pdf" in merged:
+            return "output_path"
+        if "pdf" in merged:
+            return "pdf_path"
         if "output" in merged:
             return "output_path"
         if "file_path" in merged or "file" in merged:
             return "file_path"
         if "attachment" in merged:
             return "attachment_path"
-        tail = fp.split(".")[-1].replace("[", "_").replace("]", "")
-        tail = re.sub(r"[^a-z0-9_]+", "_", tail).strip("_")
         return tail if tail else "path"
 
     def _suggest_extensions(self, slot_name: str) -> List[str]:
@@ -763,7 +947,13 @@ class PreflightInputsTool(BaseTool):
             if token:
                 chapter_tokens.append(token)
 
+        if self._FULLTEXT_PATTERN.search(raw):
+            chapter_tokens.append("全文")
+
         chapter_tokens = self._dedupe([t for t in chapter_tokens if t])
+        # 命中"全文"哨兵后，其它具体章节 token 不再叠加，避免冲突。
+        if "全文" in chapter_tokens:
+            chapter_tokens = ["全文"]
         chapter_selection = ";".join(chapter_tokens)
         return {
             "key_values": kv,
@@ -784,6 +974,7 @@ class PreflightInputsTool(BaseTool):
         s = str(value or "").strip()
         if not s:
             return ""
+        s = self._normalize_chapter_unicode(s)
         s = s.strip().strip('"').strip("'").strip("“").strip("”").strip("‘").strip("’")
         s = s.rstrip("。；，,;")
         s = s.replace("～", "-").replace("—", "-")
@@ -816,6 +1007,32 @@ class PreflightInputsTool(BaseTool):
             s = alias_map[lower]
         s = re.sub(r"\s+", " ", s)
         return s.strip()
+
+    @staticmethod
+    def _normalize_chapter_unicode(text: str) -> str:
+        """统一全角字符与 unicode 罗马数字，便于下游正则识别。"""
+        if not text:
+            return text
+        unicode_roman = {
+            "Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III", "Ⅳ": "IV", "Ⅴ": "V",
+            "Ⅵ": "VI", "Ⅶ": "VII", "Ⅷ": "VIII", "Ⅸ": "IX", "Ⅹ": "X",
+            "Ⅺ": "XI", "Ⅻ": "XII",
+            "ⅰ": "i", "ⅱ": "ii", "ⅲ": "iii", "ⅳ": "iv", "ⅴ": "v",
+            "ⅵ": "vi", "ⅶ": "vii", "ⅷ": "viii", "ⅸ": "ix", "ⅹ": "x",
+        }
+        out: List[str] = []
+        for ch in text:
+            if ch in unicode_roman:
+                out.append(unicode_roman[ch])
+                continue
+            code = ord(ch)
+            if 0xFF10 <= code <= 0xFF19:
+                out.append(chr(code - 0xFEE0))
+            elif 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:
+                out.append(chr(code - 0xFEE0))
+            else:
+                out.append(ch)
+        return "".join(out)
 
     def _map_paths_to_slots(
         self,
@@ -855,6 +1072,9 @@ class PreflightInputsTool(BaseTool):
             if not slot_name:
                 continue
             if values.get(slot_name):
+                continue
+            # 有默认策略的槽位不由「首个匹配扩展名路径」盲填，交给 _apply_slot_defaults
+            if str(slot.get("default_strategy", "") or "").strip():
                 continue
 
             exts = [str(e).lower() for e in (slot.get("suggested_extensions") or [])]

@@ -96,17 +96,20 @@ cp .env.example .env
 # 4. 运行web-ui
 python -m ui.web.server
 
-# 5. 选择带multi的三个工作流之一（v1、v2、v3）
+# 5. 选择带multi的4个工作流之一（v1、v2、v3、v4）
 #    v1 6个检查节点并行，同时多个并发的gemini API请求可能会出现请求失败的问题
 #    v2 6个检查节点串行，相对稳定，但比较慢
 #    v3 只保留一个检查节点（干六个节点的活），理论上速度最快、最稳定，但效果可能略差
+#    v4 与v1在本质上相同，支持用户自然语言输入，只需要包括文件路径信息和checkinglist路径信息
 
-# 7. 构造输出，直接输在对话框中，例如：
+# 7. 构造输入，直接输在对话框中，例如：
 "pdf_path": "./storage/pdfs/paper1.pdf",
 "checklist_path": "./storage/checklists/thesis-checklists.md",
 "output_path": "./storage/documents/paper1-checked.pdf"
 # 路径可以使用绝对路径或相对Tex_Agent的相对路径
 # 可以不用手动上传文件，直接在输入注入文件路径即可
+
+# 如果是v4工作流，就可以不用标准格式的输入，可以支持自然语言输入
 
 # 8. 如果正常就可以看到输出了，输出的文档点击链接下载，也会同时保存在"output_path"路径下
 ```
@@ -114,13 +117,32 @@ python -m ui.web.server
 ### 一些说明
 
 1. Gemini API可能连接不够稳定，并发执行大概率会有的连接失败，串行执行也有小概率失败某一个节点 —— 一个节点失败理论上有的时候不影响正常输出标注pdf，但会在UI显示有错误（有些情况下一些节点请求API失败，但Agent会根据请求成功的API输出进行工作，仍然在"output_path"下保存结果）
-2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
+2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`、`checklist_multi_v4`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
 3. 目前项目可以更方便地自定义工作流，可以参考 `checklist_multi_v1` 设计节点和边的关系，将 JSON 保存在 `config/workflow/` 下，并在 `config/workflow_registry.json` 中注册（关于自定义工作流的详细说明之后可以补充）
+4. `checklist_multi_v4`支持用户自然语言输入，需要包括文件路径信息和checkinglist路径信息
 
 
-## Docling解析文（pdf -> md + json）
+## 解析文章（pdf -> md + json）
 
-### 命令行直接调用工具
+### pypdf+pdfminer
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置环境变量
+cp .env.example .env
+
+# 3. 直接运行web-ui   
+python -m ui.web.server
+
+# 4. 选择工作流：thesis_chapter_extract
+
+# 5. 支持自然语言输入，给定待解析文件的路径和需要解析的章节（或章节名、摘要、全文等字样）
+```
+
+
+### 命令行直接调用工具（docling）
 
 ```bash
 # 1. 安装依赖

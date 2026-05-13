@@ -28,6 +28,10 @@ class ChapterNode:
         self.children: List[ChapterNode] = []
         self.end_page: int | None = None
         self.text = ""
+        # 选择器命中信息（仅在被 select_nodes_by_chapters 命中时被赋值）。
+        self.match_reason: str | None = None
+        self.match_input: str | None = None
+        self.ordinal_path: Tuple[int, ...] | None = None
 
 
 def build_outline_tree(reader, items, depth=0):
@@ -119,11 +123,22 @@ def normalize_text(s: str) -> str:
 _CH_NUMBER_RE = re.compile(r"^\d+(?:\.\d+)*$")
 _TITLE_NUMBER_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)")
 _CN_CHAPTER_RE = re.compile(r"第\s*([一二三四五六七八九十百千万零两\d]+)\s*[章节篇]", flags=re.IGNORECASE)
+_CN_CHAPTER_ROMAN_RE = re.compile(r"第\s*([IVXLCDMivxlcdm]+)\s*[章节篇]")
 _EN_CHAPTER_RE = re.compile(r"chapter\s+(\d+)", flags=re.IGNORECASE)
+_EN_CHAPTER_ROMAN_RE = re.compile(r"chapter\s+([IVXLCDM]+)", flags=re.IGNORECASE)
+_ROMAN_TITLE_RE = re.compile(
+    r"^([IVXLCDMivxlcdm]{1,5})(?:[\.\)、:：]|\s+(?=[\u4e00-\u9fa5A-Za-z\d]))",
+)
+_LETTER_TITLE_RE = re.compile(r"^([A-Z])[\.\)、:：](?:\s|$)")
+_CN_BRACKET_NUM_RE = re.compile(r"^[（\(]\s*([一二三四五六七八九十百千万零两\d]+)\s*[）\)]")
 _TAIL_SECTION_WORDS_RE = re.compile(r"(?:这一|这)?(?:章节|小节|节|部分)\s*$", flags=re.IGNORECASE)
 _TITLE_PREFIX_RE = re.compile(
-    r"^\s*(?:第\s*[一二三四五六七八九十百千万零两\d]+\s*[章节篇]\s*|chapter\s+\d+(?:\.\d+)*\s*|"
-    r"\d+(?:\.\d+)*\s*[\.、:：\-\s]*)",
+    r"^\s*(?:第\s*[一二三四五六七八九十百千万零两\d]+\s*[章节篇]\s*|"
+    r"第\s*[IVXLCDMivxlcdm]+\s*[章节篇]\s*|"
+    r"chapter\s+(?:\d+(?:\.\d+)*|[IVXLCDM]+)\s*|"
+    r"\d+(?:\.\d+)*\s*[\.、:：\-\s]*|"
+    r"[IVXLCDMivxlcdm]+\s*[\.\)、:：]\s*|"
+    r"[A-Z]\s*[\.\)、:：]\s*)",
     flags=re.IGNORECASE,
 )
 
@@ -134,6 +149,125 @@ _SPECIAL_TITLE_ALIASES: Dict[str, List[str]] = {
     "参考文献": ["参考文献", "references", "bibliography"],
     "致谢": ["致谢", "鸣谢", "acknowledgements", "acknowledgments"],
 }
+
+ALL_CHAPTERS_TOKEN = "*"
+_FULLTEXT_NORM_ALIASES: Set[str] = {
+    "全文",
+    "全部",
+    "整篇",
+    "整本",
+    "整篇论文",
+    "整本论文",
+    "全部章节",
+    "所有章节",
+    "全部内容",
+    "所有内容",
+    "全篇",
+    "通篇",
+    "尽全文",
+    "从头到尾",
+    "整篇文章",
+    "整本文档",
+    "整部论文",
+    "整份论文",
+    "整套论文",
+    "完整论文",
+    "完整文档",
+    "全部段落",
+    "整个文档",
+    "每一章",
+    "各个章节",
+    "所有小节",
+    "all",
+    "everything",
+    "entire",
+    "whole",
+    "fulltext",
+    "fulldocument",
+    "fullpaper",
+    "wholedocument",
+    "entiredocument",
+    "completedocument",
+    "thewholedocument",
+    "theentiredocument",
+    "thecompletethesis",
+    "thecompletepaper",
+    "parseentire",
+    "everychapter",
+    "allchapters",
+}
+
+_UNICODE_ROMAN_MAP: Dict[str, str] = {
+    "Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III", "Ⅳ": "IV", "Ⅴ": "V",
+    "Ⅵ": "VI", "Ⅶ": "VII", "Ⅷ": "VIII", "Ⅸ": "IX", "Ⅹ": "X",
+    "Ⅺ": "XI", "Ⅻ": "XII",
+    "ⅰ": "i", "ⅱ": "ii", "ⅲ": "iii", "ⅳ": "iv", "ⅴ": "v",
+    "ⅵ": "vi", "ⅶ": "vii", "ⅷ": "viii", "ⅸ": "ix", "ⅹ": "x",
+}
+
+_FRONT_BACK_MATTER_NORMS: Set[str] = {
+    # 前置
+    "封面", "扉页", "独创性声明", "原创性声明", "学位论文原创性声明",
+    "学位论文版权使用授权书", "学位论文使用授权书", "授权书",
+    "中文摘要", "摘要", "英文摘要", "abstract", "englishabstract",
+    "目录", "contents", "图目录", "表目录", "图表目录", "符号说明", "缩略词",
+    "关键词", "keywords",
+    # 后置
+    "参考文献", "references", "bibliography",
+    "致谢", "鸣谢", "acknowledgements", "acknowledgments",
+    "附录", "appendix",
+    "个人简历", "作者简介", "在学期间发表的论文",
+    "攻读硕士学位期间发表的成果", "攻读博士学位期间发表的成果",
+    "攻读学位期间的研究成果",
+}
+
+
+def _normalize_unicode_chars(s: str) -> str:
+    """统一全角字符/罗马 unicode 编码，便于后续 ASCII 正则匹配。"""
+    if not s:
+        return s
+    out: List[str] = []
+    for ch in s:
+        if ch in _UNICODE_ROMAN_MAP:
+            out.append(_UNICODE_ROMAN_MAP[ch])
+            continue
+        code = ord(ch)
+        if 0xFF10 <= code <= 0xFF19:  # 全角数字
+            out.append(chr(code - 0xFEE0))
+        elif 0xFF21 <= code <= 0xFF3A or 0xFF41 <= code <= 0xFF5A:  # 全角字母
+            out.append(chr(code - 0xFEE0))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _roman_to_int(token: str) -> int | None:
+    text = (token or "").strip().upper()
+    if not text or len(text) > 7:
+        return None
+    if not re.fullmatch(r"[IVXLCDM]+", text):
+        return None
+    table = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
+    total = 0
+    prev = 0
+    for ch in reversed(text):
+        val = table[ch]
+        if val < prev:
+            total -= val
+        else:
+            total += val
+            prev = val
+    return total if total > 0 else None
+
+
+def _letter_to_int(token: str) -> int | None:
+    text = (token or "").strip()
+    if len(text) != 1:
+        return None
+    upper = text.upper()
+    if "A" <= upper <= "Z":
+        return ord(upper) - ord("A") + 1
+    return None
 
 
 def _cn_to_int(token: str) -> int | None:
@@ -164,19 +298,46 @@ def _cn_to_int(token: str) -> int | None:
 
 
 def extract_chapter_number(title: str) -> str:
-    t = str(title or "").strip()
-    if not t:
+    raw = str(title or "").strip()
+    if not raw:
         return ""
+    t = _normalize_unicode_chars(raw)
     m = _TITLE_NUMBER_RE.match(t)
     if m:
         return m.group(1)
+    m = _CN_BRACKET_NUM_RE.match(t)
+    if m:
+        n = _cn_to_int(m.group(1))
+        if n:
+            return str(n)
     m = _CN_CHAPTER_RE.search(t)
     if m:
         n = _cn_to_int(m.group(1))
-        return str(n) if n else ""
+        if n:
+            return str(n)
+    m = _CN_CHAPTER_ROMAN_RE.search(t)
+    if m:
+        n = _roman_to_int(m.group(1))
+        if n:
+            return str(n)
     m = _EN_CHAPTER_RE.search(t)
     if m:
         return str(int(m.group(1)))
+    m = _EN_CHAPTER_ROMAN_RE.search(t)
+    if m:
+        n = _roman_to_int(m.group(1))
+        if n:
+            return str(n)
+    m = _ROMAN_TITLE_RE.match(t)
+    if m:
+        n = _roman_to_int(m.group(1))
+        if n:
+            return str(n)
+    m = _LETTER_TITLE_RE.match(t)
+    if m:
+        n = _letter_to_int(m.group(1))
+        if n:
+            return str(n)
     return ""
 
 
@@ -185,14 +346,32 @@ def normalize_chapter_selector(selector: str) -> str:
     if not text:
         return ""
     text = text.strip("[]()（）\"'“”‘’")
+    text = _normalize_unicode_chars(text)
+    # 全文哨兵：先于其他归一化判定，避免被裁剪。
+    flat = normalize_text(text).lower()
+    if flat in _FULLTEXT_NORM_ALIASES:
+        return ALL_CHAPTERS_TOKEN
     text = _TAIL_SECTION_WORDS_RE.sub("", text)
     text = text.rstrip("的")
     text = text.replace("～", "-").replace("—", "-").replace("到", "-").replace("至", "-")
     if _CH_NUMBER_RE.match(text):
         return text
+    # 多级混合编号：罗马/字母 + .数字。例如 "III.2" / "A.2"。
+    m_mix = re.match(r"^([IVXLCDMivxlcdm]+|[A-Za-z])\s*\.\s*(\d+(?:\.\d+)*)$", text)
+    if m_mix:
+        head = _roman_to_int(m_mix.group(1)) or _letter_to_int(m_mix.group(1))
+        if head:
+            return f"{head}.{m_mix.group(2)}"
     n = extract_chapter_number(text)
     if n:
         return n
+    # 单个罗马/字母 token（如 "III"、"A"）
+    roman = _roman_to_int(text)
+    if roman is not None:
+        return str(roman)
+    letter = _letter_to_int(text)
+    if letter is not None:
+        return str(letter)
     return normalize_text(text).lower()
 
 
@@ -200,9 +379,64 @@ def _normalize_title_for_matching(title: str) -> str:
     t = str(title or "").strip()
     if not t:
         return ""
+    t = _normalize_unicode_chars(t)
     t = _TITLE_PREFIX_RE.sub("", t).strip()
     t = _TAIL_SECTION_WORDS_RE.sub("", t).strip().rstrip("的")
     return normalize_text(t).lower()
+
+
+def _is_front_back_matter(title: str) -> bool:
+    """识别"摘要 / 目录 / 参考文献 / 致谢 / 附录"等前后置内容，用于序数兜底过滤。"""
+    if not title:
+        return False
+    t = _normalize_unicode_chars(str(title))
+    t = _TITLE_PREFIX_RE.sub("", t).strip()
+    norm = normalize_text(t).lower()
+    if not norm:
+        return False
+    if norm in _FRONT_BACK_MATTER_NORMS:
+        return True
+    # 附录 A / 附录B / Appendix C
+    if norm.startswith("附录") or norm.startswith("appendix"):
+        return True
+    return False
+
+
+def _parse_ordinal_path(token: str) -> Tuple[int, ...] | None:
+    """把 "1.1.2" / "第三章" / "III" / "A" 之类归一化为整数元组路径。"""
+    normalized = normalize_chapter_selector(token)
+    if not normalized or normalized == ALL_CHAPTERS_TOKEN:
+        return None
+    if not _CH_NUMBER_RE.match(normalized):
+        return None
+    try:
+        parts = tuple(int(x) for x in normalized.split("."))
+    except ValueError:
+        return None
+    if not parts or any(p <= 0 for p in parts):
+        return None
+    return parts
+
+
+def _pick_by_ordinal_path(
+    tree: List["ChapterNode"],
+    path: Tuple[int, ...],
+) -> "ChapterNode | None":
+    """按层级序数沿目录树取节点；首层会自动跳过前后置内容。"""
+    if not path:
+        return None
+    current_layer: List[ChapterNode] = list(tree or [])
+    chosen: ChapterNode | None = None
+    for level, idx in enumerate(path):
+        if level == 0:
+            layer = [n for n in current_layer if not _is_front_back_matter(n.title)]
+        else:
+            layer = current_layer
+        if idx < 1 or idx > len(layer):
+            return None
+        chosen = layer[idx - 1]
+        current_layer = list(chosen.children)
+    return chosen
 
 
 def _split_selector_tokens(chapters: str | List[str] | Tuple[str, ...]) -> List[str]:
@@ -245,13 +479,26 @@ def select_nodes_by_chapters(
 ) -> Tuple[List[ChapterNode], List[str]]:
     """
     根据章节选择器从目录树中选节点，支持：
-    - 单项：3 / 3.1 / 第三章 / Chapter 3 / 标题
+    - 单项：3 / 3.1 / 第三章 / Chapter 3 / 标题 / III / A. / 全文
     - 范围：3.1-3.3
     - 多项分隔：, ; 、 + 换行
+
+    命中节点会被设置 ``match_reason / match_input / ordinal_path`` 属性，便于上层观察。
     """
     tokens = _split_selector_tokens(chapters)
     if not tokens:
         return [], []
+
+    # 全文哨兵：任一 token 归一化后是 ALL → 返回全部根节点。
+    for raw in tokens:
+        if normalize_chapter_selector(raw) == ALL_CHAPTERS_TOKEN:
+            roots: List[ChapterNode] = list(tree)
+            for node in roots:
+                node.match_reason = "all"
+                node.match_input = raw
+                node.ordinal_path = None
+            return roots, []
+
     flat: List[ChapterNode] = []
     flatten_nodes(tree, flat)
     by_number, by_norm_title = _build_match_indexes(flat)
@@ -260,34 +507,57 @@ def select_nodes_by_chapters(
     selected: Dict[int, ChapterNode] = {}
     unresolved: List[str] = []
 
+    def _annotate(
+        node: ChapterNode,
+        *,
+        reason: str,
+        input_token: str,
+        ordinal_path: Tuple[int, ...] | None = None,
+    ) -> ChapterNode:
+        node.match_reason = reason
+        node.match_input = input_token
+        node.ordinal_path = ordinal_path
+        return node
+
     def _match_one(token: str) -> ChapterNode | None:
         normalized = normalize_chapter_selector(token)
         if not normalized:
             return None
         if normalized in by_number:
-            return by_number[normalized]
+            return _annotate(by_number[normalized], reason="number", input_token=token)
         for alias in _SPECIAL_TITLE_ALIASES.get(normalized, []):
             alias_norm = _normalize_title_for_matching(alias)
             matched_alias = by_norm_title.get(alias_norm, [])
             if matched_alias:
-                return matched_alias[0]
+                return _annotate(matched_alias[0], reason="alias", input_token=token)
         matched = by_norm_title.get(normalized, [])
         if matched:
-            return matched[0]
+            return _annotate(matched[0], reason="title", input_token=token)
         # 若 token 形如 "1.1研究背景"，优先按章节号匹配到 1.1 节
         m = re.match(r"^(\d+(?:\.\d+)+)", normalized)
         if m and m.group(1) in by_number:
-            return by_number[m.group(1)]
+            return _annotate(by_number[m.group(1)], reason="number", input_token=token)
         # 模糊兜底：允许 token 与标题去编号后的主体互为包含
         for key, nodes in by_norm_title.items():
             if not key or not nodes:
                 continue
             if normalized in key or key in normalized:
-                return nodes[0]
+                return _annotate(nodes[0], reason="fuzzy", input_token=token)
+        # 最后兜底：按目录树顺序数到第 path 个节点。
+        ordinal_path = _parse_ordinal_path(token)
+        if ordinal_path:
+            picked = _pick_by_ordinal_path(tree, ordinal_path)
+            if picked is not None:
+                return _annotate(
+                    picked,
+                    reason="ordinal",
+                    input_token=token,
+                    ordinal_path=ordinal_path,
+                )
         return None
 
     for token in tokens:
-        if "-" in token:
+        if "-" in token and normalize_chapter_selector(token) != ALL_CHAPTERS_TOKEN:
             left_raw, right_raw = token.split("-", 1)
             left = _match_one(left_raw)
             right = _match_one(right_raw)
@@ -300,6 +570,7 @@ def select_nodes_by_chapters(
             for k in range(lo, hi + 1):
                 candidate = flat[k]
                 if candidate.depth == level:
+                    _annotate(candidate, reason="range", input_token=token)
                     selected[id(candidate)] = candidate
             continue
 
