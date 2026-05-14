@@ -49,4 +49,8 @@
 + 建立 checklist 多路并行审查 **v4** 工作流（`checklist_multi_v4`，首节点 preflight）
   新增示例工作流 `thesis_chapter_extract`
 
-#### [2026-05-14](./2026-05-14.md)
+#### [2026-05-13 ~ 2026-05-14](./2026-05-14.md)
+
++ 新增 checklist 文本审查工作流 **v1 / v2**（`workflow_checklist_text_v1/v2`）：v1 参考文献为占位；v2 参考文献走 PDF 切片 + Docling + 实质审查
++ 新增工具 `checklist_prepare`、`thesis_chapter_route`、`references_slice_and_docling`
++ `pdf_comment`（工作流节点 `pdf_annotator`）：提示页前后多页搜索 + 分层模糊相似度匹配，提高批注命中率
