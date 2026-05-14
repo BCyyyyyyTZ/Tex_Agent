@@ -48,3 +48,5 @@
 + `preflight_inputs_tool` 增强章节槽位抽取（`chapter_selection`）并支持传递到新工具
 + 建立 checklist 多路并行审查 **v4** 工作流（`checklist_multi_v4`，首节点 preflight）
   新增示例工作流 `thesis_chapter_extract`
+
+#### [2026-05-14](./2026-05-14.md)

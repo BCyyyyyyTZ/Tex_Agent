@@ -1,0 +1,579 @@
+{
+  "_comment": "checklist text review v2: references branch uses PDF slicing + docling",
+  "nodes": [
+    {
+      "node_id": "preflight_inputs",
+      "node_type": "tool",
+      "tool_name": "preflight_inputs",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "context_text": "${last_message_content}",
+          "workflow_name": "${metadata.workflow}",
+          "current_node_id": "preflight_inputs",
+          "run_register": true,
+          "use_llm": true
+        },
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "load_checklist",
+      "node_type": "tool",
+      "tool_name": "file_loading",
+      "config": {
+        "tool_input": "${metadata.preflight_inputs.metadata.tool_metadata.checklist_abs_path}",
+        "depends_on": [
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "checklist_prepare",
+      "node_type": "tool",
+      "tool_name": "checklist_prepare",
+      "config": {
+        "tool_input": {
+          "checklist_path": "${metadata.preflight_inputs.metadata.tool_metadata.checklist_abs_path}",
+          "include_reference_rules": true
+        },
+        "depends_on": [
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "outline_extract",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "outline",
+          "outline_source": "auto",
+          "redo": false
+        },
+        "depends_on": [
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "chapter_routing",
+      "node_type": "tool",
+      "tool_name": "thesis_chapter_route",
+      "config": {
+        "tool_input": {
+          "outline_path": "${metadata.outline_extract.metadata.tool_metadata.outline_path}",
+          "strict": false
+        },
+        "depends_on": [
+          "outline_extract"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "fork_checkers",
+      "node_type": "parallel_fork",
+      "parallel_branches": [
+        "abstract_checker",
+        "introduction_checker",
+        "background_related_work_checker",
+        "method_checker",
+        "experiment_checker",
+        "references_checker"
+      ],
+      "config": {
+        "depends_on": [
+          "checklist_prepare",
+          "chapter_routing"
+        ]
+      }
+    },
+    {
+      "node_id": "extract_abstract",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "extract",
+          "chapters": "${metadata.chapter_routing.metadata.tool_metadata.selectors.abstract}",
+          "outline_source": "auto",
+          "strict_chapters": false,
+          "md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "abstract_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文摘要审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_abstract` 的章节文本与 `checklist_prepare` 里的摘要审查包进行检查。审查包键名是 abstract，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.abstract}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.abstract}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"摘要检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_abstract",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "extract_introduction",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "extract",
+          "chapters": "${metadata.chapter_routing.metadata.tool_metadata.selectors.introduction}",
+          "outline_source": "auto",
+          "strict_chapters": false,
+          "md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "introduction_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文绪论审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_introduction` 的章节文本与 `checklist_prepare` 里的绪论审查包进行检查。审查包键名是 introduction，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.introduction}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.introduction}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"绪论检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_introduction",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "extract_background_related_work",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "extract",
+          "chapters": "${metadata.chapter_routing.metadata.tool_metadata.selectors.background_related_work}",
+          "outline_source": "auto",
+          "strict_chapters": false,
+          "md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "background_related_work_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文背景与相关工作审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_background_related_work` 的章节文本与 `checklist_prepare` 里的背景相关工作审查包进行检查。审查包键名是 background_related_work，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.background_related_work}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.background_related_work}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"背景与相关工作检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_background_related_work",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "extract_method",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "extract",
+          "chapters": "${metadata.chapter_routing.metadata.tool_metadata.selectors.method}",
+          "outline_source": "auto",
+          "strict_chapters": false,
+          "md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "method_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文方法章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_method` 的章节文本与 `checklist_prepare` 里的方法审查包进行检查。审查包键名是 method，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.method}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.method}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"方法章节检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_method",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "extract_experiment",
+      "node_type": "tool",
+      "tool_name": "thesis_outline_extract",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "mode": "extract",
+          "chapters": "${metadata.chapter_routing.metadata.tool_metadata.selectors.experiment}",
+          "outline_source": "auto",
+          "strict_chapters": false,
+          "md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "experiment_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文实验章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_experiment` 的章节文本与 `checklist_prepare` 里的实验审查包进行检查。审查包键名是 experiment，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.experiment}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.experiment}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"实验章节检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_experiment",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "extract_references",
+      "node_type": "tool",
+      "tool_name": "references_slice_and_docling",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "chapter_routing": "${metadata.chapter_routing.metadata.tool_metadata}",
+          "redo_docling": false,
+          "docling_md_preview_chars": 2000000
+        },
+        "depends_on": [
+          "fork_checkers",
+          "chapter_routing",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "references_checker",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是资深学位论文参考文献审查专家。严格依据给定审查包与参考文献文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体条目，绝对不要给出宏观的读后感或总体评价。",
+        "subtask": "请仅基于上游 `extract_references` 产出的参考文献正文与 `checklist_prepare` 里的参考文献审查包进行检查。审查包键名是 references，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.references}`。原 PDF 参考文献页范围为 `${metadata.extract_references.metadata.tool_metadata.original_page_start}` 到 `${metadata.extract_references.metadata.tool_metadata.original_page_end_inclusive}`（闭区间）。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"参考文献检查结论\"}。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应条目或片段（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作修改建议；page_idx 必须使用原 PDF 页码（不是子 PDF 页码），缺失时可用 `${metadata.chapter_routing.metadata.tool_metadata.representative_pages.references}` 作为兜底。若无问题 result=\"[]\"。",
+        "depends_on": [
+          "extract_references",
+          "checklist_prepare",
+          "chapter_routing"
+        ],
+        "temperature": 0.1,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "join_checkers",
+      "node_type": "parallel_join",
+      "agent_name": "SimpleAgent",
+      "source_branches": [
+        "abstract_checker",
+        "introduction_checker",
+        "background_related_work_checker",
+        "method_checker",
+        "experiment_checker",
+        "references_checker"
+      ],
+      "join_policy": "all_success",
+      "config": {
+        "passthrough_join": true,
+        "depends_on": [
+          "abstract_checker",
+          "introduction_checker",
+          "background_related_work_checker",
+          "method_checker",
+          "experiment_checker",
+          "references_checker"
+        ],
+        "system_prompt": "（本节点已启用 passthrough_join，不调用 LLM；以下字段仅占位）",
+        "subtask": "并行分支结果由引擎按分支顺序纯文本拼接写入 result。",
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0
+      }
+    },
+    {
+      "node_id": "annotation_formatter",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是论文审查结果聚合与 JSON 格式化专家。",
+        "subtask": "上游 `join_checkers` 的「完整输出」为六个审查分支的纯文本拼接：每个分支以 `[OK 节点id]` 或 `[FAIL 节点id]` 开头，其下「输出:」后为该分支产出的 JSON。请从这些分段中解析各分支顶层 JSON 的 `result` 字段（值为 JSON 数组的字符串形式），合并为统一列表。不要用一段话替代逐条意见。去重规则：仅当 page_idx+text+comment 实质相同时合并；禁止把多条独立问题合成一条，禁止缩短或改写各条 comment 的实质内容。另请参考 `chapter_routing` 元数据补全缺失的 page_idx。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"五个正文模块+一个参考文献占位节点的综合总结\"}。要求：1) comment 仅中文；2) result 必须是合法 JSON 字符串；3) page_idx 缺失时可使用对应路由锚点页；4) 参考文献占位节点可能为空结果。",
+        "depends_on": [
+          "join_checkers",
+          "chapter_routing"
+        ],
+        "temperature": 0.05,
+        "history_mode": "minimal",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    },
+    {
+      "node_id": "pdf_annotator",
+      "node_type": "tool",
+      "tool_name": "pdf_comment",
+      "config": {
+        "tool_input": {
+          "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
+          "output_path": "${metadata.preflight_inputs.metadata.tool_metadata.output_pdf_abs_path}",
+          "question_list": "${metadata.join_checkers.result}"
+        },
+        "depends_on": [
+          "join_checkers",
+          "annotation_formatter",
+          "preflight_inputs"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "offer_download",
+      "node_type": "tool",
+      "tool_name": "offer_artifact_download",
+      "config": {
+        "tool_input": {
+          "file_path": "${metadata.pdf_annotator.metadata.tool_metadata.output_path}"
+        },
+        "depends_on": [
+          "pdf_annotator"
+        ],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "final_report",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "system_prompt": "你是审查结果总结助手。",
+        "subtask": "根据 annotation_formatter、pdf_annotator 与 offer_download 的结果，输出简洁总结：总问题数、主要问题类型、输出 PDF 路径，并提醒用户点击附件下载。",
+        "depends_on": [
+          "annotation_formatter",
+          "pdf_annotator",
+          "offer_download",
+          "chapter_routing"
+        ],
+        "temperature": 0.15,
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "always",
+        "include_metadata_chain": false,
+        "mem_limit": 0,
+        "upstream_result_max_chars": 2000000
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from_node": "preflight_inputs",
+      "to_node": "load_checklist",
+      "condition": null
+    },
+    {
+      "from_node": "preflight_inputs",
+      "to_node": "checklist_prepare",
+      "condition": null
+    },
+    {
+      "from_node": "preflight_inputs",
+      "to_node": "outline_extract",
+      "condition": null
+    },
+    {
+      "from_node": "outline_extract",
+      "to_node": "chapter_routing",
+      "condition": null
+    },
+    {
+      "from_node": "checklist_prepare",
+      "to_node": "fork_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "chapter_routing",
+      "to_node": "fork_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_abstract",
+      "condition": null
+    },
+    {
+      "from_node": "extract_abstract",
+      "to_node": "abstract_checker",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_introduction",
+      "condition": null
+    },
+    {
+      "from_node": "extract_introduction",
+      "to_node": "introduction_checker",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_background_related_work",
+      "condition": null
+    },
+    {
+      "from_node": "extract_background_related_work",
+      "to_node": "background_related_work_checker",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_method",
+      "condition": null
+    },
+    {
+      "from_node": "extract_method",
+      "to_node": "method_checker",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_experiment",
+      "condition": null
+    },
+    {
+      "from_node": "extract_experiment",
+      "to_node": "experiment_checker",
+      "condition": null
+    },
+    {
+      "from_node": "fork_checkers",
+      "to_node": "extract_references",
+      "condition": null
+    },
+    {
+      "from_node": "extract_references",
+      "to_node": "references_checker",
+      "condition": null
+    },
+    {
+      "from_node": "abstract_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "introduction_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "background_related_work_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "method_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "experiment_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "references_checker",
+      "to_node": "join_checkers",
+      "condition": null
+    },
+    {
+      "from_node": "join_checkers",
+      "to_node": "annotation_formatter",
+      "condition": null
+    },
+    {
+      "from_node": "annotation_formatter",
+      "to_node": "pdf_annotator",
+      "condition": null
+    },
+    {
+      "from_node": "pdf_annotator",
+      "to_node": "offer_download",
+      "condition": null
+    },
+    {
+      "from_node": "offer_download",
+      "to_node": "final_report",
+      "condition": null
+    }
+  ]
+}

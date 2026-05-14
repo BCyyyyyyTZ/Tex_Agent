@@ -79,6 +79,14 @@
     "thesis_chapter_extract": {
       "type": "file",
       "path": "config/workflow/workflow_thesis_chapter_extract.json"
+    },
+    "checklist_text_v1": {
+      "type": "file",
+      "path": "config/workflow/workflow_checklist_text_v1.json"
+    },
+    "checklist_text_v2": {
+      "type": "file",
+      "path": "config/workflow/workflow_checklist_text_v2.json"
     }
   }
 }

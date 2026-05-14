@@ -379,6 +379,46 @@ def _build_tool_structured_output(
     ).to_dict()
 
 
+def _format_inner_meta_value(key: str, val: Any, *, max_len: int = 900) -> str:
+    """
+    将节点 metadata 内嵌字段压缩为可读的短串，避免 tool_input / tool_metadata
+    等大对象经 repr() 整段进入上游 prompt 导致上下文爆炸。
+    """
+    if val is None:
+        return ""
+    if key == "tool_input" and isinstance(val, dict):
+        parts: List[str] = []
+        for k, v in val.items():
+            if isinstance(v, str) and len(v) > 400:
+                parts.append(f"{k}=<str {len(v)} chars>")
+            elif isinstance(v, (dict, list, tuple)) and len(str(v)) > 400:
+                parts.append(f"{k}=<{type(v).__name__} n={len(v)}>")
+            else:
+                frag = repr(v)
+                if len(frag) > 360:
+                    frag = frag[:360] + "...(trunc)"
+                parts.append(f"{k}={frag}")
+        body = ", ".join(parts[:20])
+        if len(body) > max_len * 3:
+            body = body[: max_len * 3] + "...(trunc)"
+        return "{" + body + "}"
+    if key == "tool_metadata" and isinstance(val, dict):
+        rp = val.get("review_packages")
+        if isinstance(rp, dict):
+            lens = {str(k): len(str(v)) for k, v in rp.items()}
+            return (
+                "{review_packages: "
+                + json.dumps({"keys": list(rp.keys()), "char_lens": lens}, ensure_ascii=False)
+                + " ... 完整文本见 checklist_prepare 节点 result}"
+            )
+        s = repr(val)
+        return s[: max_len * 2] + ("...(trunc)" if len(s) > max_len * 2 else "")
+    s = repr(val)
+    if len(s) > max_len:
+        return s[:max_len] + f"...(trunc total_len={len(s)})"
+    return s
+
+
 def _upstream_blocks(
     meta: dict,
     depends_on: list,
@@ -429,7 +469,10 @@ def _upstream_blocks(
                            if k not in {"node_type", "node_id", "error"}
                            and inner_meta[k] is not None]
             if useful_keys:
-                kv = ", ".join(f"{k}={inner_meta[k]!r}" for k in useful_keys[:6])
+                kv = ", ".join(
+                    f"{k}={_format_inner_meta_value(k, inner_meta[k])}"
+                    for k in useful_keys[:8]
+                )
                 block_lines.append(f"节点元数据: {{{kv}}}")
 
         lines.append("\n".join(block_lines))
@@ -1025,7 +1068,7 @@ def make_parallel_fork_node(
 
 
 def make_parallel_join_node(
-    agent: BaseAgent,
+    agent: Optional[BaseAgent],
     ctx: BaseContext,
     node_id: str,
     node_config: dict,
@@ -1043,8 +1086,8 @@ def make_parallel_join_node(
     执行步骤：
       1. 从 state.metadata 读取所有 source_branches 的结果
       2. 按 join_policy 验证整体成功/失败
-      3. 将合并后的分支内容注入 agent context，执行 agent 整合
-      4. 返回 agent 整合结果（增量 delta）
+      3. 若 config.passthrough_join=true：将各分支 result 纯文本拼接写回，不调用 LLM
+      4. 否则：将合并后的分支内容注入 agent context，执行 agent 整合并返回
 
     Args:
         source_branches:   被汇聚的分支节点 ID 列表
@@ -1074,17 +1117,25 @@ def make_parallel_join_node(
             "在结论中说明影响并尽量基于成功分支给出完整答案。"
         )
 
-    base_agent_node = make_agent_node(
-        agent=agent,
-        ctx=ctx,
-        node_id=node_id,
-        node_config=join_node_config,
-        persona_memory=persona_memory,
-        runtime_memory=runtime_memory,
-        default_history_mode=default_history_mode,
-        is_terminal=is_terminal,
-        is_entry_node=False,
-    )
+    passthrough_join = bool(join_node_config.get("passthrough_join"))
+    if passthrough_join:
+        base_agent_node = None
+    else:
+        if agent is None:
+            raise ValueError(
+                f"[{node_id}] parallel_join 未启用 passthrough_join 时必须提供 agent 实例"
+            )
+        base_agent_node = make_agent_node(
+            agent=agent,
+            ctx=ctx,
+            node_id=node_id,
+            node_config=join_node_config,
+            persona_memory=persona_memory,
+            runtime_memory=runtime_memory,
+            default_history_mode=default_history_mode,
+            is_terminal=is_terminal,
+            is_entry_node=False,
+        )
 
     def parallel_join_node(state: WorkflowState) -> dict:
         logger.info(
@@ -1125,6 +1176,36 @@ def make_parallel_join_node(
         logger.info(
             f"[{node_id}] 汇聚成功: {merged.succeeded_branches}/{merged.total_branches} 分支通过"
         )
+        if passthrough_join:
+            join_output = NodeOutput(
+                result=merged.combined_result,
+                summary=(
+                    f"并行汇聚：{merged.succeeded_branches}/{merged.total_branches} 分支"
+                    "（纯文本拼接，无 LLM）"
+                ),
+                confidence=1.0,
+                status="pass",
+                metadata={
+                    "node_type": "parallel_join",
+                    "node_id": node_id,
+                    "join_policy": join_policy.value,
+                    "total_branches": merged.total_branches,
+                    "succeeded_branches": merged.succeeded_branches,
+                    "passthrough_join": True,
+                    "branch_outputs": merged.branch_outputs,
+                },
+            ).to_dict()
+            return _finalize_node_state(
+                state=state,
+                node_id=node_id,
+                node_output=join_output,
+                output=merged.combined_result,
+                error=None,
+                new_messages=None,
+                is_terminal=is_terminal,
+            )
+
+        assert base_agent_node is not None
         result = base_agent_node(state)
 
         # 追加并行汇聚元信息到 metadata delta

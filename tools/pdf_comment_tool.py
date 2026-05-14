@@ -6,7 +6,10 @@ PdfCommentTool：在 PDF 指定位置批量添加高亮和注释。
   run(pdf_path, annotations, output_path=None)
     - pdf_path:    原始 PDF 路径（绝对路径）
     - annotations: JSON 字符串 或 列表，每项 {page_idx:int, text:str, comment:str}
-                   page_idx 从 1 开始（面向用户），内部自动减 1
+                   page_idx 从 1 开始（面向用户），作「提示页」：先在当页搜 text，
+                   未命中则在 ±PAGE_HINT_SEARCH_RADIUS 页内由近及远继续搜；仍无则在该提示页页边汇总
+    - 文本匹配：先 PyMuPDF 精确 search_for，再子串式窗口匹配；仍失败时对窗口文本与目标做相似度匹配
+      （difflib.SequenceMatcher，默认 ratio≥0.9 视为命中），以容忍模型摘录与 PDF 原文的细微差异
     - output_path: 输出路径，默认覆盖原文件（与 pdf_path 相同）
 
 上游 agent 节点只需在其 result 字段中输出 JSON 数组，即可通过
@@ -15,6 +18,7 @@ PdfCommentTool：在 PDF 指定位置批量添加高亮和注释。
 """
 
 import ast
+import difflib
 import fitz
 import json
 import os
@@ -30,6 +34,41 @@ from utils.logger import get_logger
 from utils.text_normalize import normalize, normalize_for_search
 
 logger = get_logger(__name__)
+
+
+def _extract_items_from_parallel_join_blob(text: str) -> List[Any]:
+    """
+    从 merge_parallel_results 拼接的纯文本中提取各分支「输出:\\n[...]」后的 JSON 数组元素。
+
+    典型形态（parallel_join + passthrough_join）：
+        [[OK] abstract_checker]
+        摘要: ...
+        输出:
+        [{...}, ...]
+
+    用于直连 pdf_comment，避免上游 LLM 将超长合并结果再次 JSON 封装后被截断。
+    """
+    decoder = json.JSONDecoder()
+    merged: List[Any] = []
+    marker = "输出:"
+    pos = 0
+    while True:
+        i = text.find(marker, pos)
+        if i < 0:
+            break
+        bracket = text.find("[", i + len(marker))
+        if bracket < 0:
+            pos = i + len(marker)
+            continue
+        try:
+            val, end = decoder.raw_decode(text, bracket)
+        except json.JSONDecodeError:
+            pos = bracket + 1
+            continue
+        if isinstance(val, list):
+            merged.extend(val)
+        pos = end if end > pos else bracket + 1
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -334,40 +373,127 @@ def _add_margin_note(
     _add_margin_freetext(page, layout, page_0, comment, None, py, idx)
 
 
-def _fuzzy_search(page, target_text: str) -> list:
+# 上游 page_idx（Docling/模型）与 PDF 页偶有不一致时，在提示页前后各若干页内继续搜原文
+PAGE_HINT_SEARCH_RADIUS = 10
+
+# 精确 search_for 与「子串式」模糊均未命中时，按字符级相似度接受高亮（SequenceMatcher.ratio）
+FUZZY_TEXT_MATCH_MIN_RATIO = 0.9
+
+
+def _union_word_rects(words: List[Any], i: int, win_size: int) -> fitz.Rect:
+    rect = fitz.Rect(words[i][0:4])
+    for j in range(i + 1, i + win_size):
+        rect = rect | fitz.Rect(words[j][0:4])
+    return rect
+
+
+def _fuzzy_search(
+    page: fitz.Page,
+    target_text: str,
+    *,
+    min_ratio: float = FUZZY_TEXT_MATCH_MIN_RATIO,
+) -> list:
     """
     模糊搜索：将页面所有单词提取出来，通过滑动窗口匹配目标文本。
-    支持：大小写不敏感 + 去空格字符匹配（解决 OCR 多余空格问题）。
+    支持：大小写不敏感 + 去空格字符匹配（解决 OCR 多余空格问题）；
+    若仍无子串命中，则用 SequenceMatcher.ratio >= min_ratio（默认 0.9）接受「足够接近」的窗口，
+    解决模型摘录与 PDF 原文仅有细微差异时无法高亮的问题。
     """
-    words = page.get_text("words")   # (x0, y0, x1, y1, word, ...)
-    target_words = target_text.split()
-    if not target_words:
+    words = page.get_text("words")  # (x0, y0, x1, y1, word, ...)
+    if not words:
         return []
-    # 去空格后做字符级匹配（对中文最有效）
-    target_nospace = re.sub(r'\s+', '', target_text).lower()
-    results = []
 
-    # 滑动窗口大小：从 1 到 n，取能覆盖目标长度的最小窗口
-    n_words = len(words)
+    target_words = target_text.split()
+    target_nospace = re.sub(r"\s+", "", str(target_text)).lower()
     target_len = len(target_nospace)
     if not target_len:
         return []
 
-    for win_size in range(max(1, len(target_words) - 2), min(n_words, len(target_words) + 6)):
-        for i in range(n_words - win_size + 1):
-            window_text = re.sub(r'\s+', '', "".join(w[4] for w in words[i: i + win_size])).lower()
-            # 目标字符串包含在窗口中 或 窗口包含在目标中（处理长目标被截断的情形）
-            if target_nospace in window_text or (
-                len(target_nospace) > 6 and window_text in target_nospace and len(window_text) >= len(target_nospace) * 0.7
-            ):
-                rect = fitz.Rect(words[i][0:4])
-                for j in range(i + 1, i + win_size):
-                    rect = rect | fitz.Rect(words[j][0:4])
-                results.append(rect)
-        if results:
-            break   # 找到就停，不再扩大窗口
+    n_words = len(words)
+    tw = len(target_words)
 
-    return results
+    # 无空格中文等：split 后只有 1 段，原逻辑窗口过小；按目标字符量扩大窗口上界
+    if tw <= 1:
+        est = min(n_words, max(6, target_len))
+        win_lo = max(1, est // 4)
+        win_hi = min(n_words, max(est + 8, target_len + 12), win_lo + 180)
+    else:
+        win_lo = max(1, tw - 2)
+        win_hi = min(n_words, tw + 8)
+
+    # ── 阶段 A：子串 / 长目标截断相容（保持原有行为）────────────────
+    for win_size in range(win_lo, win_hi + 1):
+        for i in range(n_words - win_size + 1):
+            window_text = re.sub(r"\s+", "", "".join(str(w[4]) for w in words[i : i + win_size])).lower()
+            if target_nospace in window_text or (
+                target_len > 6
+                and window_text in target_nospace
+                and len(window_text) >= target_len * 0.7
+            ):
+                return [_union_word_rects(words, i, win_size)]
+
+    # ── 阶段 B：相似度（默认 ratio >= 0.9）───────────────────────────
+    if target_len < 6:
+        return []
+
+    best_ratio = 0.0
+    best_pair: Optional[Tuple[int, int]] = None
+    max_len_delta = max(5, int(target_len * 0.38))
+    # 大页略降步长，避免极端 PDF 上卡顿
+    i_step = 2 if n_words > 900 else 1
+    quick_floor = max(0.0, min_ratio - 0.08)
+
+    for win_size in range(win_lo, win_hi + 1):
+        upper = n_words - win_size
+        if upper < 0:
+            continue
+        for i in range(0, upper + 1, i_step):
+            window_text = re.sub(r"\s+", "", "".join(str(w[4]) for w in words[i : i + win_size])).lower()
+            if not window_text:
+                continue
+            if abs(len(window_text) - target_len) > max_len_delta:
+                continue
+            sm = difflib.SequenceMatcher(None, target_nospace, window_text)
+            if sm.quick_ratio() < quick_floor:
+                continue
+            r = sm.ratio()
+            if r > best_ratio:
+                best_ratio = r
+                best_pair = (i, win_size)
+
+    if best_pair is not None and best_ratio >= min_ratio:
+        i, win_size = best_pair
+        logger.debug(
+            "pdf_comment 模糊相似度命中 ratio=%.3f win=%d (min=%.2f)",
+            best_ratio,
+            win_size,
+            min_ratio,
+        )
+        return [_union_word_rects(words, i, win_size)]
+
+    return []
+
+
+def _page_indices_near_hint(center_0: int, total_pages: int, radius: int) -> List[int]:
+    """从 center_0 起由近及远排序的页下标（0-based），含 [center-radius, center+radius] 与文档边界求交。"""
+    if total_pages <= 0:
+        return []
+    lo = max(0, center_0 - radius)
+    hi = min(total_pages - 1, center_0 + radius)
+    idxs = list(range(lo, hi + 1))
+    idxs.sort(key=lambda p: (abs(p - center_0), p))
+    return idxs
+
+
+def _search_text_instances_on_page(page: fitz.Page, final_candidates: List[str]) -> List[Any]:
+    """在给定页上按 final_candidates 依次尝试精确 + 模糊搜索，返回首个非空命中（矩形列表）。"""
+    for cand in final_candidates[:8]:
+        instances = page.search_for(cand)
+        if not instances:
+            instances = _fuzzy_search(page, cand)
+        if instances:
+            return instances
+    return []
 
 
 def _parse_annotations(raw: Any) -> tuple[List[Dict], Optional[str]]:
@@ -531,10 +657,21 @@ class PdfCommentTool(BaseTool):
             raw = data.strip()
             if not raw:
                 return []
-            parsed = _try_parse_obj(raw)
-            if parsed is None:
-                return []
-            data = parsed
+            # 并行 join 纯拼接：各分支「输出:」后为合法 JSON 数组，避免再走 LLM 二次封装导致截断
+            if "输出:" in raw and ("[[OK]" in raw or "[[FAIL]" in raw):
+                blob_items = _extract_items_from_parallel_join_blob(raw)
+                if blob_items:
+                    data = blob_items
+                else:
+                    parsed = _try_parse_obj(raw)
+                    if parsed is None:
+                        return []
+                    data = parsed
+            else:
+                parsed = _try_parse_obj(raw)
+                if parsed is None:
+                    return []
+                data = parsed
 
         # 2) 若是 dict，优先取 result 字段
         if isinstance(data, dict):
@@ -679,19 +816,19 @@ class PdfCommentTool(BaseTool):
                         errors.append(f"[{i}] 缺少必要字段 page_idx/comment")
                         continue
 
-                    # page_idx 从 1 开始 → 内部从 0 开始
-                    page_0 = int(raw_page) - 1
-                    if not (0 <= page_0 < total_pages):
+                    # page_idx 从 1 开始 → 内部从 0 开始（作「提示页」，允许在邻近页容错搜原文）
+                    hint_page_0 = int(raw_page) - 1
+                    if not (0 <= hint_page_0 < total_pages):
                         errors.append(f"[{i}] page_idx={raw_page} 超出范围 (共 {total_pages} 页)")
                         continue
 
-                    page = doc[page_0]
+                    page = doc[hint_page_0]
                     color_hint = item.get("color") or item.get("color_hint")
                     hl_color = _infer_color(comment, color_hint)
 
                     # ── 空文本：页边 FreeText（不需要高亮）──────────────────
                     if not text:
-                        _add_margin_note(page, layout, page_0, comment, anchor, i)
+                        _add_margin_note(page, layout, hint_page_0, comment, anchor, i)
                         success_count += 1
                         continue
 
@@ -726,18 +863,27 @@ class PdfCommentTool(BaseTool):
                         if key and key not in seen:
                             seen.add(key)
                             final_candidates.append(c)
-                    instances = []
-                    for cand in final_candidates[:8]:
-                        instances = page.search_for(cand)
-                        if not instances:
-                            instances = _fuzzy_search(page, cand)
-                        if instances:
-                            search_text = cand  # 仅用于日志
+                    instances: List[Any] = []
+                    draw_page_0 = hint_page_0
+                    for pg in _page_indices_near_hint(
+                        hint_page_0, total_pages, PAGE_HINT_SEARCH_RADIUS
+                    ):
+                        probe = doc[pg]
+                        found = _search_text_instances_on_page(probe, final_candidates)
+                        if found:
+                            instances = found
+                            draw_page_0 = pg
+                            page = probe
                             break
 
                     if instances:
                         # 全部命中处高亮；说明合并为一条页边 FreeText，避免重复且不占正文区。
                         note_text = f"[{i}] {comment}".strip() or f"[{i}] 发现潜在问题，建议复核。"
+                        if draw_page_0 != hint_page_0:
+                            note_text = (
+                                f"[{i}] (提示页第{int(raw_page)}页未命中，已定位至第{draw_page_0 + 1}页) "
+                                f"{comment}"
+                            ).strip()
                         hl_union: Optional[fitz.Rect] = None
                         for rect in instances:
                             hl = page.add_highlight_annot(rect)
@@ -745,14 +891,22 @@ class PdfCommentTool(BaseTool):
                             hl.update()
                             hl_union = rect if hl_union is None else (hl_union | rect)
                         pref_y = hl_union.y0 if hl_union is not None else 40.0
-                        _add_margin_freetext(page, layout, page_0, note_text, hl_union, pref_y, i)
-                        logger.debug(f"[{i}] 高亮({hl_color}) '{norm_text[:30]}' @ page {raw_page}")
+                        _add_margin_freetext(page, layout, draw_page_0, note_text, hl_union, pref_y, i)
+                        log_page = draw_page_0 + 1
+                        logger.debug(
+                            f"[{i}] 高亮({hl_color}) '{norm_text[:30]}' @ page {log_page} (hint={raw_page})"
+                        )
                     else:
-                        # 文本未找到 → 收集到 fallback，页面边角集中注释
-                        if page_0 not in page_fallback:
-                            page_fallback[page_0] = []
-                        page_fallback[page_0].append(f"[{i}] (未找到原文)\n文本: {text!r}\n注释: {comment}")
-                        logger.warning(f"[{i}] 未在 page {raw_page} 找到文本: {text[:40]!r}")
+                        # 邻近页仍未找到 → 收集到 fallback，仍在「提示页」页边集中注释
+                        if hint_page_0 not in page_fallback:
+                            page_fallback[hint_page_0] = []
+                        page_fallback[hint_page_0].append(
+                            f"[{i}] (未找到原文，已搜提示页±{PAGE_HINT_SEARCH_RADIUS}页)\n"
+                            f"文本: {text!r}\n注释: {comment}"
+                        )
+                        logger.warning(
+                            f"[{i}] 提示页±{PAGE_HINT_SEARCH_RADIUS}页内未找到文本: {text[:40]!r} (hint page {raw_page})"
+                        )
 
                     success_count += 1
 

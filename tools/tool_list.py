@@ -10,6 +10,7 @@ from memory.persona_memory import get_shared_user_persona_memory
 from tools.arxiv_tool import ArxivSearchTool
 from tools.chapter_index_tool import ChapterIndexTool
 from tools.command_running_tool import CommandRunningTool
+from tools.checklist_prepare_tool import ChecklistPrepareTool
 from tools.docling_search_tool import DoclingSearchTool
 from tools.docling_tool import DoclingParseTool
 from tools.figure_ref_checker_tool import FigureRefCheckerTool
@@ -20,12 +21,14 @@ from tools.pymupdf_parse_tool import PyMuPDFParseTool
 from tools.thesis_outline_extract_tool import ThesisOutlineExtractTool
 from tools.rag_retrieve_tool import RAGRetrieveTool
 from tools.ref_checker_tool import RefCheckerTool
+from tools.references_slice_and_docling_tool import ReferencesSliceAndDoclingTool
 from tools.user_persona_tools import build_user_persona_tools
 from utils.logger import get_logger
 from tools.gemini_upload_pdf_tool import GeminiUploadPdfTool
 from tools.register_inputs_tool import RegisterInputsTool
 from tools.offer_artifact_download_tool import OfferArtifactDownloadTool
 from tools.preflight_inputs_tool import PreflightInputsTool
+from tools.thesis_chapter_route_tool import ThesisChapterRouteTool
 
 logger = get_logger(__name__)
 _shared_pm = get_shared_user_persona_memory()
@@ -52,8 +55,11 @@ def _build_base_tools() -> List:
         ("markdown_section", lambda: MarkdownSectionTool()),
         ("pymupdf_parse", lambda: PyMuPDFParseTool()),
         ("thesis_outline_extract", lambda: ThesisOutlineExtractTool()),
+        ("thesis_chapter_route", lambda: ThesisChapterRouteTool()),
+        ("checklist_prepare", lambda: ChecklistPrepareTool()),
         ("chapter_index", lambda: ChapterIndexTool()),
         ("ref_checker", lambda: RefCheckerTool()),
+        ("references_slice_and_docling", lambda: ReferencesSliceAndDoclingTool()),
         ("figure_ref_checker", lambda: FigureRefCheckerTool()),
         ("rag_retrieve", lambda: RAGRetrieveTool()),
         ("register_inputs", lambda: RegisterInputsTool()),

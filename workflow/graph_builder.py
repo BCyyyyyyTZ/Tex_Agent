@@ -177,7 +177,7 @@ def build_dynamic_graph(
       - tool             → make_tool_node
       - user             → make_user_node
       - parallel_fork    → make_parallel_fork_node（轻量分叉标记）
-      - parallel_join    → make_parallel_join_node（汇聚 + agent 整合）
+      - parallel_join    → make_parallel_join_node（汇聚；可选 passthrough_join 无 LLM）
 
     Returns:
         已编译的 LangGraph CompiledGraph，支持 .invoke() / .ainvoke()。
@@ -267,8 +267,14 @@ def build_dynamic_graph(
                     f"[DynamicGraph] parallel_join 节点 '{nid}' 未指定 source_branches，"
                     f"从边推断: {src_branches}"
                 )
-            agent = _build_agent_instance(
-                node_cfg.agent_name or "SimpleAgent", nid, node_cfg.config
+            join_cfg = node_cfg.config if isinstance(node_cfg.config, dict) else {}
+            passthrough_join = bool(join_cfg.get("passthrough_join"))
+            agent = (
+                None
+                if passthrough_join
+                else _build_agent_instance(
+                    node_cfg.agent_name or "SimpleAgent", nid, join_cfg
+                )
             )
             node_fn = make_parallel_join_node(
                 agent=agent,
@@ -285,7 +291,8 @@ def build_dynamic_graph(
             graph.add_node(nid, node_fn)
             logger.debug(
                 f"[DynamicGraph] 注册并行汇聚节点: {nid} "
-                f"(sources={src_branches}, policy={node_cfg.join_policy})"
+                f"(sources={src_branches}, policy={node_cfg.join_policy}"
+                f"{', passthrough_join 无 LLM' if passthrough_join else ''})"
             )
             continue
 
