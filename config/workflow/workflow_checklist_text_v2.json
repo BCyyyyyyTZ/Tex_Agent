@@ -120,8 +120,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文摘要审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_abstract` 的章节文本与 `checklist_prepare` 里的摘要审查包进行检查。审查包键名是 abstract，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.abstract}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.abstract}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"摘要检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文摘要审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_abstract` 的章节文本与 `checklist_prepare` 里的摘要审查包进行检查。审查包键名是 abstract，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.abstract}`。本章节在 PDF 中的检索闭区间为 page_start=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.abstract.page_start}`、page_end=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.abstract.page_end}`（下游标注工具仅在该范围内匹配 text）。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 仅写违背了审查包哪一条及修改建议，不要写页码检索过程或调试说明。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"摘要检查结论\"}。每条须含 page_start、page_end（与本章闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_abstract",
           "checklist_prepare",
@@ -160,8 +160,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文绪论审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_introduction` 的章节文本与 `checklist_prepare` 里的绪论审查包进行检查。审查包键名是 introduction，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.introduction}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.introduction}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"绪论检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文绪论审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_introduction` 的章节文本与 `checklist_prepare` 里的绪论审查包进行检查。审查包键名是 introduction，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.introduction}`。本章节在 PDF 中的检索闭区间为 page_start=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.introduction.page_start}`、page_end=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.introduction.page_end}`（下游标注工具仅在该范围内匹配 text）。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 仅写违背了审查包哪一条及修改建议，不要写页码检索过程或调试说明。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"绪论检查结论\"}。每条须含 page_start、page_end（与本章闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_introduction",
           "checklist_prepare",
@@ -200,8 +200,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文背景与相关工作审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_background_related_work` 的章节文本与 `checklist_prepare` 里的背景相关工作审查包进行检查。审查包键名是 background_related_work，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.background_related_work}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.background_related_work}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"背景与相关工作检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文背景与相关工作审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_background_related_work` 的章节文本与 `checklist_prepare` 里的背景相关工作审查包进行检查。审查包键名是 background_related_work，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.background_related_work}`。本章节在 PDF 中的检索闭区间为 page_start=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.background_related_work.page_start}`、page_end=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.background_related_work.page_end}`（下游标注工具仅在该范围内匹配 text）。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 仅写违背了审查包哪一条及修改建议，不要写页码检索过程或调试说明。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"背景与相关工作检查结论\"}。每条须含 page_start、page_end（与本章闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_background_related_work",
           "checklist_prepare",
@@ -240,8 +240,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文方法章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_method` 的章节文本与 `checklist_prepare` 里的方法审查包进行检查。审查包键名是 method，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.method}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.method}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"方法章节检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文方法章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_method` 的章节文本与 `checklist_prepare` 里的方法审查包进行检查。审查包键名是 method，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.method}`。本章节在 PDF 中的检索闭区间为 page_start=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.method.page_start}`、page_end=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.method.page_end}`（下游标注工具仅在该范围内匹配 text）。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 仅写违背了审查包哪一条及修改建议，不要写页码检索过程或调试说明。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"方法章节检查结论\"}。每条须含 page_start、page_end（与本章闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_method",
           "checklist_prepare",
@@ -280,8 +280,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文实验章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_experiment` 的章节文本与 `checklist_prepare` 里的实验审查包进行检查。审查包键名是 experiment，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.experiment}`。当前路由代表页 anchor_page=`${metadata.chapter_routing.metadata.tool_metadata.representative_pages.experiment}`。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作的修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"实验章节检查结论\"}。若无法确定具体页码，请使用 anchor_page；若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文实验章节审查专家。严格依据给定审查包与章节文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体句子，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_experiment` 的章节文本与 `checklist_prepare` 里的实验审查包进行检查。审查包键名是 experiment，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.experiment}`。本章节在 PDF 中的检索闭区间为 page_start=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.experiment.page_start}`、page_end=`${metadata.chapter_routing.metadata.tool_metadata.page_ranges.experiment.page_end}`（下游标注工具仅在该范围内匹配 text）。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应句子或短语（不要含换行）；comment 仅写违背了审查包哪一条及修改建议，不要写页码检索过程或调试说明。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"实验章节检查结论\"}。每条须含 page_start、page_end（与本章闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_experiment",
           "checklist_prepare",
@@ -318,8 +318,8 @@
       "node_type": "agent",
       "agent_name": "SimpleAgent",
       "config": {
-        "system_prompt": "你是资深学位论文参考文献审查专家。严格依据给定审查包与参考文献文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体条目，绝对不要给出宏观的读后感或总体评价。",
-        "subtask": "请仅基于上游 `extract_references` 产出的参考文献正文与 `checklist_prepare` 里的参考文献审查包进行检查。审查包键名是 references，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.references}`。原 PDF 参考文献页范围为 `${metadata.extract_references.metadata.tool_metadata.original_page_start}` 到 `${metadata.extract_references.metadata.tool_metadata.original_page_end_inclusive}`（闭区间）。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"参考文献检查结论\"}。审查粒度：凡有问题必须在 result 数组中单独成一条，禁止仅用 summary 或单条 result 概括全章；text 须尽量一字不差摘录原文对应条目或片段（不要含换行）；comment 须说明违背了审查包中哪一条或哪一句要求，并给出可操作修改建议；page_idx 必须使用原 PDF 页码（不是子 PDF 页码），缺失时可用 `${metadata.chapter_routing.metadata.tool_metadata.representative_pages.references}` 作为兜底。若无问题 result=\"[]\"。",
+        "system_prompt": "你是资深学位论文参考文献审查专家。严格依据给定审查包与参考文献文本审查，不要输出无依据结论。你的任务是“找茬”并定位到具体条目，绝对不要给出宏观的读后感或总体评价。审查包中若附有「## 大模型避免检查的项目」一节：凡问题仅属于该节所列情形或与该节实质相同，一律不得写入 result，须立即忽略。",
+        "subtask": "请仅基于上游 `extract_references` 产出的参考文献正文与 `checklist_prepare` 里的参考文献审查包进行检查。审查包键名是 references，内容位于 `${metadata.checklist_prepare.metadata.tool_metadata.review_packages.references}`。参考文献在原 PDF 中的检索闭区间为 page_start=`${metadata.extract_references.metadata.tool_metadata.original_page_start}`、page_end=`${metadata.extract_references.metadata.tool_metadata.original_page_end_inclusive}`（下游标注工具仅在该闭区间内匹配 text，勿用子 PDF 页码）。审查粒度：凡有问题必须在 result 数组中单独成一条；text 须尽量一字不差摘录原条目或片段（不要含换行）；comment 仅写违背了审查包哪一条及修改建议。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"参考文献检查结论\"}。每条须含 page_start、page_end（与上述闭区间一致）、text、comment；若无问题 result=\"[]\"。",
         "depends_on": [
           "extract_references",
           "checklist_prepare",
@@ -368,12 +368,14 @@
       "agent_name": "SimpleAgent",
       "config": {
         "system_prompt": "你是论文审查结果聚合与 JSON 格式化专家。",
-        "subtask": "上游 `join_checkers` 的「完整输出」为六个审查分支的纯文本拼接：每个分支以 `[OK 节点id]` 或 `[FAIL 节点id]` 开头，其下「输出:」后为该分支产出的 JSON。请从这些分段中解析各分支顶层 JSON 的 `result` 字段（值为 JSON 数组的字符串形式），合并为统一列表。不要用一段话替代逐条意见。去重规则：仅当 page_idx+text+comment 实质相同时合并；禁止把多条独立问题合成一条，禁止缩短或改写各条 comment 的实质内容。另请参考 `chapter_routing` 元数据补全缺失的 page_idx。输出严格 JSON：{\"result\":\"[{\\\"page_idx\\\":1,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"五个正文模块+一个参考文献占位节点的综合总结\"}。要求：1) comment 仅中文；2) result 必须是合法 JSON 字符串；3) page_idx 缺失时可使用对应路由锚点页；4) 参考文献占位节点可能为空结果。",
+        "subtask": "上游 `join_checkers` 的「完整输出」为六个审查分支的纯文本拼接：每个分支以 `[OK 节点id]` 或 `[FAIL 节点id]` 开头，其下「输出:」后为该分支产出的 JSON。请从这些分段中解析各分支顶层 JSON 的 `result` 字段（值为 JSON 数组的字符串形式），合并为统一列表。不要用一段话替代逐条意见。去重规则：仅当 page_start+page_end+text+comment 实质相同时合并；禁止把多条独立问题合成一条，禁止缩短或改写各条 comment 的实质内容。若某条缺少 page_start/page_end，请按分支主题从 `chapter_routing.metadata.tool_metadata.page_ranges` 或参考文献的 `extract_references` 原 PDF 页闭区间补全。须丢弃任何仅属于或与「大模型避免检查的项目」一节实质相同的问题，不得出现在合并后的 result 中。输出严格 JSON：{\"result\":\"[{\\\"page_start\\\":1,\\\"page_end\\\":2,\\\"text\\\":\\\"原句\\\",\\\"comment\\\":\\\"中文意见\\\"}]\",\"summary\":\"五个正文模块+一个参考文献占位节点的综合总结\"}。要求：1) comment 仅中文；2) result 必须是合法 JSON 字符串；3) 每条须含 page_start、page_end、text、comment。",
         "depends_on": [
           "join_checkers",
-          "chapter_routing"
+          "chapter_routing",
+          "extract_references"
         ],
         "temperature": 0.05,
+        "max_tokens": 65536,
         "history_mode": "minimal",
         "include_metadata_chain": false,
         "mem_limit": 0,
@@ -388,7 +390,7 @@
         "tool_input": {
           "pdf_path": "${metadata.preflight_inputs.metadata.tool_metadata.pdf_abs_path}",
           "output_path": "${metadata.preflight_inputs.metadata.tool_metadata.output_pdf_abs_path}",
-          "question_list": "${metadata.join_checkers.result}"
+          "question_list": "${metadata.annotation_formatter.result}"
         },
         "depends_on": [
           "join_checkers",

@@ -39,6 +39,7 @@ class SimpleAgent(BaseAgent):
         base_url: Optional[str] = None,
         temperature: Optional[float] = None,
         max_history: int = 100,
+        max_tokens: Optional[int] = None,
     ):
         if tools is None:
             tools = tool_list
@@ -59,6 +60,7 @@ class SimpleAgent(BaseAgent):
             or ""
         )
 
+        self._llm_max_tokens = max_tokens
         self.backend = self._init_backend()
         self.history: List[WorkflowMessage] = []
         self.max_history = max_history
@@ -68,7 +70,7 @@ class SimpleAgent(BaseAgent):
         wants_gemini = "gemini" in model_lower
 
         if wants_gemini and self.gemini_api_key:
-            self.set_gemini("llm", self.model_name, self.gemini_api_key, self.temperature)
+            self.set_gemini("llm", self.model_name, self.gemini_api_key, self.temperature, self._llm_max_tokens)
             return "gemini"
 
         if self.openai_api_key:
@@ -78,6 +80,7 @@ class SimpleAgent(BaseAgent):
                 self.openai_api_key,
                 self.openai_base_url,
                 self.temperature,
+                self._llm_max_tokens,
             )
             if wants_gemini:
                 logger.warning(

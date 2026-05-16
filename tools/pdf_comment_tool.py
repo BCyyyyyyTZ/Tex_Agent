@@ -5,9 +5,11 @@ PdfCommentTool：在 PDF 指定位置批量添加高亮和注释。
 
   run(pdf_path, annotations, output_path=None)
     - pdf_path:    原始 PDF 路径（绝对路径）
-    - annotations: JSON 字符串 或 列表，每项 {page_idx:int, text:str, comment:str}
-                   page_idx 从 1 开始（面向用户），作「提示页」：先在当页搜 text，
-                   未命中则在 ±PAGE_HINT_SEARCH_RADIUS 页内由近及远继续搜；仍无则在该提示页页边汇总
+    - annotations: JSON 字符串 或 列表，每项含 text、comment，以及定位字段（1-based）：
+                   - 推荐：page_start + page_end（闭区间），在该页码范围内检索 text；
+                   - 兼容：仅 page_idx 时视为单页 [page_idx, page_idx]；单页未命中时在 ±5 页内扩展检索；
+                   - 显式多页区间（page_end > page_start）不做 ±5 扩展。
+                   同一 PDF 页的词向量解析结果会按页缓存，多批注共享同一页时不会重复 get_text。
     - 文本匹配：先 PyMuPDF 精确 search_for，再子串式窗口匹配；仍失败时对窗口文本与目标做相似度匹配
       （difflib.SequenceMatcher，默认 ratio≥0.9 视为命中），以容忍模型摘录与 PDF 原文的细微差异
     - output_path: 输出路径，默认覆盖原文件（与 pdf_path 相同）
@@ -373,8 +375,8 @@ def _add_margin_note(
     _add_margin_freetext(page, layout, page_0, comment, None, py, idx)
 
 
-# 上游 page_idx（Docling/模型）与 PDF 页偶有不一致时，在提示页前后各若干页内继续搜原文
-PAGE_HINT_SEARCH_RADIUS = 10
+# 仅「单页」搜索区间（page_start==page_end 或仅提供 page_idx）未命中时，向两侧扩展的半径
+SINGLE_PAGE_FALLBACK_RADIUS = 5
 
 # 精确 search_for 与「子串式」模糊均未命中时，按字符级相似度接受高亮（SequenceMatcher.ratio）
 FUZZY_TEXT_MATCH_MIN_RATIO = 0.9
@@ -392,6 +394,7 @@ def _fuzzy_search(
     target_text: str,
     *,
     min_ratio: float = FUZZY_TEXT_MATCH_MIN_RATIO,
+    words: Optional[List[Any]] = None,
 ) -> list:
     """
     模糊搜索：将页面所有单词提取出来，通过滑动窗口匹配目标文本。
@@ -399,7 +402,10 @@ def _fuzzy_search(
     若仍无子串命中，则用 SequenceMatcher.ratio >= min_ratio（默认 0.9）接受「足够接近」的窗口，
     解决模型摘录与 PDF 原文仅有细微差异时无法高亮的问题。
     """
-    words = page.get_text("words")  # (x0, y0, x1, y1, word, ...)
+    if words is None:
+        words = page.get_text("words")  # (x0, y0, x1, y1, word, ...)
+    else:
+        words = words or []
     if not words:
         return []
 
@@ -485,20 +491,91 @@ def _page_indices_near_hint(center_0: int, total_pages: int, radius: int) -> Lis
     return idxs
 
 
-def _search_text_instances_on_page(page: fitz.Page, final_candidates: List[str]) -> List[Any]:
+def _neighbor_pages_excluding_center(center_0: int, total_pages: int, radius: int) -> List[int]:
+    """单页检索失败时，在 ±radius 内由近及远扩展的页下标（不含 center 自身）。"""
+    return [p for p in _page_indices_near_hint(center_0, total_pages, radius) if p != center_0]
+
+
+def _clamp_page_span_0(lo0: int, hi0: int, total_pages: int) -> Tuple[int, int]:
+    if total_pages <= 0:
+        return 0, -1
+    lo0 = max(0, min(lo0, total_pages - 1))
+    hi0 = max(0, min(hi0, total_pages - 1))
+    if lo0 > hi0:
+        lo0, hi0 = hi0, lo0
+    return lo0, hi0
+
+
+def _search_text_instances_on_page(
+    page: fitz.Page,
+    final_candidates: List[str],
+    words: Optional[List[Any]] = None,
+) -> List[Any]:
     """在给定页上按 final_candidates 依次尝试精确 + 模糊搜索，返回首个非空命中（矩形列表）。"""
     for cand in final_candidates[:8]:
         instances = page.search_for(cand)
         if not instances:
-            instances = _fuzzy_search(page, cand)
+            instances = _fuzzy_search(page, cand, words=words)
         if instances:
             return instances
     return []
 
 
+def _get_cached_page_words(doc: fitz.Document, page_0: int, cache: Dict[int, List[Any]]) -> List[Any]:
+    if page_0 not in cache:
+        cache[page_0] = doc[page_0].get_text("words") or []
+    return cache[page_0]
+
+
+def _parse_page_span_from_item(item: Dict[str, Any]) -> Optional[Tuple[int, int]]:
+    """
+    从单条标注 dict 解析 PDF 页码闭区间（1-based inclusive）。
+    支持 page_start+page_end、page_range [a,b]、或仅 page_idx（视为单页）。
+    """
+    pr = item.get("page_range")
+    if isinstance(pr, (list, tuple)) and len(pr) >= 2:
+        try:
+            a, b = int(pr[0]), int(pr[1])
+            if a > b:
+                a, b = b, a
+            return a, b
+        except Exception:
+            pass
+    ps, pe = item.get("page_start"), item.get("page_end")
+    if ps is not None and pe is not None:
+        try:
+            a, b = int(ps), int(pe)
+            if a > b:
+                a, b = b, a
+            return a, b
+        except Exception:
+            pass
+    pi = item.get("page_idx")
+    if pi is not None:
+        try:
+            p = int(pi)
+            return p, p
+        except Exception:
+            pass
+    return None
+
+
+def _margin_body_for_unfound(comment: str, excerpt: str) -> str:
+    """未在 PDF 中精确定位原文时：审查意见 + 所针对的摘录文本。"""
+    c = (comment or "").strip()
+    ex = (excerpt or "").strip()
+    if len(ex) > 400:
+        ex = ex[:400] + "…"
+    if c and ex:
+        return f"{c}\n\n针对摘录：{ex}"
+    if c:
+        return c
+    return f"针对摘录：{ex}" if ex else ""
+
+
 def _parse_annotations(raw: Any) -> tuple[List[Dict], Optional[str]]:
     """
-    将 raw 解析为 [{page_idx, text, comment}] 列表。
+    将 raw 解析为标注 dict 列表（含 page_idx / page_start+page_end 等）。
     支持：list / JSON 字符串 / 带 ```json 包裹的字符串。
     返回 (items, error_msg)，成功时 error_msg=None。
     """
@@ -579,10 +656,10 @@ class PdfCommentTool(BaseTool):
 
     annotations 格式（由上游 agent 输出的 JSON 数组）：
       [
-        {"page_idx": 1, "text": "要高亮的文本片段", "comment": "检查问题说明"},
-        {"page_idx": 3, "text": "另一段文本",        "comment": "另一个问题"}
+        {"page_start": 3, "page_end": 12, "text": "要高亮的文本片段", "comment": "检查问题说明"},
+        {"page_idx": 5, "text": "另一段文本", "comment": "另一个问题"}
       ]
-    注意：page_idx 从 1 开始。
+      page_start/page_end 为 1-based 闭区间；仅 page_idx 时等价于单页区间。
     """
 
     def __init__(self):
@@ -590,16 +667,18 @@ class PdfCommentTool(BaseTool):
             name="pdf_comment",
             description=(
                 "在 PDF 中批量添加高亮和注释。"
-                "annotations 为 JSON 数组，每项包含 page_idx（从1开始）、"
-                "text（要高亮的文本片段）、comment（注释内容）。"
+                "annotations 为 JSON 数组，每项须含 text（要高亮的片段）、comment（审查意见），"
+                "以及页码定位：推荐 page_start 与 page_end（1-based 闭区间，在该范围内检索 text）；"
+                "或仅 page_idx（视为单页；未命中时向 ±5 页扩展一次）。"
+                "显式多页区间（page_end > page_start）不做 ±5 扩展。"
                 "output_path 为可选输出路径，不填则覆盖原文件。"
             ),
             input_schema={
                 "pdf_path":    "必填，原始 PDF 文件的绝对路径",
                 "annotations": (
-                    "必填，JSON 数组字符串，每项 {page_idx:int(从1开始), text:str, comment:str, color?:str}。"
-                    "color 可选，支持颜色名（yellow/red/green/blue/orange/purple/pink）"
-                    "或自动按 comment 中的关键词推断（摘要→黄, 结构→蓝, 语言→绿, 图表→橙, 实验→浅红, 排版→紫）。"
+                    "必填，JSON 数组字符串，每项含 text、comment，及 "
+                    "page_start+page_end（1-based 闭区间，检索范围）或 page_idx（单页，兼容旧数据）。"
+                    "可选 page_range: [start,end]、color（颜色名或 RGB）、anchor。"
                 ),
                 "output_path": "可选，带注释的 PDF 输出路径，不填则覆盖原文件",
             }
@@ -692,29 +771,32 @@ class PdfCommentTool(BaseTool):
             if not isinstance(item, dict):
                 continue
 
-            page_idx = item.get("page_idx")
             text = item.get("text")
             if text is None:
                 text = item.get("text_quote")
+            if text is not None:
+                text = str(text).strip()
+            else:
+                text = ""
             comment = _clean_comment(item.get("comment"))
 
-            if page_idx is None or text is None:
+            span = _parse_page_span_from_item(item)
+            if span is None:
                 continue
+            ps, pe = span
 
-            try:
-                page_idx = int(page_idx)
-            except Exception:
-                continue
-
-            text = str(text).strip()
             if not text and not comment:
                 continue
 
             normalized.append(
                 {
-                    "page_idx": page_idx,
+                    "page_start": ps,
+                    "page_end": pe,
+                    "page_idx": ps,
                     "text": text,
                     "comment": comment,
+                    "anchor": str(item.get("anchor", "top")).lower(),
+                    "color": item.get("color") or item.get("color_hint"),
                 }
             )
         return normalized
@@ -736,9 +818,10 @@ class PdfCommentTool(BaseTool):
 
         Args:
             pdf_path:    原始 PDF 路径。
-            question_list: 与 annotations 二选一或同时提供；字符串/列表，每项含 page_idx、text/text_quote、comment。
+            question_list: 与 annotations 二选一或同时提供；字符串/列表，每项含
+                page_start+page_end（闭区间）或 page_idx（单页）、text/text_quote、comment。
             annotations: 同上；工作流里可只传 question_list，此时仅用 coerce 结果标注。
-            page_idx 从 1 开始。
+            页码均为 1-based。
             output_path: 输出路径，None 表示覆盖原文件。
 
         Returns:
@@ -749,10 +832,13 @@ class PdfCommentTool(BaseTool):
             question_list = annotations
         coerced = self._coerce_question_list(question_list)
         if not coerced:
+            err = "question_list 为空或格式非法，期望为列表或可解析 JSON"
+            if isinstance(question_list, str) and len(question_list) > 6000:
+                err += "。若输入为超长字符串，常见原因是上游格式化节点 LLM 输出被截断（JSON 不完整）；请增大该节点的 max_tokens 或缩短合并列表。"
             return ToolResult(
                 success=False,
                 output="处理失败",
-                error="question_list 为空或格式非法，期望为列表或可解析 JSON",
+                error=err,
             )
         items: List[Dict] = []
         if annotations is not None:
@@ -801,61 +887,57 @@ class PdfCommentTool(BaseTool):
             layout = _MarginLayout()
             success_count = 0
             errors: List[str] = []
-            # page_idx → [comments] for unfound texts
             page_fallback: Dict[int, List[str]] = {}
+            words_cache: Dict[int, List[Any]] = {}
 
             for i, item in enumerate(items, 1):
                 try:
-                    raw_page = item.get("page_idx")
+                    span = _parse_page_span_from_item(item)
+                    if span is None:
+                        errors.append(f"[{i}] 缺少有效页码（page_start/page_end、page_range 或 page_idx）")
+                        continue
+                    ps, pe = span
                     raw_text = item.get("text") or item.get("text_quote") or ""
                     text = str(raw_text).strip()
                     comment = str(item.get("comment", "")).strip()
-                    anchor = str(item.get("anchor", "top")).lower()  # top / bottom / margin
+                    anchor = str(item.get("anchor", "top")).lower()
 
-                    if raw_page is None or not comment:
-                        errors.append(f"[{i}] 缺少必要字段 page_idx/comment")
+                    lo0, hi0 = _clamp_page_span_0(ps - 1, pe - 1, total_pages)
+                    if lo0 > hi0:
+                        errors.append(f"[{i}] 页码区间无效")
+                        continue
+                    if not comment:
+                        errors.append(f"[{i}] 缺少 comment")
                         continue
 
-                    # page_idx 从 1 开始 → 内部从 0 开始（作「提示页」，允许在邻近页容错搜原文）
-                    hint_page_0 = int(raw_page) - 1
-                    if not (0 <= hint_page_0 < total_pages):
-                        errors.append(f"[{i}] page_idx={raw_page} 超出范围 (共 {total_pages} 页)")
-                        continue
-
-                    page = doc[hint_page_0]
+                    single_page_span = ps == pe
+                    anchor_page_0 = lo0
+                    page = doc[anchor_page_0]
                     color_hint = item.get("color") or item.get("color_hint")
                     hl_color = _infer_color(comment, color_hint)
 
-                    # ── 空文本：页边 FreeText（不需要高亮）──────────────────
                     if not text:
-                        _add_margin_note(page, layout, hint_page_0, comment, anchor, i)
+                        _add_margin_note(page, layout, anchor_page_0, comment, anchor, i)
                         success_count += 1
                         continue
 
-                    # ── Unicode 规范化 + 剔除 Markdown 语法 ──────────────
                     norm_text = normalize(text)
-                    # 剔除 docling 生成的 Markdown 标记（## / # / ** / * / ` 等）
-                    clean_text = re.sub(r'^#{1,6}\s*', '', norm_text)  # 行首 # 标题
-                    clean_text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', clean_text)  # **bold** / *italic*
-                    clean_text = re.sub(r'`[^`]*`', '', clean_text).strip()  # `code`
-                    
-                    # 如果剔除后文本变短，取最长可搜索的核心片段
+                    clean_text = re.sub(r'^#{1,6}\s*', '', norm_text)
+                    clean_text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', clean_text)
+                    clean_text = re.sub(r'`[^`]*`', '', clean_text).strip()
+
                     base_text = clean_text if clean_text else norm_text
                     base_text = re.sub(r'\s+', ' ', base_text).strip()
 
-                    # ── 文本搜索（先精确，再模糊）─────────────────────────
-                    # 候选策略：整句 + 按标点切分 + 中间片段，减少跨行导致的失败
                     segs = [base_text]
                     segs.extend([s.strip() for s in re.split(r"[，。；：,.!?！？\n]", base_text) if s.strip()])
                     candidates = []
                     for s in segs:
                         if len(s) >= 8:
                             candidates.append(s)
-                            # 超长文本截取中段更容易命中
                             if len(s) > 80:
                                 mid = len(s) // 2
                                 candidates.append(s[max(0, mid - 35): mid + 35])
-                    # 去重且按长度降序（先试信息量大的）
                     seen = set()
                     final_candidates = []
                     for c in sorted(candidates, key=len, reverse=True):
@@ -864,26 +946,35 @@ class PdfCommentTool(BaseTool):
                             seen.add(key)
                             final_candidates.append(c)
                     instances: List[Any] = []
-                    draw_page_0 = hint_page_0
-                    for pg in _page_indices_near_hint(
-                        hint_page_0, total_pages, PAGE_HINT_SEARCH_RADIUS
-                    ):
-                        probe = doc[pg]
-                        found = _search_text_instances_on_page(probe, final_candidates)
-                        if found:
-                            instances = found
-                            draw_page_0 = pg
-                            page = probe
-                            break
+                    draw_page_0 = anchor_page_0
+
+                    def try_pages(pages_list: List[int]) -> bool:
+                        nonlocal instances, draw_page_0, page
+                        for pg in pages_list:
+                            if not (0 <= pg < total_pages):
+                                continue
+                            probe = doc[pg]
+                            w = _get_cached_page_words(doc, pg, words_cache)
+                            found = _search_text_instances_on_page(probe, final_candidates, words=w)
+                            if found:
+                                instances = found
+                                draw_page_0 = pg
+                                page = probe
+                                return True
+                        return False
+
+                    primary_pages = list(range(lo0, hi0 + 1))
+                    try_pages(primary_pages)
+
+                    if not instances and single_page_span:
+                        try_pages(
+                            _neighbor_pages_excluding_center(
+                                lo0, total_pages, SINGLE_PAGE_FALLBACK_RADIUS
+                            )
+                        )
 
                     if instances:
-                        # 全部命中处高亮；说明合并为一条页边 FreeText，避免重复且不占正文区。
-                        note_text = f"[{i}] {comment}".strip() or f"[{i}] 发现潜在问题，建议复核。"
-                        if draw_page_0 != hint_page_0:
-                            note_text = (
-                                f"[{i}] (提示页第{int(raw_page)}页未命中，已定位至第{draw_page_0 + 1}页) "
-                                f"{comment}"
-                            ).strip()
+                        note_text = comment.strip() or "发现潜在问题，建议复核。"
                         hl_union: Optional[fitz.Rect] = None
                         for rect in instances:
                             hl = page.add_highlight_annot(rect)
@@ -892,20 +983,23 @@ class PdfCommentTool(BaseTool):
                             hl_union = rect if hl_union is None else (hl_union | rect)
                         pref_y = hl_union.y0 if hl_union is not None else 40.0
                         _add_margin_freetext(page, layout, draw_page_0, note_text, hl_union, pref_y, i)
-                        log_page = draw_page_0 + 1
                         logger.debug(
-                            f"[{i}] 高亮({hl_color}) '{norm_text[:30]}' @ page {log_page} (hint={raw_page})"
+                            "[%s] 高亮(%s) %r @ page %s",
+                            i,
+                            hl_color,
+                            norm_text[:30],
+                            draw_page_0 + 1,
                         )
                     else:
-                        # 邻近页仍未找到 → 收集到 fallback，仍在「提示页」页边集中注释
-                        if hint_page_0 not in page_fallback:
-                            page_fallback[hint_page_0] = []
-                        page_fallback[hint_page_0].append(
-                            f"[{i}] (未找到原文，已搜提示页±{PAGE_HINT_SEARCH_RADIUS}页)\n"
-                            f"文本: {text!r}\n注释: {comment}"
-                        )
+                        if anchor_page_0 not in page_fallback:
+                            page_fallback[anchor_page_0] = []
+                        page_fallback[anchor_page_0].append(_margin_body_for_unfound(comment, text))
                         logger.warning(
-                            f"[{i}] 提示页±{PAGE_HINT_SEARCH_RADIUS}页内未找到文本: {text[:40]!r} (hint page {raw_page})"
+                            "[%s] 页码区间 %s–%s 内未找到文本: %r",
+                            i,
+                            ps,
+                            pe,
+                            text[:60],
                         )
 
                     success_count += 1
@@ -932,7 +1026,7 @@ class PdfCommentTool(BaseTool):
             unfound_total = sum(len(v) for v in page_fallback.values())
             summary = (
                 f"已处理 {success_count}/{len(items)} 条注释，"
-                f"{unfound_total} 条文本未精确定位（已添加页边汇总批注），"
+                f"{unfound_total} 条文本未在给定页码范围内精确定位（已添加页边汇总批注），"
                 f"{len(errors)} 条跳过。\n"
                 f"输出文件: {final_path}"
             )

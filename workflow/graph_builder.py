@@ -62,6 +62,7 @@ def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
 
     system_prompt = node_config.get("system_prompt", f"你是 {node_id} 专家。")
     temperature = float(node_config.get("temperature", NODE_DEFAULT_TEMPERATURE))
+    max_tok = node_config.get("max_tokens")
 
     alias = str(agent_type or "").strip() or "SimpleAgent"
     if alias not in AGENT_TYPE_NAMES:
@@ -84,6 +85,7 @@ def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
         system_prompt=system_prompt,
         temperature=temperature,
         tools=[],
+        max_tokens=int(max_tok) if max_tok is not None else None,
     )
 
 

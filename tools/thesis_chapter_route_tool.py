@@ -132,13 +132,40 @@ def _representative_page(nodes: List[OutlineNode]) -> int:
     return start + (length // 2)
 
 
+def _pdf_page_range_inclusive_from_dicts(nodes: List[Dict[str, Any]]) -> Dict[str, int]:
+    """
+    由 matched_nodes 中的节点 dict（含 page_start、page_end_exclusive）计算 PDF 闭区间页码（1-based）。
+    供下游 pdf_comment 在章节范围内检索原文。
+    """
+    if not nodes:
+        return {"page_start": 1, "page_end": 1}
+    starts: List[int] = []
+    ends_inclusive: List[int] = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        ps = int(n.get("page_start", 1) or 1)
+        ex = int(n.get("page_end_exclusive", ps + 1) or (ps + 1))
+        if ex <= ps:
+            ex = ps + 1
+        starts.append(max(1, ps))
+        ends_inclusive.append(max(ps, ex - 1))
+    if not starts:
+        return {"page_start": 1, "page_end": 1}
+    lo = min(starts)
+    hi = max(ends_inclusive)
+    if hi < lo:
+        hi = lo
+    return {"page_start": lo, "page_end": hi}
+
+
 class ThesisChapterRouteTool(BaseTool):
     def __init__(self) -> None:
         super().__init__(
             name="thesis_chapter_route",
             description=(
                 "根据 thesis_outline_extract 的 outline 结果，"
-                "输出摘要/绪论/背景相关/方法/实验/参考文献六路 chapters 选择器与代表页。"
+                "输出摘要/绪论/背景相关/方法/实验/参考文献六路 chapters 选择器、代表页及各章节在原 PDF 上的页码闭区间（page_ranges）。"
             ),
             input_schema={
                 "outline_path": "可选，outline.json 路径（优先读取）",
@@ -246,6 +273,17 @@ class ThesisChapterRouteTool(BaseTool):
                 "references": [n.__dict__ for n in ref_nodes],
             }
 
+            page_ranges = {
+                "abstract": _pdf_page_range_inclusive_from_dicts(matched_nodes["abstract"]),
+                "introduction": _pdf_page_range_inclusive_from_dicts(matched_nodes["introduction"]),
+                "background_related_work": _pdf_page_range_inclusive_from_dicts(
+                    matched_nodes["background_related_work"]
+                ),
+                "method": _pdf_page_range_inclusive_from_dicts(matched_nodes["method"]),
+                "experiment": _pdf_page_range_inclusive_from_dicts(matched_nodes["experiment"]),
+                "references": _pdf_page_range_inclusive_from_dicts(matched_nodes["references"]),
+            }
+
             unresolved = [k for k, v in matched_nodes.items() if len(v) == 0]
             if strict and unresolved:
                 return ToolResult(
@@ -256,6 +294,7 @@ class ThesisChapterRouteTool(BaseTool):
                         "selectors": selectors,
                         "representative_pages": representative_pages,
                         "matched_nodes": matched_nodes,
+                        "page_ranges": page_ranges,
                         "unresolved": unresolved,
                     },
                 )
@@ -264,12 +303,14 @@ class ThesisChapterRouteTool(BaseTool):
                 "selectors": selectors,
                 "representative_pages": representative_pages,
                 "matched_nodes": matched_nodes,
+                "page_ranges": page_ranges,
                 "unresolved": unresolved,
             }
             output = json.dumps(
                 {
                     "selectors": selectors,
                     "representative_pages": representative_pages,
+                    "page_ranges": page_ranges,
                     "unresolved": unresolved,
                 },
                 ensure_ascii=False,

@@ -1,0 +1,10 @@
+{
+    "_comment": "复制为 run_config_text.json。路径可为绝对路径，或相对于项目根目录。",
+    "workflow": "checklist_text_v3",
+    "checklist_path": "thesis-checklists.md",
+    "output_dir": "files/output_text",
+    "pdf_paths": [
+        "doc/paper-a.pdf",
+        "doc/paper-b.pdf"
+    ]
+}

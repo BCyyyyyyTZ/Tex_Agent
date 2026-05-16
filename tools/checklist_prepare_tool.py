@@ -1,7 +1,8 @@
 """
 ChecklistPrepareTool：将论文 checklist 确定性切分为 6 份审查包。
 
-每份审查包 = 「通用规则」+「章节组织检查列表」+「目标模块检查列表」。
+每份审查包 = 「通用规则」+「章节组织检查列表」+「目标模块检查列表」
++（若存在）「## 大模型避免检查的项目」及忽略指令。
 """
 
 from __future__ import annotations
@@ -59,18 +60,45 @@ def _compose_package(common_sections: List[str], specific_section: str) -> str:
     return "\n\n---\n\n".join(parts).strip()
 
 
+_AVOID_SECTION_ALIASES = [
+    "大模型避免检查的项目",
+]
+
+# 附在「大模型避免检查的项目」原文之后的固定指令（不依赖模型是否读到二级标题）
+_AVOID_SECTION_REMINDER = (
+    "\n\n---\n\n"
+    "**【审查指令】** 以上「大模型避免检查的项目」所列情形，不得作为本分支的审查结论写入 result。"
+    "若你发现的问题与该节任一条相同、或仅针对该节所描述的情形，一律不得输出，须立即忽略。"
+)
+
+
+def _append_avoid_llm_check_section(package: str, avoid_block: str) -> str:
+    """将「大模型避免检查的项目」整节拼接到审查包末尾，并附加明确忽略指令。"""
+    body = (avoid_block or "").strip()
+    if not body:
+        return package.strip()
+    base = (package or "").strip()
+    if not base:
+        return (body + _AVOID_SECTION_REMINDER).strip()
+    return (base + "\n\n---\n\n" + body + _AVOID_SECTION_REMINDER).strip()
+
+
 class ChecklistPrepareTool(BaseTool):
     def __init__(self) -> None:
         super().__init__(
             name="checklist_prepare",
             description=(
                 "将 thesis checklist 确定性切分为六份审查包。"
-                "每份包含通用规则、章节组织、以及一个目标章节模块。"
+                "每份包含通用规则、章节组织、一个目标章节模块；"
+                "若文中存在「## 大模型避免检查的项目」，则将该节原文附加到每一份审查包末尾并附带忽略指令。"
             ),
             input_schema={
                 "checklist_text": "可选，checklist 原文文本（优先于 checklist_path）",
                 "checklist_path": "可选，checklist 文件路径；当 checklist_text 为空时读取",
-                "include_reference_rules": "可选，是否给 references 包拼接参考文献规则（默认 true）",
+                "include_reference_rules": (
+                    "可选，是否给 references 包拼接参考文献规则（默认 true）。"
+                    "若 checklist 含「## 大模型避免检查的项目」，该节将自动附加到各审查包末尾。"
+                ),
             },
         )
 
@@ -121,15 +149,29 @@ class ChecklistPrepareTool(BaseTool):
             method_title, method_text = _pick_section(sections, ["方法章节检查列表"])
             exp_title, exp_text = _pick_section(sections, ["实验章节检查列表"])
             ref_title, ref_text = _pick_section(sections, ["参考文献检查列表"])
+            _avoid_title, avoid_llm_text = _pick_section(sections, _AVOID_SECTION_ALIASES)
 
             common_blocks = [common_text, org_text]
             review_packages = {
-                "abstract": _compose_package(common_blocks, abstract_text),
-                "introduction": _compose_package(common_blocks, intro_text),
-                "background_related_work": _compose_package(common_blocks, bg_text),
-                "method": _compose_package(common_blocks, method_text),
-                "experiment": _compose_package(common_blocks, exp_text),
-                "references": _compose_package(common_blocks, ref_text if include_reference_rules else ""),
+                "abstract": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, abstract_text), avoid_llm_text
+                ),
+                "introduction": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, intro_text), avoid_llm_text
+                ),
+                "background_related_work": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, bg_text), avoid_llm_text
+                ),
+                "method": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, method_text), avoid_llm_text
+                ),
+                "experiment": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, exp_text), avoid_llm_text
+                ),
+                "references": _append_avoid_llm_check_section(
+                    _compose_package(common_blocks, ref_text if include_reference_rules else ""),
+                    avoid_llm_text,
+                ),
             }
 
             missing: List[str] = []
@@ -159,6 +201,7 @@ class ChecklistPrepareTool(BaseTool):
                 "method": method_title,
                 "experiment": exp_title,
                 "references": ref_title,
+                "avoid_llm_check": _avoid_title or "",
             }
 
             metadata = {
@@ -167,6 +210,8 @@ class ChecklistPrepareTool(BaseTool):
                 "missing_modules": missing,
                 "section_count": len(sections),
                 "include_reference_rules": bool(include_reference_rules),
+                "avoid_llm_check_section_present": bool((avoid_llm_text or "").strip()),
+                "avoid_llm_check_section_title": _avoid_title or "",
             }
             output = json.dumps(
                 {

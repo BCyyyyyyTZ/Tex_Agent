@@ -87,6 +87,10 @@
     "checklist_text_v2": {
       "type": "file",
       "path": "config/workflow/workflow_checklist_text_v2.json"
+    },
+    "checklist_text_v3": {
+      "type": "file",
+      "path": "config/workflow/workflow_checklist_text_v3.json"
     }
   }
 }

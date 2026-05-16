@@ -1,36 +1,5 @@
 # TeX_Agent —— 基于多智能体架构的 LaTeX 论文写作增强系统
 
-## 命令行批量审查：`check.py`（checklist_multi v1 / v2 / v3）
-
-用于不经过 Web UI、按配置文件顺序跑多份 PDF 的 checklist 审查。
-
-1. **论文文件组织结构**
-   - `files/input/`：待审PDF原件（还在这里面的就是没审查的，审查完的会移动到checked下面）
-   - `files/checklist/`：checklist 文件
-   - `files/output/`：批注后的 PDF（脚本自动生成，无需在配置里写路径，同一个论文多次批注的结果会在后面标版本的）
-   - `files/checked/`：已审PDF原件
-
-
-2. **配置文件**：仓库中config/run_config.json
-   - `version`：`"v1"`、`"v2"` 或 `"v3"`（对应三套并行/串行/单节点审查策略）
-   - `checklist_path`：绝对路径 or 相对于 `files/checklist/` 的相对路径
-   - `pdf_path`（单个）或 `pdf_paths`（列表）：绝对路径 or 相对于 `files/input/` 的相对路径  
-   - 不用写输出路径
-
-3. **运行**：
-
-   ```bash
-   python check.py
-   ```
-
-4. **行为说明**
-   - 启动前会探测 **Gemini** 与 **OpenAI 兼容 API**；**连不上模型则直接退出**，不跑任何 PDF。
-   - 某个 **PDF 或 checklist 路径不存在**：**跳过该条**（若共享的 checklist 不存在则整批跳过）。
-   - 某一 PDF **执行失败（非连接类错误）**：打印错误并**继续**下一个。
-   - 运行中出现 **连接类错误**：**立即停止**，不再处理后续文件。
-   - **成功**：在 `files/output/` 生成批注 PDF，并把**原稿**归档到 `files/checked/`；**失败**：原文件仍留在原位置（例如仍在 `files/input/`）。
-
-5. **退出码**：`0` 表示本批全部成功；`1` 表示存在失败项、配置错误或没有任何可处理文件；`2` 表示模型连通性检查失败或运行中出现连接类错误并已中止。
 
 ## 项目简介
 
@@ -94,9 +63,10 @@ python -m ui.web.server
 
 对应工作流含“text”字段，包括：
 + `checklist_text_v1`：旧版工作流，没有包括对参考文献的审查
-+ `checklist_text_v2`：最新版本，包括对**所有正文部分**的审查（摘要、绪论、背景与相关工作、方法、实验、参考文献 共6个部分，**不包括图片、图表、表格等内容的检查**）
++ `checklist_text_v2`：包括对**所有正文部分**的审查（摘要、绪论、背景与相关工作、方法、实验、参考文献 共 6 部分，**不包括图片、图表、表格等**）；支持自然语言输入路径
++ `checklist_text_v3`：审查逻辑与 v2 相同；`preflight_inputs` 关闭 LLM，适合 `check_text.py` 批量脚本（结构化 JSON 路径输入）
 
-上述两个工作流都**支持用户用自然语言的方式跟Tex_Agent交互，只需要包括待审查论文路径和checklist路径**（可选输入：输出的标注文件的路径），不再有严格的输入格式要求，工作时六路并行分别审查某一个部分的论文文本内容，工作结束后会提供结果的下载链接
+v1 / v2 支持自然语言交互（含待审 PDF、checklist 路径，可选输出路径）。v3 推荐批处理时使用 `check_text.py` 或自行传入上述 JSON。工作时六路并行分别审查各章节文本，结束后提供批注 PDF 下载。
 
 ### 如何运行
 
@@ -134,6 +104,64 @@ python -m ui.web.server
 2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`、`checklist_multi_v4`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
 3. 目前项目可以更方便地自定义工作流，可以参考 `checklist_multi_v1` 设计节点和边的关系，将 JSON 保存在 `config/workflow/` 下，并在 `config/workflow_registry.json` 中注册（关于自定义工作流的详细说明之后可以补充）
 4. `checklist_multi_v4`支持用户自然语言输入，需要包括文件路径信息和checkinglist路径信息
+
+## 命令行批量审查：`check.py`（checklist_multi v1 / v2 / v3）
+
+用于不经过 Web UI、按配置文件顺序跑多份 PDF 的 checklist 审查。
+
+1. **论文文件组织结构**
+   - `files/input/`：待审PDF原件（还在这里面的就是没审查的，审查完的会移动到checked下面）
+   - `files/checklist/`：checklist 文件
+   - `files/output/`：批注后的 PDF（脚本自动生成，无需在配置里写路径，同一个论文多次批注的结果会在后面标版本的）
+   - `files/checked/`：已审PDF原件
+
+
+2. **配置文件**：仓库中config/run_config.json
+   - `version`：`"v1"`、`"v2"` 或 `"v3"`（对应三套并行/串行/单节点审查策略）
+   - `checklist_path`：绝对路径 or 相对于 `files/checklist/` 的相对路径
+   - `pdf_path`（单个）或 `pdf_paths`（列表）：绝对路径 or 相对于 `files/input/` 的相对路径  
+   - 不用写输出路径
+
+3. **运行**：
+
+   ```bash
+   python check.py
+   ```
+
+4. **行为说明**
+   - 启动前会探测 **Gemini** 与 **OpenAI 兼容 API**；**连不上模型则直接退出**，不跑任何 PDF。
+   - 某个 **PDF 或 checklist 路径不存在**：**跳过该条**（若共享的 checklist 不存在则整批跳过）。
+   - 某一 PDF **执行失败（非连接类错误）**：打印错误并**继续**下一个。
+   - 运行中出现 **连接类错误**：**立即停止**，不再处理后续文件。
+   - **成功**：在 `files/output/` 生成批注 PDF，并把**原稿**归档到 `files/checked/`；**失败**：原文件仍留在原位置（例如仍在 `files/input/`）。
+
+5. **退出码**：`0` 表示本批全部成功；`1` 表示存在失败项、配置错误或没有任何可处理文件；`2` 表示模型连通性检查失败或运行中出现连接类错误并已中止。
+
+## 命令行批量审查：`check_text.py`（checklist_text_v3）
+
+用于不经过 Web UI、按**结构化路径**批量跑 **文本审查**工作流（`checklist_text_v3`，与 v2 审查逻辑一致；首节点 `preflight_inputs` 不调用 LLM，适合批处理）。
+
+1. **配置文件**（可选）：将 `config/run_config_text.example.json` 复制为 `config/run_config_text.json`，字段说明：
+   - `workflow`：默认 `checklist_text_v3`
+   - `checklist_path`：审查清单（绝对路径或相对项目根）
+   - `output_dir`：输出目录；每篇生成 `{PDF 原名}-checked.pdf`（重名时自动加 `_1` 后缀）
+   - `pdf_paths`：待审 PDF 列表（绝对路径或相对项目根）
+
+2. **运行**：
+
+   ```bash
+   # 使用配置文件
+   python check_text.py
+
+   # 或命令行直接指定
+   python check_text.py --checklist thesis-checklists.md --output-dir files/output_text --pdfs doc/a.pdf doc/b.pdf
+   ```
+
+3. **行为说明**
+   - 每篇论文向工作流传入 JSON：`{"pdf_path":"...","checklist_path":"...","output_path":"..."}`。
+   - 某一 PDF 失败（非连接类错误）：打印错误并继续下一篇；连接类错误则立即停止。
+
+4. **退出码**：与 `check.py` 相同（`0` / `1` / `2`）。
 
 
 ## 解析文章（pdf -> md + json）

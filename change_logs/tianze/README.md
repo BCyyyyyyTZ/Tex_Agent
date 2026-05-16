@@ -53,4 +53,9 @@
 
 + 新增 checklist 文本审查工作流 **v1 / v2**（`workflow_checklist_text_v1/v2`）：v1 参考文献为占位；v2 参考文献走 PDF 切片 + Docling + 实质审查
 + 新增工具 `checklist_prepare`、`thesis_chapter_route`、`references_slice_and_docling`
-+ `pdf_comment`（工作流节点 `pdf_annotator`）：提示页前后多页搜索 + 分层模糊相似度匹配，提高批注命中率
++ `checklist_prepare`：解析并附加「大模型避免检查的项目」至各审查包；工作流 prompt 要求 LLM 忽略该节问题
++ `thesis_chapter_route`：输出各章 `page_ranges`（闭区间），供 checker 与 `pdf_comment` 按章节范围检索
++ `pdf_comment`（节点 `pdf_annotator`）：页码区间检索 + 单页 ±5 兜底 + 页级词缓存；批注去掉调试话术；兼容 `page_idx` / multi 工作流
++ 工作流 v1/v2：`page_start`/`page_end` 替代代表页；`pdf_annotator` 改读 `annotation_formatter.result`
++ 修复批注链路：`annotation_formatter` 配置 `max_tokens: 65536`；`LlmClient` 可配置输出上限（默认 8192），避免合并列表 JSON 被截断导致 `pdf_annotator` / `offer_download` 失败
++ 新增 `checklist_text_v3` 工作流与 `check_text.py` 批处理脚本：与 v2 审查链路一致，首节点 `preflight_inputs` 设 `use_llm: false`，配合结构化 JSON 路径输入批量生成 `{原名}-checked.pdf`

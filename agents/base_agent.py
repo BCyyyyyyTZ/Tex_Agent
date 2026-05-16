@@ -3,7 +3,11 @@ BaseAgent 抽象基类。
 所有 Agent 实现均继承此类，保证接口统一，支持面向接口编程与 Mock 测试。
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+import json
+import logging
+from typing import Any, List, Optional, Union
+
+from config.settings import settings
 import asyncio
 import openai
 
@@ -15,6 +19,9 @@ import os
 import time
 from google import genai
 from google.genai import types
+
+_logger = logging.getLogger(__name__)
+
 
 class AgentMemoryItem:
     """
@@ -44,12 +51,77 @@ class AgentMemory:
         return [item for item in self.memory if item.type == item_type]
 
 class LlmClient:
-	def __init__(self, model_name: str, api_key: str, base_url: str, temperature: float):
+	def __init__(
+		self,
+		model_name: str,
+		api_key: str,
+		base_url: str,
+		temperature: float,
+		max_tokens: Optional[int] = None,
+	):
 		self.model_name = model_name
 		self.api_key = api_key
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
 		self.temperature = temperature
-		
+		mt = int(max_tokens) if max_tokens is not None else int(settings.llm_max_tokens)
+		# 合并超长 checklist 标注列表等场景需要足够 completion 预算
+		self.max_tokens = max(512, min(mt, 128000))
+
+	@staticmethod
+	def _parse_chat_completion_response(response: Any) -> str:
+		"""
+		从 OpenAI Chat Completions 响应中提取文本。
+		兼容部分代理在异常/限流时直接返回 str 或非标准 dict 的情况。
+		"""
+		if response is None:
+			raise ValueError("LLM 返回为空")
+
+		if isinstance(response, str):
+			text = response.strip()
+			if text.startswith("{") and text.endswith("}"):
+				try:
+					parsed = json.loads(text)
+					if isinstance(parsed, dict):
+						return LlmClient._parse_chat_completion_response(parsed)
+				except json.JSONDecodeError:
+					pass
+			return text
+
+		if isinstance(response, dict):
+			choices = response.get("choices") or []
+			if choices:
+				first = choices[0] if isinstance(choices[0], dict) else {}
+				msg = first.get("message") if isinstance(first, dict) else {}
+				if isinstance(msg, dict):
+					content = msg.get("content")
+					if content is not None:
+						return str(content).strip()
+			for key in ("output_text", "text", "content", "result"):
+				val = response.get(key)
+				if isinstance(val, str) and val.strip():
+					return val.strip()
+			raise ValueError(f"dict 响应缺少 choices/message: keys={list(response.keys())[:12]}")
+
+		choices = getattr(response, "choices", None)
+		if choices:
+			first = choices[0]
+			message = getattr(first, "message", None)
+			content = getattr(message, "content", None) if message is not None else None
+			if content is not None:
+				if isinstance(content, str):
+					return content.strip()
+				if isinstance(content, list):
+					parts: List[str] = []
+					for part in content:
+						if isinstance(part, dict) and part.get("type") == "text":
+							parts.append(str(part.get("text", "")))
+						elif isinstance(part, str):
+							parts.append(part)
+					return "\n".join(p for p in parts if p).strip()
+			return ""
+
+		raise ValueError(f"无法解析 LLM 响应类型: {type(response).__name__}")
+
 	def response(self, prompt: str, attachments: Optional[List[dict]] = None) -> str:
 		"""
 		生成LLM响应，支持上传附件
@@ -77,18 +149,36 @@ class LlmClient:
 		if len(message_content) == 1 and message_content[0].get("type") == "text":
 			message_content = message_content[0]["text"]
 		
-		response = self.client.chat.completions.create(
-				model=self.model_name,
-				messages=[
-					{"role": "user", "content": message_content}
-				],
-				temperature=self.temperature,
-				max_tokens=4096
+		raw = self.client.chat.completions.create(
+			model=self.model_name,
+			messages=[{"role": "user", "content": message_content}],
+			temperature=self.temperature,
+			max_tokens=self.max_tokens,
+		)
+		try:
+			return self._parse_chat_completion_response(raw)
+		except (AttributeError, IndexError, TypeError, ValueError) as e:
+			_logger.warning(
+				"LlmClient 响应解析失败 (%s)，类型=%s，将重试一次",
+				e,
+				type(raw).__name__,
 			)
-		return response.choices[0].message.content.strip()
+			raw_retry = self.client.chat.completions.create(
+				model=self.model_name,
+				messages=[{"role": "user", "content": message_content}],
+				temperature=self.temperature,
+				max_tokens=self.max_tokens,
+			)
+			return self._parse_chat_completion_response(raw_retry)
 
 class GeminiClient:
-    def __init__(self, model_name: str, api_key: str, temperature: float):
+    def __init__(
+        self,
+        model_name: str,
+        api_key: str,
+        temperature: float,
+        max_output_tokens: Optional[int] = None,
+    ):
         """
         :param api_key: 你的 Google AI Studio API Key
         :param model_id: 推荐使用 gemini-1.5-flash (免费额度高且支持长文本)
@@ -97,6 +187,8 @@ class GeminiClient:
         self.api_key = api_key
         self.client = genai.Client(api_key=self.api_key)
         self.temperature = temperature
+        mt = int(max_output_tokens) if max_output_tokens is not None else int(settings.llm_max_tokens)
+        self.max_output_tokens = max(512, min(mt, 65536))
         self.files = {}
         
     def _upload_files_parallel(self, file_paths: List[str]):
@@ -163,9 +255,9 @@ class GeminiClient:
             model=self.model_name,
             contents=contents,
             config=types.GenerateContentConfig(
-                    temperature=self.temperature,
-                    #max_output_tokens=8192 # 综述任务建议调大输出上限
-                )
+                temperature=self.temperature,
+                max_output_tokens=self.max_output_tokens,
+            ),
         )
 
         return response.text.strip()
@@ -202,11 +294,30 @@ class BaseAgent(ABC):
         self.memory = AgentMemory()
         self.llms = {}
   
-    def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
-        self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
+    def set_llm(
+        self,
+        llm_name: str,
+        model_name: str,
+        api_key: str,
+        base_url: str,
+        temperature: float,
+        max_tokens: Optional[int] = None,
+    ) -> None:
+        self.llms[llm_name] = LlmClient(
+            model_name, api_key, base_url, temperature, max_tokens=max_tokens
+        )
 
-    def set_gemini(self, llm_name: str, model_name: str, api_key: str, temperature: float) -> None:
-        self.llms[llm_name] = GeminiClient(model_name, api_key, temperature)    
+    def set_gemini(
+        self,
+        llm_name: str,
+        model_name: str,
+        api_key: str,
+        temperature: float,
+        max_tokens: Optional[int] = None,
+    ) -> None:
+        self.llms[llm_name] = GeminiClient(
+            model_name, api_key, temperature, max_output_tokens=max_tokens
+        )    
 
     def set_tool_args(self, args: dict) -> None:
         for tool_name, tool_args in args.items():

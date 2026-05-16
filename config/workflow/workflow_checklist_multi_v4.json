@@ -197,7 +197,7 @@
             "agent_name": "SimpleAgent",
             "config": {
                 "system_prompt": "你是论文审查结果的数据清洗与 JSON 格式化专家。",
-                "subtask": "请合并前面六个维度的审查 result。要求：1. 数据完整：去重但绝对禁止遗漏，保留所有独立的检查结果，按 severity (high > medium > low) 排序。2. 字段映射：将提取的 'text_quote' 字段值无损映射为 'text' 字段。3. 净化数据：所有的 'comment' 必须保持纯中文，自动修复乱码，严禁在输出中包含任何 \\uXXXX 转义符，确保批注内容清晰可读。输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。注意：result 必须是合法的 JSON 字符串供下游直接解析，内部双引号必须正确转义为 \\\"。",
+                "subtask": "请合并前面六个维度的审查 result。要求：1. 数据完整：去重但绝对禁止遗漏，保留所有独立的检查结果，按 severity (high > medium > low) 排序。2. 字段映射：将提取的 'text_quote' 字段值无损映射为 'text' 字段。3. 净化数据：所有的 'comment' 必须保持纯中文，自动修复乱码，严禁在输出中包含任何 \\uXXXX 转义符，确保批注内容清晰可读；comment 中不要写页码匹配或搜索过程的调试说明。4. 页码字段：若上游已给出精准 page_idx，保留即可（等价于单页区间，pdf 工具未命中时会自动向 ±5 页扩展一次）；也可同时输出 page_start=page_end=page_idx。输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差的原句\",\"comment\":\"纯中文审查意见\"}]\",\"summary\":\"六维度的综合中文总结\"}```。注意：result 必须是合法的 JSON 字符串供下游直接解析，内部双引号必须正确转义为 \\\"。",
                 "depends_on": [
                     "join_checkers"
                 ],
