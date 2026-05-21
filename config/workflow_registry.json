@@ -91,6 +91,10 @@
     "checklist_text_v3": {
       "type": "file",
       "path": "config/workflow/workflow_checklist_text_v3.json"
+    },
+    "latex_diagnose_v0": {
+      "type": "file",
+      "path": "config/workflow/workflow_latex_diagnose_v0.json"
     }
   }
 }

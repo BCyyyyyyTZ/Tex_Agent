@@ -29,6 +29,13 @@ from tools.register_inputs_tool import RegisterInputsTool
 from tools.offer_artifact_download_tool import OfferArtifactDownloadTool
 from tools.preflight_inputs_tool import PreflightInputsTool
 from tools.thesis_chapter_route_tool import ThesisChapterRouteTool
+from tools.latex_project_tool import LatexProjectTool
+from tools.latex_parser import LaTeXParserTool
+from tools.chktex_tool import ChkTeXTool
+from tools.latexmk_tool import LatexmkTool
+from tools.latex_slice_tool import LatexSliceTool
+from tools.latex_merge_tool import LatexMergeTool
+from tools.latex_report_tool import LatexReportTool
 
 logger = get_logger(__name__)
 _shared_pm = get_shared_user_persona_memory()
@@ -66,6 +73,13 @@ def _build_base_tools() -> List:
         ("preflight_inputs", lambda: PreflightInputsTool()),
         ("gemini_upload_pdf", lambda: GeminiUploadPdfTool()),
         ("offer_artifact_download", lambda: OfferArtifactDownloadTool()),
+        ("latex_project", lambda: LatexProjectTool()),
+        ("latex_parser", lambda: LaTeXParserTool()),
+        ("chktex", lambda: ChkTeXTool()),
+        ("latexmk", lambda: LatexmkTool()),
+        ("latex_slice", lambda: LatexSliceTool()),
+        ("latex_merge", lambda: LatexMergeTool()),
+        ("latex_report", lambda: LatexReportTool()),
     ]
     out = []
     for label, factory in specs:

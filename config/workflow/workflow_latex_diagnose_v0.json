@@ -1,0 +1,87 @@
+{
+  "description": "LaTeX 目录诊断 v0：项目扫描 → ChkTeX → latexmk → 合并 issues → 切片 → 报告（无 LLM）",
+  "nodes": [
+    {
+      "node_id": "latex_project",
+      "node_type": "tool",
+      "tool_name": "latex_project",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "chktex",
+      "node_type": "tool",
+      "tool_name": "chktex",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": ["latex_project"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latexmk",
+      "node_type": "tool",
+      "tool_name": "latexmk",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": ["chktex"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_merge",
+      "node_type": "tool",
+      "tool_name": "latex_merge",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "chktex_output": "${metadata.chktex.result}",
+          "latexmk_output": "${metadata.latexmk.result}",
+          "project_output": "${metadata.latex_project.result}"
+        },
+        "depends_on": ["latexmk", "latex_project"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_slice",
+      "node_type": "tool",
+      "tool_name": "latex_slice",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "merge_output": "${metadata.latex_merge.result}",
+          "severity": "error"
+        },
+        "depends_on": ["latex_merge"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_report",
+      "node_type": "tool",
+      "tool_name": "latex_report",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "project_output": "${metadata.latex_project.result}",
+          "merge_output": "${metadata.latex_merge.result}",
+          "slice_output": "${metadata.latex_slice.result}"
+        },
+        "depends_on": ["latex_slice", "latex_project", "latex_merge"],
+        "history_mode": "minimal",
+        "emit_messages": true
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "latex_project", "to_node": "chktex", "condition": null},
+    {"from_node": "chktex", "to_node": "latexmk", "condition": null},
+    {"from_node": "latexmk", "to_node": "latex_merge", "condition": null},
+    {"from_node": "latex_merge", "to_node": "latex_slice", "condition": null},
+    {"from_node": "latex_slice", "to_node": "latex_report", "condition": null}
+  ]
+}

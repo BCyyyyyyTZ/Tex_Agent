@@ -69,3 +69,6 @@ output/
 memory_store/
 # RAG 工具集成测试落盘输出（本地查看用）
 tests/test_rag/_rag_tool_output/
+
+# 关于latex解析的测试内容
+tests/test_latex/VaLoRA_TMC

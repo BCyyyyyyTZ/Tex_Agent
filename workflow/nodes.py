@@ -825,6 +825,27 @@ def make_tool_node(
             raw_response=structured.get("result", ""),
             structured=structured,
         )
+        latex_meta_promote: Dict[str, Any] = {}
+        inner = structured.get("metadata") if isinstance(structured.get("metadata"), dict) else {}
+        tool_md = inner.get("tool_metadata") if isinstance(inner.get("tool_metadata"), dict) else {}
+        if tool_md:
+            try:
+                from latex.constants import (
+                    METADATA_LATEX_DIAGNOSTICS,
+                    METADATA_LATEX_DIRTY,
+                    METADATA_LATEX_PROJECT,
+                )
+
+                for key in (
+                    METADATA_LATEX_PROJECT,
+                    METADATA_LATEX_DIAGNOSTICS,
+                    METADATA_LATEX_DIRTY,
+                ):
+                    if key in tool_md:
+                        latex_meta_promote[key] = tool_md[key]
+            except ImportError:
+                pass
+
         return _finalize_node_state(
             state=state,
             node_id=node_id,
@@ -832,6 +853,7 @@ def make_tool_node(
             output=structured.get("result", ""),
             error=None,
             new_messages=[user_msg, tool_msg],
+            metadata_updates=latex_meta_promote or None,
             is_terminal=is_terminal,
         )
 

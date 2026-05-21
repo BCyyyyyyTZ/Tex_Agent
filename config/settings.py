@@ -124,6 +124,23 @@ class Settings:
         default_factory=lambda: (os.getenv("DOCLING_PDF_DEVICE", "auto") or "auto").strip().lower()
     )
 
+    # ---- LaTeX 子系统（阶段 3+）----
+    latex_chktex_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_CHKTEX_TIMEOUT_SEC", 30))
+    )
+    latex_latexmk_fast_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LATEXMK_FAST_TIMEOUT_SEC", 120))
+    )
+    latex_latexmk_full_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LATEXMK_FULL_TIMEOUT_SEC", 600))
+    )
+    latex_llm_max_issues_per_run: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LLM_MAX_ISSUES_PER_RUN", 5))
+    )
+    latex_slice_context_lines: int = field(
+        default_factory=lambda: max(0, _env_int("LATEX_SLICE_CONTEXT_LINES", 10))
+    )
+
     def __repr__(self) -> str:
         """遮蔽 API Key，防止其通过日志/调试输出泄露。"""
         masked_key = (

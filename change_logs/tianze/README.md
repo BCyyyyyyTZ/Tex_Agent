@@ -59,3 +59,9 @@
 + 工作流 v1/v2：`page_start`/`page_end` 替代代表页；`pdf_annotator` 改读 `annotation_formatter.result`
 + 修复批注链路：`annotation_formatter` 配置 `max_tokens: 65536`；`LlmClient` 可配置输出上限（默认 8192），避免合并列表 JSON 被截断导致 `pdf_annotator` / `offer_download` 失败
 + 新增 `checklist_text_v3` 工作流与 `check_text.py` 批处理脚本：与 v2 审查链路一致，首节点 `preflight_inputs` 设 `use_llm: false`，配合结构化 JSON 路径输入批量生成 `{原名}-checked.pdf`
+
+#### [2026-05-22](./2026-05-22.md)
+
++ 落地 [LaTeX 子系统分阶段路线图](../../doc/TeX_Agent%20LaTeX%20子系统分阶段实现路线图.md) **阶段 0～6**（契约 → 项目扫描 → 解析/引用/bib/约定 → ChkTeX → latexmk → issue 合并与切片 → 诊断工作流 `latex_diagnose_v0`）
++ 新增 `latex/` 包与 `latex_project` / `latex_parser` / `chktex` / `latexmk` / `latex_slice` / `latex_merge` / `latex_report` 等 Tool；`workflow/nodes.py` 提升 `__latex_project__`、`__latex_diagnostics__` 至顶层 metadata
++ 夹具 `tests/fixtures/latex/`（multifile、cross_ref、with_bib、broken_braces 等）及对应 pytest；详见 [2026-05-22.md](./2026-05-22.md) 验证命令
