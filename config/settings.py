@@ -141,6 +141,17 @@ class Settings:
         default_factory=lambda: max(0, _env_int("LATEX_SLICE_CONTEXT_LINES", 10))
     )
 
+    # ---- LaTeX 监视与润色（阶段 8+）----
+    latex_watch_diagnose_debounce_ms: int = field(
+        default_factory=lambda: max(100, _env_int("LATEX_WATCH_DIAGNOSE_DEBOUNCE_MS", 500))
+    )
+    latex_watch_idle_polish_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_WATCH_IDLE_POLISH_SEC", 2))
+    )
+    latex_watch_enable_latexmk: bool = field(
+        default_factory=lambda: _env_bool("LATEX_WATCH_ENABLE_LATEXMK", False)
+    )
+
     def __repr__(self) -> str:
         """遮蔽 API Key，防止其通过日志/调试输出泄露。"""
         masked_key = (

@@ -1,8 +1,9 @@
 # TeX_Agent LaTeX 子系统分阶段实现路线图
 
-> 版本：v0.2  
+> 版本：v0.4  
 > 用途：在 [TeX_Agent LaTeX 诊断与润色子系统设计（增量版）.md](./TeX_Agent%20LaTeX%20诊断与润色子系统设计（增量版）.md) 之上，给出**自底向上、每步尽量少做**的落地顺序。  
-> 原则：**先冻结契约 → 再纯函数/服务 → 再 Tool → 再工作流 → 再 API → 最后编辑器**。  
+> 原则：**先冻结契约 → 再纯函数/服务 → 再 Tool → 再工作流 → 再监视服务/Web·CLI → 最后编辑器（幽灵窗口）**。  
+> **产品方向（v0.3 起，v0.4 补充运行预期）**：短期在 **Web-UI 或 CLI** 中启动后台程序，**持续监视**用户 LaTeX 目录并推送纠错/润色建议；远期在 **VS Code / Cursor** 中以**行间幽灵窗口**呈现（可拖动、可改文件、可开关）。**Checklist** 与**目录批处理**均不纳入 LaTeX 辅助主路径（见阶段 8–10、附加阶段 A）。  
 > **全程要求**：文件路径在 **Linux / Windows** 下行为一致；复杂仓库与引用体系分阶段补齐（见 §1.5、§二附表）。
 
 ---
@@ -21,9 +22,9 @@
   → 外部进程封装 (chktex/latexmk)
   → BaseTool 适配
   → workflow JSON
-  → TeXAgentCLI / 脚本
-  → FastAPI job
-  → vscode-extension
+  → 目录监视服务 (watch + 防抖)
+  → Web-UI / CLI 展示
+  → vscode-extension（幽灵窗口，最终）
 ```
 
 ### 1.2 每步「只做一件事」
@@ -68,7 +69,7 @@ python -c "from latex.project_index import build_index; print(build_index('path'
 | 子进程 | 参数列表 `argv` | 不用 `shell=True` 拼接用户路径；`cwd` 为解析后的 `root` |
 | 测试 | 夹具 + 双风格路径用例 | `tests/test_latex/test_paths.py`；复杂样本 `tests/test_latex/VaLoRA_TMC/` |
 
-**后续阶段（3–11）** 凡涉及 `root`、`main_tex`、log 内 `file:line` 映射，均复用 `latex/paths.py`，不得另起一套路径规则。
+**后续阶段（3–10、附加 A）** 凡涉及 `root`、`main_tex`、log 内 `file:line` 映射，均复用 `latex/paths.py`，不得另起一套路径规则。
 
 ### 1.6 复杂仓库与「引用解读」能力分层
 
@@ -98,11 +99,11 @@ python -c "from latex.project_index import build_index; print(build_index('path'
 阶段 4  Latexmk + log 解析（含引用类警告） [已完成]
 阶段 5  Issue 合并与源码切片          [已完成]
 阶段 6  诊断工作流（无 LLM）          [已完成]
-阶段 7  PromptBuilder + LLM 修复（L3，依赖 2.5 脏区级联）
-阶段 8  润色工作流（独立）
-阶段 9  Web Job API
-阶段 10 CLI 批处理
-阶段 11 VS Code（实时 / 幽灵文本）
+阶段 7  PromptBuilder + LLM 修复（L3，依赖 2.5 脏区级联） [已完成]
+阶段 8  目录监视与实时诊断/建议（后台服务）
+阶段 9  Web-UI / CLI 集成与展示
+阶段 10 VS Code / Cursor 扩展（行间幽灵窗口，最终目标）
+附加 A  Checklist 预留接口（可选，最后实现）
 ```
 
 ```mermaid
@@ -117,19 +118,19 @@ flowchart BT
   S5[阶段5 切片]
   S6[阶段6 工作流无LLM]
   S7[阶段7 LLM修复]
-  S8[阶段8 润色]
-  S9[阶段9 Web API]
-  S10[阶段10 CLI]
-  S11[阶段11 VSCode]
+  S8[阶段8 目录监视]
+  S9[阶段9 Web或CLI]
+  S10[阶段10 VSCode幽灵窗]
+  SA[附加A Checklist接口]
   S0 --> S1 --> S2 --> S25
   S25 --> S26
   S25 --> S7
   S1 --> S3 --> S4 --> S5 --> S6 --> S7
-  S6 --> S9
-  S7 --> S9
-  S2 --> S8
+  S6 --> S8
+  S7 --> S8
+  S8 --> S9
   S9 --> S10
-  S9 --> S11
+  S10 -.-> SA
 ```
 
 ### 实现状态速查
@@ -146,6 +147,28 @@ flowchart BT
 | 4 | 已完成 | `latex/log_parser.py`, `latex/latexmk_runner.py`, `tools/latexmk_tool.py` |
 | 5 | 已完成 | `latex/issues.py`, `latex/slice.py`, `latex/dirty.py`, `tools/latex_slice_tool.py` |
 | 6 | 已完成 | `config/workflow/workflow_latex_diagnose_v0.json`, `tools/latex_merge_tool.py`, `tools/latex_report_tool.py` |
+| 7 | 已完成 | `latex/prompt_builder.py`, `latex/suggestion.py`, `latex/fix_batch.py`, `workflow_latex_diagnose_v1.json`, `latex_fix_prepare` / `latex_collect_suggestions` |
+| 8 | 已完成 | 目录监视、防抖增量诊断、空闲润色触发（见 §三 阶段 8） |
+| 9 | 未开始 | Web-UI / CLI 启动监视、展示 issues / suggestions / 润色（见 §三 阶段 9） |
+| 10 | 未开始 | VS Code / Cursor 行间幽灵窗口（见 §三 阶段 10） |
+| 附加 A | 未开始 | Checklist 预留接口，不接论文审稿主流程（见 §三 附加阶段 A） |
+
+**已取消 / 移出主路径（v0.3）**
+
+| 原阶段 | 处理 |
+|--------|------|
+| 原阶段 8「润色工作流 + checklist」 | 拆入阶段 8 空闲润色；**不**读取 `thesis-checklists.md` |
+| 原阶段 10「CLI 批处理」 | **从 LaTeX 辅助路线图移除**；一次性 `latex_diagnose_v0/v1` 仍可用 `main.py task`，非产品主路径 |
+| 原阶段 11 | 合并为 **阶段 10**，强调幽灵窗口交互 |
+
+**两条使用路径（v0.4 说明）**
+
+| 路径 | 阶段 | 用途 |
+|------|------|------|
+| **一次性诊断** | 6–7（已完成） | `main.py task --wf latex_diagnose_v0/v1`：全库扫描一次，输出 `latex_report` JSON；适合 CI、抽查、验证 L3 |
+| **产品主路径** | 8–9（待做） | 目录 **watch** + 防抖诊断 + 空闲润色 + **人读展示**；短期 MVP 以此为准 |
+
+阶段 7 的 report **不是**给作者直接阅读的终态；人读视图在 **阶段 9** 交付（一次性 v1 也应复用同一 view 层，默认简短输出）。
 
 ---
 
@@ -439,109 +462,240 @@ python main.py task --wf latex_diagnose_v0 "{\"root\":\"tests/fixtures/latex/mul
 
 ---
 
-### 阶段 7：PromptBuilder + L3 修复（单轮 SimpleAgent）
+### 阶段 7：PromptBuilder + L3 修复（单轮 SimpleAgent）— 已完成
 
 **目标**：对**每条** error 级 issue 生成 0–1 条 `Suggestion`；控制 Token。
 
+**已实现**
+
+- `latex/prompt_builder.py`：`build_fix_prompt()`、`build_project_meta()`、`collect_ref_context_snippets()`（2.5 引用图：issue 附近 `\ref` → `\label` 定义处跨文件片段）
+- `latex/suggestion.py`：`parse_llm_suggestion_json()`、`parse_llm_suggestions_from_agent_result()`（容错 Agent 包装 JSON）
+- `latex/fix_batch.py`：`select_error_issues()`、`build_fix_batch()`（最多 `settings.latex_llm_max_issues_per_run`，默认 5）
+- `latex/fix_agent_prompt.py`：`LATEX_FIX_AGENT_SYSTEM_PROMPT`（供节点 config 参考）
+- `tools/latex_fix_prepare_tool.py`（`latex_fix_prepare`）：确定性组装 `fix_batch` + `prompt_bundle`，**不调用 LLM**
+- `tools/latex_collect_suggestions_tool.py`（`latex_collect_suggestions`）：解析 `fix_agent` 输出 → `Suggestion[]`，写入 `__latex_suggestions__`
+- `tools/latex_report_tool.py`：支持 `suggestions_output`、`workflow=latex_diagnose_v1`，report 含 `suggestions` / `suggestion_count`
+- `config/workflow/workflow_latex_diagnose_v1.json`，注册名 `latex_diagnose_v1`：
+  - 链：`latex_project` → `chktex` → `latexmk` → `latex_merge` → `latex_slice(error)` → `latex_fix_prepare` → `fix_agent` → `latex_collect_suggestions` → `latex_report`
+  - `fix_agent`：`SimpleAgent`，`temperature=0.2`，`result` 字段为 Suggestion 数组；`max_issues: 5` 在 `latex_fix_prepare` 节点 config
+- `workflow/nodes.py`：Tool metadata 提升增加 `__latex_suggestions__`
+- `tools/tool_list.py`：注册新 Tool
+
+**接口（已冻结 / 扩展）**
+
+- `Suggestion.issue_id`：关联 `DiagnosticIssue.id`（阶段 0 已有可选字段）
+- metadata：`__latex_suggestions__`（`constants.py` 常量）
+
+**用户输入（CLI / Web task）**
+
+与 v0 相同，至少 `root` + 建议 `main_tex`；选用工作流 **`latex_diagnose_v1`**（需配置 LLM API Key）。
+
+```bash
+python main.py task --wf latex_diagnose_v1 "{\"root\":\"tests/fixtures/latex/multifile\",\"main_tex\":\"main.tex\"}"
+```
+
+**验收（已通过）**
+
+```bash
+pytest tests/test_latex/test_prompt_builder.py tests/test_latex/test_suggestion.py tests/test_latex/test_fix_batch.py -v
+pytest tests/test_workflow/test_latex_diagnose_v1.py -v -m "not slow"
+# 端到端（Mock Agent，需 openai 等依赖，否则 skip）：
+pytest tests/test_workflow/test_latex_diagnose_v1.py::test_latex_diagnose_v1_invoke_mocked -v -m slow
+```
+
+**与 v0 的关系**
+
+- `latex_diagnose_v0` 保持不变（无 LLM、无 suggestions），供 CI / 无 API 环境。
+- v1 在 v0 工具链后追加 L3；无 error 或无切片时 `fix_batch` 为空，流水线仍可跑通。
+
+**运行预期与局限（v0.4，避免误用 v1）**
+
+| 项 | 说明 |
+|----|------|
+| **唯一 LLM 节点** | `fix_agent`（`SimpleAgent`）；**不**含润色 Agent |
+| **触发 L3 的条件** | 合并后存在 `severity=error` 且 `latex_slice` 能产出对应切片；否则 `suggestion_count=0`，**流水线仍成功** |
+| **warning 不调 LLM** | ChkTeX / parser / latexmk 的 **warning** 仅出现在 `diagnostics.issues`；不进 `fix_batch` |
+| **无润色** | `source=llm_polish`、空闲润色属于 **阶段 8**；勿把 v1 当润色工作流 |
+| **LLM 产出形态** | `Suggestion`：`replacement`（必填）为带 `range` 的 **LaTeX 补丁** + `rationale_zh`；`issue_id` 关联 error |
+| **`latex_report` 定位** | **机器契约** / 调试 / 阶段 9 输入；当前 embed **全量** `issues` 属有意设计，**非**作者终态 UI |
+| **大库典型现象** | 如 `VaLoRA_TMC`：`issue_count` 可达数百（多为 ChkTeX warning），`suggestions` 仍可为空；验证 L3 宜用 `broken_braces.tex` 或含真实 **error** 的样本 |
+
+**本步不做**：Reflection 多轮、目录监视（→8）、Web/CLI 人读展示（→9）、VS Code 幽灵窗口（→10）、`latex_report` 人读渲染（→9）。
+
+**说明**：阶段 7 中的 `fix_batch` 仅用于**单次工作流内**限制 LLM 处理条数，不是「目录批处理」产品能力；路线图不再规划独立的 LaTeX 批处理阶段。
+
+---
+
+### 阶段 8：目录监视与实时诊断/建议（后台服务） — 已完成
+
+**目标**：用户指定 LaTeX 目录后，后台进程**持续监视**文件变更，在 Web-UI 或 CLI 可订阅的通道上推送：**问题说明**、**修改建议**（纠错）、**润色建议**（空闲时）。本阶段只做服务与数据流，不做编辑器 UI。
+
 **本步实现范围**
 
-- `latex/prompt_builder.py`：`build_fix_prompt(issue, snippet, project_meta) -> str`（`project_meta` 含 2.5 引用图：受影响 `\ref` 所在文件片段）
-- `latex/suggestion.py`：`parse_llm_suggestion_json(text) -> Suggestion | None`（容错）
-- 升级工作流为 `workflow_latex_diagnose_v1.json`：
-  - 在 slice 后增加 `fix_agent`（`SimpleAgent`，system_prompt 要求**只输出 JSON 数组**）
-  - **限制**：首版可对 `severity=error` 且最多前 **5** 条 issue 调 LLM（配置写在 node config）
-- 写入 `metadata["__latex_suggestions__"]`
+| 能力 | 行为 |
+|------|------|
+| **目录监视** | 监视 `root` 下 `.tex` / 相关 `.bib`（可配置 glob）；跨平台用 `watchdog` 或等价方案；`main_tex` 与阶段 1 一致 |
+| **变更 → 诊断** | 文件保存或内容变更后**防抖**（建议 300–800ms，可配置）：增量跑 ChkTeX / 可选 latexmk（重编译可更长防抖或手动触发）→ `merge_issues` → 变更涉及 error 时走 v1 链路片段或轻量 `latex_fix_prepare` + Agent |
+| **空闲 → 润色** | 用户**连续 N 秒无修改**（默认 **2s**，可配置）后，对**当前活跃文件**或光标所在 `section` 调用润色 Agent；输出 `Suggestion(source=llm_polish)`，`replacement` 可为空，以 `rationale_zh` 为主 |
+| **状态推送** | 统一事件模型：`diagnostics_updated`、`suggestions_updated`、`polish_suggestions_updated`；含 `project_version` / 文件 checksum，供 UI 去重 |
+| **进程模型** | 独立模块如 `latex/watch_service.py`；可由 CLI `tex-agent watch` 或 Web 子进程拉起；单 `root` 单实例（同目录重复启动则 attach 或拒绝） |
 
-**接口扩展**
+**建议新增/修改文件**
 
-- `Suggestion` 已有字段不动；可增加可选 `issue_id` 关联
+```
+latex/watch_service.py      # 监视 + 防抖调度
+latex/polish_prompt.py      # 空闲润色 prompt（无 checklist）
+latex/watch_events.py       # 事件 / 快照模型（可并入 models）
+# 可选：workflow_latex_watch_v1.json 或直接在服务内调 Tool 链，避免 LangGraph 过重
+```
+
+**接口要冻结**
+
+- 监视配置：`root`、`main_tex`、`idle_polish_sec`（默认 2）、`diagnose_debounce_ms`、`enable_latexmk_on_watch`
+- 推送 payload：`issues[]`、`suggestions[]`（纠错）、`polish_suggestions[]`（润色），字段仍用阶段 0 契约
+- **不**在本阶段引入 checklist 文件路径或 `file_loading` 读审稿清单
 
 **验收**
 
-- Mock LLM 返回固定 JSON 的集成测试
-- 手工 1 个真实项目：issues + suggestions 均有 `replacement`
+```bash
+# 启动监视（CLI 形态示例）
+python -m latex.watch_cli --root tests/fixtures/latex/multifile --main_tex main.tex
+# 修改 tex → 2s 内应看到 diagnostics；停笔 2s → 应看到 polish 事件（Mock LLM 单测）
+pytest tests/test_latex/test_watch_service.py -v
+```
 
-**本步不做**：Reflection 多轮、润色、VS Code。
+**本步明确不做**
 
----
-
-### 阶段 8：润色工作流（与诊断解耦）
-
-**目标**：章节 + checklist → 润色建议（可不生成 `replacement` 自动替换）。
-
-**本步实现范围**
-
-- 复用 `latex_project` + `latex_parser`（按 `section` 切块）
-- 复用 `file_loading` 读 `thesis-checklists.md` 或 `storage/checklists/*`
-- `workflow_latex_polish_v1.json`：
-  - `SimpleAgent` 单轮即可（首版）
-  - 输出：`list[Suggestion]` 且 `source=llm_polish`，`replacement` 可为空，以 `rationale_zh` 为主
-- 注册 `latex_polish_v1`
-
-**验收**：指定 `root` + `section=Method`，输出非空建议列表。
-
-**本步不做**：Web 专用路由（可与阶段 9 合并）、InlineCompletion。
+- Web 页面布局、VS Code 扩展（→9、→10）
+- 接入论文审稿 **checklist** 工作流（→附加阶段 A）
+- 对多个无关目录的**批处理扫描**、定时全库 cron 报告
+- 独立 `workflow_latex_polish_v1` + `thesis-checklists.md` 方案（已废弃）
 
 ---
 
-### 阶段 9：Web Job API（目录模式 MVP）
+### 阶段 9：Web-UI / CLI 集成与展示
 
-**目标**：异步诊断，不阻塞 `/api/chat`。
+**目标**：用户在 **Web-UI** 或 **CLI** 中**启动/停止**阶段 8 的监视服务，并**查看**问题说明、修改建议、润色建议。这是当前阶段的**短期产品目标**；不要求编辑器内嵌。本阶段交付 **人读视图**，与阶段 7 的机器 JSON 分离。
+
+**人读视图 vs 机器 JSON（本阶段核心交付）**
+
+| 层级 | 内容 | 暴露方式 |
+|------|------|----------|
+| **机器层** | 完整 snapshot / `latex_report`（含全量或分级 issues） | CLI/Web 的 `--json`、落盘、Agent 间传递 |
+| **人读层** | 摘要 + 可操作条目 | CLI 默认 / Web 主界面 |
+
+人读层建议包含：
+
+- **摘要**：`error` / `warning` 计数、按 `source`（chktex / latexmk / parser）统计。
+- **问题列表（可截断）**：默认 **Top-K** warning（如 20）+ **全部 error**；提供「展开全量」或链到 JSON 文件。
+- **修改建议**：**全部** `suggestions`（`file`、行号、`rationale_zh`、`replacement` 预览）。
+- **润色建议**：**全部** `polish_suggestions`（阶段 8 产出；`replacement` 可为空）。
+
+可参考审稿工作流 `workflow_checklist_text_v3` 的 **`final_report`**（自然语言总结 + 路径）；LaTeX 宜增加确定性 **`latex_report_view`** Tool 或 CLI `--human`，**不必**在阶段 7 用额外 Agent 塞总结（避免与 watch 重复）。
+
+**一次性诊断也走人读层**：`main.py task --wf latex_diagnose_v1` 完成后，除原始 JSON 外，阶段 9 提供同一套简短终端/Markdown 输出（不必等 watch）。
+
+**report 契约扩展（规划，实现于本阶段）**
+
+在保持阶段 0 字段兼容前提下，可为 view 层增加（不改变 `DiagnosticIssue` / `Suggestion` 本体）：
+
+- `report.summary`：`{ "error": n, "warning": n, "by_source": {...} }`
+- `issues_top_k` + 可选 `issues_full_ref`（路径或内联），减轻默认 payload 体积。
 
 **本步实现范围**
 
-- `latex/job_store.py`：内存 dict 即可（`job_id`, status, result, error）
-- `ui/web/server.py` 增加：
-  - `POST /api/latex/projects/scan`
-  - `POST /api/latex/diagnose` → 后台 `asyncio.create_task` 跑 `TeXAgentCLI` 或 `graph.invoke`
-  - `GET /api/latex/jobs/{job_id}`
-- 首版 **可不实现 SSE**；轮询 GET 即可
+**CLI**
+
+- 子命令：`watch start | stop | status`（或等价），参数：`--root`、`--main_tex`、`--idle-polish-sec`
+- **默认人读**：表格或分页（摘要 + Top-K issues + 全部 suggestions / polish）；**`--json`** 输出完整 snapshot 供脚本
+- 一次性诊断：`task` 跑完 v0/v1 后可选 `--human`（或默认简短、`-v` 全量 JSON）
+- 可选：TTY 下简单高亮 severity；**不**实现「扫一遍目录写 report.json 退出」的批处理 CLI
+
+**Web-UI**
+
+- 启动监视：`POST /api/latex/watch`（body：`root`, `main_tex`, …）→ `watch_id`
+- 停止 / 状态：`DELETE /api/latex/watch/{id}`、`GET /api/latex/watch/{id}`
+- 订阅更新（二选一，首版可只做 b）：
+  - a) `GET /api/latex/watch/{id}/events` SSE
+  - b) `GET /api/latex/watch/{id}/snapshot` 轮询（含最新 issues + suggestions + polish）
+- 页面区域：问题列表 | 修改建议 | 润色建议（三栏或 Tab）；展示 `rationale_zh`、`replacement`（若有）
+- 与现有 `/api/chat` 解耦；监视会话内存存储即可（与旧「一次性 Job API」可复用 `job_store` 模式，但语义改为 **watch**）
 
 **接口冻结**
 
-- Job 响应 JSON 形状与 §7 设计一致
-- `cancelled` 状态可先占位
+- `WatchSession`：`watch_id`、`root`、`status`（`running` | `stopped` | `error`）、`last_event_at`
+- Snapshot JSON 与阶段 8 事件模型一致
 
-**验收**：`curl` 启动 job → 轮询至 `completed` → body 含 `diagnostics` + `suggestions`。
+**验收**
 
-**本步不做**：VS Code、编辑器防抖。
+- CLI：启动 watch → 改文件 → 终端或 `--json` 收到 diagnostics；停笔 2s 收到 polish
+- Web：`curl` 创建 watch → 轮询 snapshot 含三类数据；前端手动联调一页即可
 
----
+**本步不做**
 
-### 阶段 10：CLI 批处理
-
-**目标**：不启 Web 也能扫目录。
-
-**本步实现范围**
-
-- `check_latex.py` 或 `python -m latex.diagnose_cli`：
-  - 读 `config/run_config_latex.example.json`（`root`, `workflow`, `main_tex`）
-  - 输出 `files/output_latex/report.json`
-- 退出码约定：与 `check.py` 类似（0 全成功 / 1 有 issues / 2 环境缺失）
-
-**验收**：CI 可只跑 `latex_diagnose_v0` + Mock。
-
-**本步不做**：扩展。
+- VS Code / Cursor 扩展（→10）
+- Checklist 勾选 UI（→附加阶段 A）
+- 编辑器内「应用 replacement」一键改文件（可在 Web 做「复制建议」，完整改文件交互留给阶段 10）
 
 ---
 
-### 阶段 11：VS Code 扩展（实时）
+### 阶段 10：VS Code / Cursor 扩展（行间幽灵窗口，最终目标）
 
-**目标**：Diagnostics；幽灵文本为可选子步。
+**目标**：在 LaTeX **阅读与编辑界面行间**以**幽灵窗口**（ghost panel / inline ghost UI）展示建议：可**拖动**、可**帮助用户修改文件**（采纳 `replacement` 或片段插入）、支持**自动显示**与**用户开关**；连接阶段 8–9 的监视服务或扩展内轻量客户端。
 
-**建议再拆两步**
+**建议分步（均在阶段 10 内，但 PR 可拆分）**
 
 | 子步 | 内容 |
 |------|------|
-| 11a | 打开 `.tex` 时调 `POST .../diagnose`（整文件或 root）；`DiagnosticCollection` 展示 issues |
-| 11b | `document_version` + 防抖调 API；`InlineCompletionItemProvider` 展示 `replacement` |
+| **10a** | 扩展配置：`texagent.latexProjectRoot`、`texagent.watch.enabled`；连接 watch 服务（本地进程或 `localhost` API）；Problems 面板映射 `DiagnosticIssue` |
+| **10b** | **行间幽灵窗口**：在 `.tex` 对应行附近渲染建议卡片（非完整 WebView 占满屏为佳）；支持拖拽 reposition；展示问题说明 + 修改建议 + 润色建议 |
+| **10c** | **改文件**：采纳建议 → `WorkspaceEdit`；润色仅文案时可只插入/替换选区；与 `document_version` 协调，避免过期 suggestion 误应用 |
+| **10d** | **体验**：打开/关闭幽灵层开关；自动显示策略（仅 error / 含 warning / 含 polish）；与 2s 空闲润色节奏对齐 |
 
-**本步实现范围（11a 优先）**
+**本步实现范围**
 
-- `vscode-extension` 增加配置 `texagent.latexProjectRoot`
-- 调用阶段 9 API，映射到 `vscode.Diagnostic`
+- `vscode-extension`（兼容 Cursor）：Language Client 可选，首版 **HTTP/stdio 连 watch 服务** 即可
+- 复用阶段 0 的 `Suggestion.range`（0-based）映射到 `Range`
+- 不在扩展内嵌完整 latexmk 流水线；编译仍走阶段 4 服务侧
 
-**本步不做**：LSP、SyncTeX、扩展内嵌 latexmk。
+**验收**
+
+- 打开 `multifile` 工程：改 `.tex` → 行间出现纠错幽灵条；停笔 2s → 出现润色幽灵条；拖动后位置保持；关闭开关后不再自动弹出
+- 采纳一条 `replacement` 后文件内容正确、诊断刷新
+
+**本步明确不做（首版）**
+
+- LSP、SyncTeX、扩展内嵌 TeX 发行版安装器
+- Checklist 侧边栏（→附加阶段 A）
+- 多根工作区批处理诊断
+
+---
+
+### 附加阶段 A：Checklist 预留接口（可选，最后实现）
+
+**目标**：为「写论文时的个性化清单」预留扩展点，**不**接入当前 LaTeX 监视主路径；**不**与独立**论文审稿 / checklist 工作流**混用同一执行链。
+
+**背景**
+
+- 仓库内审稿用 checklist（如 `thesis-checklists.md`、`storage/checklists/*`）属于**另一条工作流**，本 LaTeX 辅助程序阶段 8–10 **不读取、不依赖**。
+- 用户日后可**自行提供**与写作相关的 checklist（路径或 JSON），使润色/建议更贴近章节要求。
+
+**本步实现范围（接口为主，实现可薄）**
+
+- 契约：`ChecklistProvider` 协议，例如 `load_checklist(path | checklist_id) -> ChecklistSnapshot`
+- 配置项（占位）：`latex_checklist_path` 或 `checklist_id`；默认 **空** = 行为与无 checklist 一致
+- 润色 prompt 钩子：`build_polish_prompt(..., checklist: ChecklistSnapshot | None)`；**仅当用户显式配置**时注入条目
+- 文档注明：与 `workflow_*_review*` 类审稿流程的关系是**可选组合**，非默认
+
+**验收**
+
+- 单测：注入 mock checklist 后 prompt 含对应条目；未配置时与阶段 8 空闲润色 prompt 一致
+- **不**要求 Web/VS Code 完成 checklist 编辑 UI
+
+**本步不做**
+
+- 将 checklist 写入 `workflow_latex_diagnose_v1` 或 watch 默认路径
+- 替代现有论文审稿工作流
 
 ---
 
@@ -550,12 +704,14 @@ python main.py task --wf latex_diagnose_v0 "{\"root\":\"tests/fixtures/latex/mul
 | 可并行 | 说明 |
 |--------|------|
 | 阶段 2 与 3 | 不同开发者：解析 vs chktex，但都依赖阶段 0 |
-| 阶段 8 与 7 | 润色工作流可在诊断 LLM 完成后并行 |
-| 阶段 10 与 9 | CLI 可在 API 稳定后快速跟进 |
+| 阶段 9 CLI 与 9 Web | 共用阶段 8 事件模型，可两人并行 |
+| 附加阶段 A 与 阶段 10 | Checklist 接口可在扩展稳定后独立合入 |
 
-**串行硬依赖**：`0 → 1 → 2 → 2.5 → (2.6 可选) → 3 → 4 → 5 → 6 → 7 → 9 → 11`。
+**串行硬依赖**：`0 → 1 → 2 → 2.5 → (2.6 可选) → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10`。
 
-**说明**：阶段 2 与 3 可并行；**2.5 必须在 7 之前**（跨文件脏区）；2.6 与 3/4 可并行。
+**说明**：阶段 2 与 3 可并行；**2.5 必须在 7 之前**（跨文件脏区）；2.6 与 3/4 可并行。**附加阶段 A** 依赖 8 的润色 prompt 钩子，且 intentionally **晚于** 10。
+
+**产品优先级**：**8 → 9**（Web 或 CLI 二选一先打通即可演示）→ **10**（编辑器幽灵窗口）→ **附加 A**（checklist 增强）。
 
 ---
 
@@ -568,7 +724,9 @@ python main.py task --wf latex_diagnose_v0 "{\"root\":\"tests/fixtures/latex/mul
 | `chktex` | `root`；可选 `files[]`、`main_tex` | `issues[]`, `env` |
 | `latexmk` | `root`, `main_tex`；可选 `mode` | `issues[]`, `success`, `log_tail` |
 | `latex_slice` | `root`, `issues[]` 或 `issue_ids[]` | `slices[]` |
-| `latex_report`（可选） | metadata 引用 | `report` 汇总 |
+| `latex_report`（可选） | metadata 引用；v1 可加 `suggestions_output` | `report` 汇总（含 `suggestions`） |
+| `latex_fix_prepare` | `merge_output`, `slice_output`, `project_output`；可选 `max_issues` | `fix_batch`, `prompt_bundle` |
+| `latex_collect_suggestions` | `fix_agent_output`, `fix_prepare_output` | `suggestions[]` → `__latex_suggestions__` |
 
 所有 Tool 的 `run()` 失败应返回 `ToolResult(success=False, error=...)`，**不要**抛到 LangGraph 未捕获（与现有工具一致）。
 
@@ -606,8 +764,10 @@ tests/test_tools/
 | 3–4 | `test_chktex_parser.py`, `test_log_parser.py` + integration mark |
 | 5 | `test_slice.py`, `test_merge_issues.py`, `test_dirty.py`（已通过） |
 | 6 | `tests/test_workflow/test_latex_diagnose_v0.py`（已通过，含 merge/report；e2e 需 openai 依赖） |
-| 6–7 | `test_workflow_latex_diagnose.py`（Mock LLM，阶段 7） |
-| 9 | `test_latex_api.py`（FastAPI TestClient） |
+| 7 | `test_prompt_builder.py`, `test_suggestion.py`, `test_fix_batch.py`, `test_latex_diagnose_v1.py`（Mock LLM） |
+| 8 | `test_watch_service.py`（防抖、空闲润色触发，Mock LLM） |
+| 9 | `test_latex_watch_api.py`（FastAPI TestClient）或 CLI 集成测试 |
+| 10 | 扩展手册 + 手工验收清单（自动化可后置） |
 
 ---
 
@@ -621,6 +781,10 @@ LATEX_LATEXMK_FAST_TIMEOUT_SEC = 120
 LATEX_LATEXMK_FULL_TIMEOUT_SEC = 600
 LATEX_LLM_MAX_ISSUES_PER_RUN = 5
 LATEX_SLICE_CONTEXT_LINES = 10
+# 阶段 8+
+LATEX_WATCH_DIAGNOSE_DEBOUNCE_MS = 500
+LATEX_WATCH_IDLE_POLISH_SEC = 2
+LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按需开启
 ```
 
 ---
@@ -636,28 +800,46 @@ LATEX_SLICE_CONTEXT_LINES = 10
 
 ## 九、最小可用产品（MVP）定义
 
-达到以下四条即可对外演示「目录诊断」：
+**v0.3 起、v0.4 细化 MVP 定义：「实时辅助」+ 人读视图在阶段 9**，不再以「一次性扫目录 Job」或「批处理 CLI」为准。
 
-1. 阶段 6：`latex_diagnose_v0` 在 CLI/Web workflow 可跑通，输出 issues 列表。
-2. 阶段 3：本机有 TeX 时 ChkTeX issues 非空（对故意写错的夹具）。
-3. 阶段 9：`POST /api/latex/diagnose` 可轮询拿到 JSON。
-4. 阶段 7 可**延后**：无 LLM 时仍算 MVP，仅无 `replacement` 建议。
+**已达成的底座（阶段 0–7）**
 
-润色、幽灵文本、实时防抖均 **不属于 MVP**。
+1. 阶段 6：`latex_diagnose_v0` 可跑通，输出 issues 列表（CI / 无 LLM）。
+2. 阶段 3：本机有 TeX 时 ChkTeX 对夹具可产出 issues。
+3. 阶段 7（可选）：`latex_diagnose_v1` 对 **error** 产出纠错 `Suggestion`（全 warning 大库可能 `suggestion_count=0`，属预期）。
+
+**一次性诊断（阶段 7，非产品 MVP，但可用）**
+
+- `latex_diagnose_v1` + JSON report：适合验证流水线；**作者友好输出依赖阶段 9 的 view 层**。
+
+**新的对外 MVP（阶段 8 + 9，Web 或 CLI 任一）**
+
+1. 用户指定 `root` 后，后台**持续监视**目录。
+2. 修改 `.tex` 后，在 **2s 内**（防抖后）可在 Web 或 CLI 看到**问题说明**与**修改建议**（有 LLM 时）。
+3. 用户**停笔约 2s**，可看到**润色建议**（文案为主，可无 `replacement`）。
+4. **不**要求 VS Code 扩展、幽灵窗口、checklist、目录批处理。
+
+**明确不属于 MVP**
+
+- 阶段 10 行间幽灵窗口、拖动、扩展内改文件
+- 附加阶段 A checklist 注入
+- 对多项目/多目录的批处理扫描与 `report.json` 批出
 
 ---
 
 ## 十、与设计文档里程碑的对应
 
-| 设计文档 §10 | 本路线图 |
-|--------------|----------|
+| 设计文档 §10 | 本路线图（v0.3） |
+|--------------|------------------|
 | M1 | 阶段 1 + 2（**已完成**） |
-| M1+ | 阶段 2.5（+ 可选 2.6）复杂结构与引用解读 |
-| M2 | 阶段 3 + 6 |
-| M3 | 阶段 4 + 6 |
-| M4 | 阶段 7 + 9 |
-| M5 | 阶段 8 |
-| M6 | 阶段 11 |
+| M1+ | 阶段 2.5（+ 可选 2.6）复杂结构与引用解读（**已完成**） |
+| M2 | 阶段 3 + 6（**已完成**） |
+| M3 | 阶段 4 + 6（**已完成**） |
+| M4 | 阶段 7（**已完成**）+ 阶段 8–9（实时监视与展示） |
+| M5 | 阶段 10（VS Code / Cursor 幽灵窗口） |
+| M5+（可选） | 附加阶段 A（用户 checklist 接口，非审稿主流程） |
+
+*说明：原路线图 M5「润色工作流 + checklist」已废止；润色并入阶段 8 空闲触发，checklist 仅保留附加阶段。*
 
 ---
 
@@ -667,9 +849,14 @@ LATEX_SLICE_CONTEXT_LINES = 10
 2. **用 `CommandRunningTool` 直接跑 latexmk**：超时 30s 不够；且 `shell=True` 不利于路径安全；单独封装。
 3. **整篇 tex 送入 LLM**：阶段 7 必须按 issue 切片 + 条数上限。
 4. **展平多文件为一棵 AST**：行号对不上；坚持 ProjectIndex + 相对路径。
-5. **先改 vscode-extension**：API 未稳定时扩展会反复改。
-6. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
-7. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
+5. **先改 vscode-extension**：监视服务与事件 JSON（阶段 8–9）未稳定时，幽灵窗口（阶段 10）会反复改。
+6. **把 checklist 塞进 LaTeX watch 默认路径**：checklist 属于审稿工作流；LaTeX 仅通过附加阶段 A 预留可选注入。
+7. **为 LaTeX 辅助单独做目录批处理 CLI**：一次性诊断用 `main.py task --wf latex_diagnose_*` 即可，不作为产品阶段。
+8. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
+9. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
+10. **把 `latex_diagnose_v1` 当润色或当「必有 suggestions」**：v1 仅 error→L3；润色在阶段 8；大库全 warning 时 `suggestion_count=0` 正常。
+11. **把阶段 7 的 `latex_report` 直接给用户**：全量 JSON 过长；应用阶段 9 人读视图，或 `--json` 显式索取。
+12. **用 `VaLoRA_TMC` 全 warning 验收 L3**：应使用含 **error** 的夹具（如 `broken_braces.tex`）或确认 latexmk 产出 error 后再看 `suggestions`。
 
 ---
 
@@ -686,6 +873,8 @@ LATEX_SLICE_CONTEXT_LINES = 10
 | 全项目 `\ref{fig:VaLoRA}` 解析到定义所在 tex | 2.5 | 已通过 |
 | `\cite` key 在 `reference.bib` 中有对应条目 | 2.6 | 已通过 |
 | `latexmk` 报未定义引用 / 文献警告 | 4 | 已通过（log 解析） |
+| `latex_diagnose_v1`：`issue_count` 大、`suggestion_count=0`（多 warning、少 error） | 7 | 预期行为；L3 用 error 夹具另验 |
+| 人读摘要 / Top-K issues / 非 JSON 终态 | 9 | 待实现 |
 
 ---
 

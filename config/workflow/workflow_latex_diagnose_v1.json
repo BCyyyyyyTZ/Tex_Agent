@@ -1,0 +1,142 @@
+{
+  "description": "LaTeX 目录诊断 v1：v0 工具链 + L3 SimpleAgent 修复（最多 5 条 error）",
+  "nodes": [
+    {
+      "node_id": "latex_project",
+      "node_type": "tool",
+      "tool_name": "latex_project",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": [],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "chktex",
+      "node_type": "tool",
+      "tool_name": "chktex",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": ["latex_project"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latexmk",
+      "node_type": "tool",
+      "tool_name": "latexmk",
+      "config": {
+        "tool_input": "${input}",
+        "depends_on": ["chktex"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_merge",
+      "node_type": "tool",
+      "tool_name": "latex_merge",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "chktex_output": "${metadata.chktex.result}",
+          "latexmk_output": "${metadata.latexmk.result}",
+          "project_output": "${metadata.latex_project.result}"
+        },
+        "depends_on": ["latexmk", "latex_project"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_slice",
+      "node_type": "tool",
+      "tool_name": "latex_slice",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "merge_output": "${metadata.latex_merge.result}",
+          "severity": "error"
+        },
+        "depends_on": ["latex_merge"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_fix_prepare",
+      "node_type": "tool",
+      "tool_name": "latex_fix_prepare",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "merge_output": "${metadata.latex_merge.result}",
+          "slice_output": "${metadata.latex_slice.result}",
+          "project_output": "${metadata.latex_project.result}",
+          "max_issues": 5
+        },
+        "depends_on": ["latex_slice", "latex_merge", "latex_project"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "fix_agent",
+      "node_type": "agent",
+      "agent_name": "SimpleAgent",
+      "config": {
+        "depends_on": ["latex_fix_prepare"],
+        "history_mode": "minimal",
+        "single_turn_contract_mode": "never",
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "upstream_result_max_chars": 120000,
+        "system_prompt": "你是 LaTeX 编译错误修复专家。你必须只输出一个合法 JSON 对象（首字符 {，末字符 }），禁止 Markdown 代码块与 JSON 外的文字。JSON 结构：{\"result\": [ /* Suggestion 对象数组 */ ], \"summary\": \"摘要\", \"confidence\": 0.0-1.0, \"metadata\": {}}。result 数组每项含 issue_id、file（POSIX 路径）、range（0-based）、replacement（必填）、message、rationale_zh、source=\"llm_fix\"。每条 issue 最多 1 条建议；仅最小修改；无法修复则省略该条。",
+        "subtask": "根据上游 latex_fix_prepare 的 fix_batch，为每个 issue 生成 Suggestion。将 Suggestion 数组放入 JSON 的 result 字段。"
+      }
+    },
+    {
+      "node_id": "latex_collect_suggestions",
+      "node_type": "tool",
+      "tool_name": "latex_collect_suggestions",
+      "config": {
+        "tool_input": {
+          "fix_agent_output": "${metadata.fix_agent.result}",
+          "fix_prepare_output": "${metadata.latex_fix_prepare.result}",
+          "merge_output": "${metadata.latex_merge.result}"
+        },
+        "depends_on": ["fix_agent", "latex_fix_prepare", "latex_merge"],
+        "history_mode": "minimal"
+      }
+    },
+    {
+      "node_id": "latex_report",
+      "node_type": "tool",
+      "tool_name": "latex_report",
+      "config": {
+        "tool_input": {
+          "user_input": "${input}",
+          "workflow": "latex_diagnose_v1",
+          "project_output": "${metadata.latex_project.result}",
+          "merge_output": "${metadata.latex_merge.result}",
+          "slice_output": "${metadata.latex_slice.result}",
+          "suggestions_output": "${metadata.latex_collect_suggestions.result}"
+        },
+        "depends_on": [
+          "latex_collect_suggestions",
+          "latex_slice",
+          "latex_project",
+          "latex_merge"
+        ],
+        "history_mode": "minimal",
+        "emit_messages": true
+      }
+    }
+  ],
+  "edges": [
+    {"from_node": "latex_project", "to_node": "chktex", "condition": null},
+    {"from_node": "chktex", "to_node": "latexmk", "condition": null},
+    {"from_node": "latexmk", "to_node": "latex_merge", "condition": null},
+    {"from_node": "latex_merge", "to_node": "latex_slice", "condition": null},
+    {"from_node": "latex_slice", "to_node": "latex_fix_prepare", "condition": null},
+    {"from_node": "latex_fix_prepare", "to_node": "fix_agent", "condition": null},
+    {"from_node": "fix_agent", "to_node": "latex_collect_suggestions", "condition": null},
+    {"from_node": "latex_collect_suggestions", "to_node": "latex_report", "condition": null}
+  ]
+}

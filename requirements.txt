@@ -30,6 +30,9 @@ pytest-asyncio>=0.21.0
 # LaTeX 单文件解析（阶段 2，AST 可选）
 pylatexenc>=2.10
 
+# 目录监视（阶段 8）
+watchdog>=4.0.0
+
 # PDF 处理依赖
 pymupdf>=1.24.0
 pypdf>=4.2.0

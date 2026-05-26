@@ -834,12 +834,14 @@ def make_tool_node(
                     METADATA_LATEX_DIAGNOSTICS,
                     METADATA_LATEX_DIRTY,
                     METADATA_LATEX_PROJECT,
+                    METADATA_LATEX_SUGGESTIONS,
                 )
 
                 for key in (
                     METADATA_LATEX_PROJECT,
                     METADATA_LATEX_DIAGNOSTICS,
                     METADATA_LATEX_DIRTY,
+                    METADATA_LATEX_SUGGESTIONS,
                 ):
                     if key in tool_md:
                         latex_meta_promote[key] = tool_md[key]

@@ -8,7 +8,11 @@ from typing import Any, Dict, Optional
 
 from core.message import ToolResult
 from latex.coerce_payload import coerce_json_payload
-from latex.constants import METADATA_LATEX_DIAGNOSTICS, METADATA_LATEX_PROJECT
+from latex.constants import (
+    METADATA_LATEX_DIAGNOSTICS,
+    METADATA_LATEX_PROJECT,
+    METADATA_LATEX_SUGGESTIONS,
+)
 from latex.diagnose_io import (
     extract_root_from_payload,
     issues_from_tool_output,
@@ -28,6 +32,8 @@ class LatexReportTool(BaseTool):
     输入：
         - user_input / root
         - project_output、merge_output、slice_output（上游 result 字符串）
+        - suggestions_output（可选，latex_collect_suggestions result）
+        - workflow（可选，默认 latex_diagnose_v0）
     """
 
     def __init__(self) -> None:
@@ -42,6 +48,8 @@ class LatexReportTool(BaseTool):
                 "project_output": "latex_project result",
                 "merge_output": "latex_merge result",
                 "slice_output": "latex_slice result",
+                "suggestions_output": "可选，latex_collect_suggestions result",
+                "workflow": "可选，报告 workflow 名称",
             },
         )
 
@@ -57,11 +65,18 @@ class LatexReportTool(BaseTool):
             index = project_from_tool_output(data.get("project_output"))
             merge_data = _loads_dict(data.get("merge_output"))
             slice_data = _loads_dict(data.get("slice_output"))
+            suggestions_data = _loads_dict(data.get("suggestions_output"))
 
             issues = issues_from_tool_output(merge_data or data.get("merge_output"))
             slices = []
             if isinstance(slice_data, dict):
                 slices = slice_data.get("slices", []) or []
+
+            suggestions: list = []
+            if isinstance(suggestions_data, dict):
+                suggestions = suggestions_data.get("suggestions", []) or []
+
+            workflow_name = str(data.get("workflow") or "latex_diagnose_v0").strip()
 
             project_summary: Dict[str, Any] = {}
             if index is not None:
@@ -75,7 +90,7 @@ class LatexReportTool(BaseTool):
 
             sources = merge_data.get("sources", {}) if isinstance(merge_data, dict) else {}
             report = {
-                "workflow": "latex_diagnose_v0",
+                "workflow": workflow_name,
                 "root": root or (index.root if index else ""),
                 "project": project_summary,
                 "diagnostics": {
@@ -85,6 +100,8 @@ class LatexReportTool(BaseTool):
                 },
                 "slices": slices,
                 "slice_count": len(slices),
+                "suggestions": suggestions,
+                "suggestion_count": len(suggestions),
             }
             issues_dicts = [to_dict(i) for i in issues]
             meta: Dict[str, Any] = {
@@ -93,6 +110,8 @@ class LatexReportTool(BaseTool):
             }
             if index is not None:
                 meta[METADATA_LATEX_PROJECT] = to_dict(index)
+            if suggestions:
+                meta[METADATA_LATEX_SUGGESTIONS] = suggestions
 
             return ToolResult(
                 success=True,

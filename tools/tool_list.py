@@ -36,6 +36,8 @@ from tools.latexmk_tool import LatexmkTool
 from tools.latex_slice_tool import LatexSliceTool
 from tools.latex_merge_tool import LatexMergeTool
 from tools.latex_report_tool import LatexReportTool
+from tools.latex_fix_prepare_tool import LatexFixPrepareTool
+from tools.latex_collect_suggestions_tool import LatexCollectSuggestionsTool
 
 logger = get_logger(__name__)
 _shared_pm = get_shared_user_persona_memory()
@@ -80,6 +82,8 @@ def _build_base_tools() -> List:
         ("latex_slice", lambda: LatexSliceTool()),
         ("latex_merge", lambda: LatexMergeTool()),
         ("latex_report", lambda: LatexReportTool()),
+        ("latex_fix_prepare", lambda: LatexFixPrepareTool()),
+        ("latex_collect_suggestions", lambda: LatexCollectSuggestionsTool()),
     ]
     out = []
     for label, factory in specs:

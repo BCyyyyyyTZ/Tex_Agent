@@ -48,10 +48,6 @@
       "type": "file",
       "path": "config/workflow/workflow_docling_user_test.json"
     },
-    "checklist_annotate": {
-      "type": "file",
-      "path": "config/workflow/workflow_checklist_annotate.json"
-    },
     "checklist_annotate_v2": {
       "type": "file",
       "path": "config/workflow/workflow_checklist_annotate_v2.json"
@@ -95,6 +91,10 @@
     "latex_diagnose_v0": {
       "type": "file",
       "path": "config/workflow/workflow_latex_diagnose_v0.json"
+    },
+    "latex_diagnose_v1": {
+      "type": "file",
+      "path": "config/workflow/workflow_latex_diagnose_v1.json"
     }
   }
 }
