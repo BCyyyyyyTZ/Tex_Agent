@@ -108,6 +108,7 @@ def parse_llm_suggestion_json(
         return None
 
     replacement = str(data.get("replacement", "") or "").strip()
+    rationale_zh = str(data.get("rationale_zh", data.get("rationale", "")) or "").strip()
     if not replacement:
         return None
 
@@ -129,6 +130,76 @@ def parse_llm_suggestion_json(
         confidence=_parse_confidence(data.get("confidence")),
         rationale_zh=str(data.get("rationale_zh", data.get("rationale", "")) or ""),
         issue_id=str(issue_id) if issue_id else None,
+    )
+
+
+def parse_polish_suggestion_json(
+    text: Union[str, Dict[str, Any], None],
+    *,
+    default_file: Optional[str] = None,
+) -> Optional[Suggestion]:
+    """
+    解析润色建议：允许 replacement 为空，只要有 rationale_zh 即可展示。
+    """
+    if text is None:
+        return None
+    data: Any = text
+    if isinstance(text, str):
+        stripped = text.strip()
+        if not stripped:
+            return None
+        for candidate in (stripped, *_extract_json_candidates(stripped)):
+            try:
+                data = json.loads(candidate)
+                break
+            except json.JSONDecodeError:
+                continue
+        else:
+            # 润色场景允许纯文本返回：将整段文本作为说明保存。
+            file_norm = normalize_rel_path(str(default_file)) if default_file else ""
+            if not file_norm:
+                return None
+            return Suggestion(
+                file=file_norm,
+                range=TextRange(
+                    start=Position(line=0, character=0),
+                    end=Position(line=0, character=0),
+                ),
+                severity=Severity.INFO,
+                source=IssueSource.LLM_POLISH,
+                message="",
+                replacement="",
+                rationale_zh=stripped,
+                issue_id=None,
+            )
+
+    if not isinstance(data, dict):
+        return None
+
+    file_raw = data.get("file") or default_file
+    file_norm = normalize_rel_path(str(file_raw)) if file_raw else ""
+    if not file_norm:
+        return None
+
+    replacement = str(data.get("replacement", "") or "").strip()
+    rationale_zh = str(data.get("rationale_zh", data.get("rationale", "")) or "").strip()
+    if not replacement and not rationale_zh:
+        return None
+
+    rng = _parse_range(data.get("range"))
+
+    return Suggestion(
+        request_id=str(data.get("request_id") or uuid.uuid4()),
+        document_version=int(data.get("document_version") or 0),
+        file=file_norm,
+        range=rng,
+        severity=Severity.INFO,
+        source=IssueSource.LLM_POLISH,
+        message=str(data.get("message", "") or ""),
+        replacement=replacement,
+        confidence=_parse_confidence(data.get("confidence")),
+        rationale_zh=rationale_zh,
+        issue_id=None,
     )
 
 

@@ -201,6 +201,42 @@ python -m rag.document_parse "D:\papers\my.pdf" -o "D:\output\my_parse_folder"
 
 ---
 
+## latex 论文辅助写作功能的说明
+
+TeX_Agent 提供了一套 LaTeX 论文辅助写作子系统，支持项目扫描、语法检查、编译诊断、LLM 自动纠错以及空闲时的语言润色。
+
+### 1. 一次性全库诊断 (CLI)
+
+如果您只需要对当前的 LaTeX 项目进行一次全面的体检，可以使用 `main.py task` 命令行入口。
+
+- **基础诊断（无 LLM）**：速度快，仅执行 ChkTeX 和 latexmk 检查。
+  ```bash
+  python main.py task --wf latex_diagnose_v0 "{\"root\":\"您的项目绝对或相对路径\",\"main_tex\":\"main.tex\"}"
+  ```
+- **智能诊断（带 LLM 修复建议）**：在基础诊断之上，针对 `error` 级别的问题，调用大模型生成具体的修改建议。
+  ```bash
+  python main.py task --wf latex_diagnose_v1 "{\"root\":\"您的项目绝对或相对路径\",\"main_tex\":\"main.tex\"}"
+  ```
+
+### 2. 实时监视与辅助 (Watch 模式)
+
+在您撰写论文的过程中，TeX_Agent 可以作为后台服务持续运行，实时为您提供反馈。
+
+**通过命令行启动监视：**
+```bash
+python -m latex.watch_cli start --root 您的项目路径 --main_tex main.tex
+```
+启动后，保持该终端窗口打开。当您在编辑器中修改并保存 `.tex` 文件时：
+1. **防抖诊断**：修改后约 500ms，终端会输出最新的语法错误和警告。
+2. **空闲润色**：当您停止输入约 2 秒后，系统会自动对您当前正在编辑的段落进行学术语言润色，并在终端打印出修改建议和中文解释。
+
+### 3. 注意事项
+- **路径格式**：`root` 参数支持 Windows 和 Linux 风格的路径（绝对路径或相对路径均可）。`main_tex` 是相对于 `root` 的主文件路径。
+- **环境依赖**：系统会自动探测本机的 TeX 环境。为了获得最佳体验，建议您在系统中安装 `chktex` 和 `latexmk`。如果未安装，系统会降级，仅使用内置的轻量级解析器。
+- **API Key**：使用带有 LLM 修复和润色功能（如 `v1` 工作流或 Watch 模式的润色）时，请确保在 `.env` 文件中正确配置了 `OPENAI_API_KEY` 或 `GEMINI_API_KEY`。
+
+
+
 ## 项目目录树结构与文件说明
 
 ```

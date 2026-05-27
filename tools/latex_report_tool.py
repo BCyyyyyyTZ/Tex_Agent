@@ -89,13 +89,36 @@ class LatexReportTool(BaseTool):
                 }
 
             sources = merge_data.get("sources", {}) if isinstance(merge_data, dict) else {}
+            
+            # 阶段 9：人读层扩展
+            error_count = sum(1 for i in issues if i.severity.value == "error")
+            warning_count = sum(1 for i in issues if i.severity.value == "warning")
+            by_source = {}
+            for i in issues:
+                src = i.source.value if hasattr(i.source, "value") else str(i.source)
+                by_source[src] = by_source.get(src, 0) + 1
+            
+            summary = {
+                "error": error_count,
+                "warning": warning_count,
+                "by_source": by_source
+            }
+            
+            issues_dicts = [to_dict(i) for i in issues]
+            # Top-K: 所有的 error，加上部分 warning (最多 20 条)
+            errors = [i for i in issues_dicts if i.get("severity") == "error"]
+            warnings = [i for i in issues_dicts if i.get("severity") == "warning"]
+            issues_top_k = errors + warnings[:20]
+
             report = {
                 "workflow": workflow_name,
                 "root": root or (index.root if index else ""),
                 "project": project_summary,
+                "summary": summary,
                 "diagnostics": {
                     "issue_count": len(issues),
-                    "issues": [to_dict(i) for i in issues],
+                    "issues": issues_dicts,
+                    "issues_top_k": issues_top_k,
                     "sources": sources,
                 },
                 "slices": slices,
@@ -103,7 +126,6 @@ class LatexReportTool(BaseTool):
                 "suggestions": suggestions,
                 "suggestion_count": len(suggestions),
             }
-            issues_dicts = [to_dict(i) for i in issues]
             meta: Dict[str, Any] = {
                 METADATA_LATEX_DIAGNOSTICS: issues_dicts,
                 "report": report,

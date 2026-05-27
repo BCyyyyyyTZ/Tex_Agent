@@ -28,6 +28,8 @@ from pydantic import BaseModel, Field
 
 from core.agent_cli import TeXAgentCLI, _serialize_plan_graph_for_ui
 from ui.web import file_storage
+from latex.watch_service import WatchService
+from latex.watch_events import WatchSnapshot
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -551,6 +553,14 @@ class BranchHistoryOut(BaseModel):
     branch: str
     messages: List[BranchHistoryMsgOut]
 
+class WatchStartRequest(BaseModel):
+    root: str = Field(..., description="LaTeX 项目根目录")
+    main_tex: Optional[str] = Field(None, description="主文件相对路径")
+    idle_polish_sec: Optional[float] = Field(2.0, description="空闲润色触发时间")
+
+class WatchStartResponse(BaseModel):
+    watch_id: str
+    status: str
 
 def _augment_message_with_active_files(message: str, body: "ChatRequest") -> str:
     """将各 storage 子目录中已勾选文件解析为绝对路径，置于用户消息前。"""
@@ -629,6 +639,9 @@ _BR_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 _cli: Optional[TeXAgentWebUI] = None
 _rag_pipeline: Optional[Any] = None
 
+# 阶段 9：LaTeX 监视服务会话存储
+_watch_sessions: Dict[str, WatchService] = {}
+
 
 def get_cli() -> TeXAgentWebUI:
     global _cli
@@ -701,6 +714,51 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    # --- 阶段 9: LaTeX Watch API ---
+    @app.post("/api/latex/watch", response_model=WatchStartResponse)
+    async def start_latex_watch(body: WatchStartRequest) -> WatchStartResponse:
+        import uuid
+        root_path = Path(body.root).expanduser().resolve()
+        if not root_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"目录不存在: {body.root}")
+            
+        # 检查是否已有同目录的 running session
+        for wid, svc in _watch_sessions.items():
+            if svc.root_path == root_path and svc.status == "running":
+                return WatchStartResponse(watch_id=wid, status="already_running")
+                
+        watch_id = str(uuid.uuid4())
+        service = WatchService(
+            watch_id=watch_id,
+            root=str(root_path),
+            main_tex=body.main_tex,
+            idle_polish_sec=body.idle_polish_sec
+        )
+        service.start()
+        _watch_sessions[watch_id] = service
+        return WatchStartResponse(watch_id=watch_id, status="started")
+
+    @app.get("/api/latex/watch/{watch_id}", response_model=WatchSnapshot)
+    async def get_latex_watch_status(watch_id: str) -> WatchSnapshot:
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        return _watch_sessions[watch_id].get_snapshot()
+
+    @app.get("/api/latex/watch/{watch_id}/snapshot", response_model=WatchSnapshot)
+    async def get_latex_watch_snapshot(watch_id: str) -> WatchSnapshot:
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        return _watch_sessions[watch_id].get_snapshot()
+
+    @app.delete("/api/latex/watch/{watch_id}")
+    async def stop_latex_watch(watch_id: str):
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        _watch_sessions[watch_id].stop()
+        del _watch_sessions[watch_id]
+        return {"status": "stopped", "watch_id": watch_id}
+    # -------------------------------
 
     @app.post("/api/rag/index-text", response_model=RAGIndexResponse)
     async def rag_index_text_ep(body: RAGTextIndexRequest) -> RAGIndexResponse:

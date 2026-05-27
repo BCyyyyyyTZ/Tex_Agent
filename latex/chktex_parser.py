@@ -39,9 +39,28 @@ _ERROR_RE = re.compile(
 )
 
 
+_ERROR_MESSAGE_PATTERNS = (
+    "no match found for",
+    "could not execute latex command",
+    "number of `(' doesn't match",
+    "number of `{' doesn't match",
+    "number of `$' doesn't match",
+    r"number of `\{' doesn't match",
+    "unmatched",
+    "undefined control sequence",
+)
+
+# ChkTeX 结构性问题常见 warning 编号（仍可能以 Warning 输出）
+_ERROR_CHKTEX_CODES = frozenset({"15", "17"})
+
+
 def _map_severity(message: str, code: str) -> Severity:
     lower = message.lower()
     if "error" in lower or code.startswith("e"):
+        return Severity.ERROR
+    if code in _ERROR_CHKTEX_CODES:
+        return Severity.ERROR
+    if any(p in lower for p in _ERROR_MESSAGE_PATTERNS):
         return Severity.ERROR
     if "info" in lower:
         return Severity.INFO

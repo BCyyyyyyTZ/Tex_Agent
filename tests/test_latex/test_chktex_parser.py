@@ -41,6 +41,15 @@ def test_parse_chktex_prefix_line() -> None:
     issues = parse_chktex_output(text, default_file="main.tex")
     assert len(issues) == 1
     assert issues[0].line == 7
+    assert issues[0].severity.value == "error"
+
+
+def test_structural_brace_mismatch_is_error() -> None:
+    text = 'paper.tex:155:1:17: No match found for `{`.'
+    issues = parse_chktex_output(text, default_file="paper.tex")
+    assert len(issues) == 1
+    assert issues[0].severity.value == "error"
+    assert issues[0].line == 155
 
 
 def test_deduplicate_same_issue() -> None:

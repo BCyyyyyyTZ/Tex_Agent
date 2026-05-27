@@ -149,7 +149,7 @@ flowchart BT
 | 6 | 已完成 | `config/workflow/workflow_latex_diagnose_v0.json`, `tools/latex_merge_tool.py`, `tools/latex_report_tool.py` |
 | 7 | 已完成 | `latex/prompt_builder.py`, `latex/suggestion.py`, `latex/fix_batch.py`, `workflow_latex_diagnose_v1.json`, `latex_fix_prepare` / `latex_collect_suggestions` |
 | 8 | 已完成 | 目录监视、防抖增量诊断、空闲润色触发（见 §三 阶段 8） |
-| 9 | 未开始 | Web-UI / CLI 启动监视、展示 issues / suggestions / 润色（见 §三 阶段 9） |
+| 9 | 已完成 | Web-UI / CLI 启动监视、展示 issues / suggestions / 润色（见 §三 阶段 9） |
 | 10 | 未开始 | VS Code / Cursor 行间幽灵窗口（见 §三 阶段 10） |
 | 附加 A | 未开始 | Checklist 预留接口，不接论文审稿主流程（见 §三 附加阶段 A） |
 
@@ -573,7 +573,7 @@ pytest tests/test_latex/test_watch_service.py -v
 
 ---
 
-### 阶段 9：Web-UI / CLI 集成与展示
+### 阶段 9：Web-UI / CLI 集成与展示 — 已完成
 
 **目标**：用户在 **Web-UI** 或 **CLI** 中**启动/停止**阶段 8 的监视服务，并**查看**问题说明、修改建议、润色建议。这是当前阶段的**短期产品目标**；不要求编辑器内嵌。本阶段交付 **人读视图**，与阶段 7 的机器 JSON 分离。
 

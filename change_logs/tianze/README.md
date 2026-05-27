@@ -71,3 +71,8 @@
 + 继续实现**阶段 7**：`prompt_builder` / `suggestion` / `fix_batch`、`latex_fix_prepare` / `latex_collect_suggestions`、工作流 `latex_diagnose_v1`（L3 SimpleAgent 修复 + `__latex_suggestions__`）；`latex_diagnose_v0` 保持无 LLM
 + 重新设计阶段8及以后的[规划](../../doc/TeX_Agent%20LaTeX%20子系统分阶段实现路线图.md)
 + 实现**阶段 8**：目录监视与实时诊断/建议服务（后台服务）。新增 `WatchService` 结合 `watchdog` 监听文件修改，支持防抖增量诊断和空闲润色触发。
+
+#### [2026-05-27](./2026-05-27.md)
+
++ 实现**阶段 9**：Web-UI / CLI 集成与展示。新增 `latex/watch_cli.py` 命令行工具，支持启动监视并输出人读视图；更新 `latex_report_tool` 增加 `summary` 和 `issues_top_k`；在 `ui/web/server.py` 中新增了启动、停止和轮询 LaTeX 监视状态的 FastAPI 接口。
++ 更新项目 `README.md`，添加了“LaTeX 辅助写作功能的说明”。
