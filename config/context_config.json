@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "routing": {
+    "mode_defaults": {
+      "auto": "auto_single",
+      "plan": "dialogue",
+      "task": "pipeline"
+    },
+    "workflow_prefixes": {
+      "checklist_": "legacy",
+      "latex_": "legacy",
+      "thesis_": "legacy"
+    },
+    "workflow_names": {
+      "plan_dynamic": "dialogue",
+      "auto_single": "auto_single",
+      "docling_user_test": "legacy",
+      "file_analysis": "legacy"
+    },
+    "default_profile": "pipeline"
+  },
+  "intent_patterns": {
+    "echo": {
+      "substr": ["原封不动", "原样", "照抄", "逐字", "复述一遍", "echo", "verbatim"],
+      "regex": []
+    },
+    "persona_write": {
+      "substr": ["记住我", "请记住", "保存我的", "更新画像", "记住我是", "个人资料"],
+      "regex": []
+    },
+    "persona_read": {
+      "substr": [],
+      "regex": ["^你是谁[？?]?$", "^who are you[？?]?$", "^你叫什么[？?]?$", "^介绍一下你自己[？?]?$"]
+    },
+    "user_identity": {
+      "substr": [],
+      "regex": ["^我是谁[？?]?$", "^who am i[？?]?$"]
+    },
+    "persona_intro_merge": {
+      "substr": [],
+      "regex": []
+    },
+    "assistant_nickname": {
+      "substr": ["改名叫", "叫你", "称呼你", "你的名字是", "以后你就叫"],
+      "regex": []
+    },
+    "long_form_delivery": {
+      "substr": ["分析", "报告", "论文", "规划", "详细", "完整"],
+      "regex": []
+    }
+  },
+  "persona_reply_skip": {
+    "min_length": 20,
+    "marker_substrings": ["已记录", "已写入用户画像", "用户画像", "个人档案", "已成功记录"],
+    "min_marker_hits": 2
+  },
+  "message_filter": {
+    "skip_source_suffixes": ["_prompt_builder"],
+    "prompt_builder_body_markers": ["[你的具体任务]", "[原始任务背景]"],
+    "dialogue_source_ids": ["chat", "user", "web", "cli"],
+    "max_user_line_chars": 2000,
+    "max_assistant_line_chars": 2500
+  },
+  "terminal_delivery_auto": {
+    "short_input_max_chars": 48,
+    "question_chars": ["?", "？"]
+  },
+  "planner": {
+    "extra_principles": [
+      "若用户意图匹配 echo（见配置 intent_patterns.echo）：只规划 1 个 agent 终节点，subtask 仅复述用户原文。",
+      "除非用户意图匹配 persona_write，否则禁止规划 user_persona_get、user_persona_merge、load_persona、store_persona 等画像工具节点。",
+      "节点 subtask 必须贴合用户字面意图，不得擅自改成用户档案复述或画像确认。",
+      "简单、一句可答的任务优先 1~2 个 agent 节点。"
+    ],
+    "forbidden_persona_tool_names": [
+      "user_persona_get",
+      "user_persona_merge",
+      "load_persona",
+      "store_persona",
+      "retrieve_user_persona"
+    ],
+    "persona_subtask_markers": ["记录用户基本信息", "写入用户画像"],
+    "persona_task_markers": ["记住", "画像", "个人资料"]
+  },
+  "json_format": {
+    "full": null,
+    "compact": "---\n【输出格式】只输出一个 JSON 对象，首字符 { 末字符 }。禁止 Markdown 代码块。\n{\"result\":\"正文\",\"summary\":\"摘要\",\"confidence\":0.0-1.0}\n可选顶层键 persona_memory_update。\n---\n"
+  },
+  "prompt_templates": {
+    "legacy": {
+      "layout": "pipeline_legacy",
+      "user_input_label": "[原始任务背景]",
+      "task_label": "[你的具体任务]",
+      "upstream_label": "[上游节点输出]",
+      "history_label": "[历史上下文]"
+    },
+    "priority_input": {
+      "layout": "priority_input",
+      "user_input_label": "【本轮用户输入 · 最高优先级】",
+      "task_label": "[你的具体任务]",
+      "upstream_label": "[上游节点输出]",
+      "history_label": "[历史上下文]",
+      "history_disclaimer": "【仅供参考 · 非本轮任务】以下历史/检索片段若与【本轮用户输入】冲突，必须以【本轮用户输入】为准。\n"
+    },
+    "chat_compact": {
+      "layout": "chat_compact",
+      "user_input_label": "【用户本轮消息】",
+      "history_label": "【近期对话摘要 · 仅供参考】"
+    }
+  },
+  "profiles": {
+    "legacy": {
+      "memory_search_enabled": true,
+      "dialogue_max_turns": 6,
+      "include_metadata_chain": true,
+      "persona_file_write": "always",
+      "persona_prompt_read": "always",
+      "skip_persona_reply_in_dialogue": false,
+      "prompt_template": "legacy",
+      "json_format": "full",
+      "single_turn_contract": "terminal_only",
+      "terminal_delivery_default": "full",
+      "terminal_delivery_auto": false
+    },
+    "pipeline": {
+      "memory_search_enabled": true,
+      "dialogue_max_turns": 3,
+      "include_metadata_chain_non_terminal": true,
+      "include_metadata_chain_terminal": false,
+      "persona_file_write": "on_intent",
+      "persona_file_write_intents": ["persona_write"],
+      "persona_prompt_read": "on_intent",
+      "persona_prompt_read_intents": ["persona_write"],
+      "skip_persona_reply_in_dialogue": true,
+      "prompt_template": "priority_input",
+      "json_format": "full",
+      "single_turn_contract": "terminal_only",
+      "terminal_delivery_default": "full",
+      "terminal_delivery_auto": true
+    },
+    "dialogue": {
+      "memory_search_enabled": true,
+      "dialogue_max_turns": 4,
+      "include_metadata_chain": false,
+      "persona_file_write": "on_intent",
+      "persona_file_write_intents": ["persona_write"],
+      "persona_prompt_read": "on_intent",
+      "persona_prompt_read_intents": ["persona_write"],
+      "skip_persona_reply_in_dialogue": true,
+      "prompt_template": "priority_input",
+      "json_format": "full",
+      "single_turn_contract": "terminal_only",
+      "terminal_delivery_default": "full",
+      "terminal_delivery_auto": true
+    },
+    "auto_single": {
+      "memory_search_enabled": false,
+      "dialogue_max_turns": 3,
+      "include_metadata_chain": false,
+      "persona_file_write": "on_intent",
+      "persona_file_write_intents": ["persona_write", "persona_intro_merge", "assistant_nickname"],
+      "persona_prompt_read": "on_intent",
+      "persona_prompt_read_intents": ["persona_write", "persona_read", "user_identity", "persona_intro_merge"],
+      "skip_persona_reply_in_dialogue": true,
+      "prompt_template": "chat_compact",
+      "json_format": "compact",
+      "single_turn_contract": "never",
+      "terminal_delivery_default": "brief",
+      "terminal_delivery_auto": false,
+      "node_defaults": {
+        "history_mode": "minimal",
+        "mem_limit": 0,
+        "conv_limit": 6,
+        "terminal_delivery_style": "brief",
+        "persona_read_in_prompt": null
+      },
+      "agent": {
+        "node_id": "auto_response",
+        "agent_name": "SimpleAgent",
+        "system_prompt": "你是本系统的 Auto 对话助手。只回答用户本轮消息；不要输出与本轮无关的长篇画像说明。用户要求原样输出时，result 仅含用户原文。",
+        "subtask": "直接回应用户本轮消息。"
+      }
+    }
+  }
+}

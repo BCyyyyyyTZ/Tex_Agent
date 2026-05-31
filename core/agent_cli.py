@@ -2,7 +2,6 @@
 """
 TeX Agent CLI 核心类
 """
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -94,7 +93,7 @@ class TeXAgentCLI:
                 "design": MemoryFactory.create_memory("private", "design"),
                 "think": MemoryFactory.create_memory("private", "think"),
                 "execute": MemoryFactory.create_memory("private", "execute"),
-                # 会话落盘仍走 shared.jsonl；与 use_branch=True 时一致使用 BranchMemory
+                # shared：分支元数据（启用 use_branch 时）；不再落盘整段节点 prompt
                 "shared": MemoryFactory.create_shared_memory(branch_enabled=False),
             }
     
@@ -133,6 +132,7 @@ class TeXAgentCLI:
             persona_memory=self.persona_memory,
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
+            execution_mode="task",
         )
 
     def _human_input_provider(self, prompt: str, schema: Dict[str, Any], rules: Dict[str, Any]) -> Any:
@@ -145,45 +145,6 @@ class TeXAgentCLI:
         if isinstance(options, list) and options:
             print(f"   可选项: {options}")
         return input("   请输入反馈: ")
-
-    def _persist_new_messages_to_shared_memory_store(
-        self, new_messages_raw: List[Any], workflow_label: str
-    ) -> None:
-        """
-        将本轮追加到会话的消息同步写入 shared BranchMemory（memory_store/*.jsonl）。
-
-        说明：ctx.build 的检索仍走 ContextManager + state.messages（会话级）；
-        此处仅做与对话同语义的持久化，便于跨重启检索与 show_status 统计。
-        """
-        shared = self.memory_system.get("shared")
-        if shared is None or not hasattr(shared, "save"):
-            return
-        for raw in new_messages_raw:
-            msg = ensure_message(
-                raw,
-                default_role="assistant",
-                default_source_type="system",
-                default_source_id="workflow",
-            )
-            body = str(msg.content or "").strip()
-            if not body:
-                continue
-            key = f"session:{self.current_branch}:{uuid.uuid4().hex}"
-            meta: Dict[str, Any] = {
-                "role": msg.role,
-                "source_type": msg.source_type,
-                "source_id": msg.source_id,
-                "workflow": workflow_label,
-                "branch": self.current_branch,
-            }
-            if isinstance(msg.metadata, dict):
-                for k in ("node_id", "node_type"):
-                    if k in msg.metadata:
-                        meta[k] = msg.metadata[k]
-            try:
-                shared.save(key, body, metadata=meta)
-            except Exception as e:
-                logger.warning("会话记忆落盘失败: %s", e)
 
     def _execute_with_app(
         self,
@@ -306,7 +267,6 @@ class TeXAgentCLI:
                     default_source_id="workflow",
                 )
                 self.context.save(msg)
-            self._persist_new_messages_to_shared_memory_store(new_messages, workflow_label)
 
         return result
     
@@ -387,8 +347,82 @@ class TeXAgentCLI:
             persona_memory=self.persona_memory,
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
+            default_context_profile="dialogue",
+            default_workflow_name="plan_dynamic",
         )
         return nodes, edges, app
+
+    def build_auto_graph_and_app(
+        self, user_input: str, branch: Optional[str] = None
+    ) -> Tuple[List[Any], List[Any], Any]:
+        """
+        Auto 模式：当前默认单节点直连（后续可路由到 plan/task）。
+        """
+        from config.auto_config import AUTO_NODE_ID, AUTO_WORKFLOW_LABEL
+        from config.context_settings import (
+            PROFILE_AUTO_SINGLE,
+            get_profile_agent_spec,
+            get_profile_node_defaults,
+        )
+        from workflow.workflow_parser import NodeConfig
+        from workflow.graph_builder import build_dynamic_graph
+
+        target_branch = branch or self.current_branch
+        if target_branch != self.current_branch:
+            self.switch_branch(target_branch)
+
+        agent_spec = get_profile_agent_spec(PROFILE_AUTO_SINGLE)
+        node_cfg = dict(get_profile_node_defaults(PROFILE_AUTO_SINGLE))
+        node_cfg.setdefault("context_profile", PROFILE_AUTO_SINGLE)
+        node_cfg.setdefault("system_prompt", agent_spec.get("system_prompt", ""))
+        node_cfg.setdefault("subtask", agent_spec.get("subtask", ""))
+        node_cfg.setdefault("depends_on", [])
+
+        nodes = [
+            NodeConfig(
+                node_id=str(agent_spec.get("node_id") or AUTO_NODE_ID),
+                node_type="agent",
+                agent_name=str(agent_spec.get("agent_name") or "SimpleAgent"),
+                config=node_cfg,
+            )
+        ]
+        edges = []
+        app = build_dynamic_graph(
+            nodes=nodes,
+            edges=edges,
+            context_manager=self.context,
+            persona_memory=self.persona_memory,
+            runtime_memory=self.context,
+            default_workflow_name=AUTO_WORKFLOW_LABEL,
+            default_context_profile="auto_single",
+            human_input_provider=self._human_input_provider,
+        )
+        return nodes, edges, app
+
+    def run_auto_task(
+        self,
+        user_input: str,
+        branch: str = None,
+        *,
+        use_loading: bool = True,
+    ) -> dict:
+        """Auto 模式执行（当前为单节点）。"""
+        from config.auto_config import AUTO_WORKFLOW_LABEL
+
+        nodes, edges, app = self.build_auto_graph_and_app(user_input, branch)
+        result = self._execute_with_app(
+            user_input,
+            app,
+            workflow_label=AUTO_WORKFLOW_LABEL,
+            use_loading=use_loading,
+        )
+        try:
+            result.setdefault("metadata", {})["__auto_graph__"] = (
+                _serialize_plan_graph_for_ui(nodes, edges)
+            )
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("[run_auto_task] 无法序列化 auto 图供 UI：%s", ex)
+        return result
 
     def run_plan_task(
         self, user_input: str, branch: str = None, *, use_loading: bool = True

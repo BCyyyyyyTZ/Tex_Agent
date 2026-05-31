@@ -97,6 +97,22 @@ PERSONA_ENTRY_NODE_FORMAT_ADDON: str = """
 ---
 """
 
+FINAL_DELIVERY_BRIEF_ADDON: str = """
+---
+[终节点交付判据 · 简答模式]
+你是最终交付节点，必须直接回答【本轮用户输入】。
+
+【要求】
+1) result 先给直接答案，简洁清晰，通常 30~400 字（中文）即可；
+2) 充分利用上游要点，但禁止写成长篇报告或用户画像说明书；
+3) 用户若要求原样复述，result 仅含用户原文。
+
+【禁止】
+- 无关的用户画像罗列（除非用户本轮明确要求）
+- 以「已记录」「档案」代替实质回答
+---
+"""
+
 FINAL_DELIVERY_SYSTEM_ADDON: str = """
 ---
 [终节点交付判据 - 必须严格遵守]
@@ -133,6 +149,18 @@ FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS: List[str] = [
 FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS: List[str] = [
     "上游", "节点", "阶段", "摘要", "总结", "复述",
 ]
+
+
+def resolve_final_delivery_addon(
+    delivery_style: str,
+) -> str:
+    """delivery_style: none | brief | full"""
+    s = str(delivery_style or "full").strip().lower()
+    if s == "none":
+        return ""
+    if s == "brief":
+        return FINAL_DELIVERY_BRIEF_ADDON
+    return FINAL_DELIVERY_SYSTEM_ADDON
 
 
 # ------------------------------------------------------------------

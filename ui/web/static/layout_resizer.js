@@ -74,7 +74,7 @@
   }
 
   function bindGutter(gutter, which) {
-    if (!gutter) return;
+    if (!gutter || gutter.classList.contains("is-collapsed")) return;
     gutter.addEventListener("mousedown", function (downEv) {
       downEv.preventDefault();
       var w = load();
@@ -112,13 +112,20 @@
     });
   }
 
-  function init() {
-    var w = load();
-    applyWidths(w);
+  function bindAllGutters() {
     bindGutter(document.getElementById("gutter-right-rag"), 0);
     bindGutter(document.getElementById("gutter-wf-branch"), 1);
     bindGutter(document.getElementById("gutter-branch-main"), 2);
     bindGutter(document.getElementById("gutter-main-right"), 3);
+  }
+
+  function init() {
+    var w = load();
+    applyWidths(w);
+    bindAllGutters();
+    window.addEventListener("texagent:panels-changed", function () {
+      applyWidths(load());
+    });
   }
 
   if (document.readyState === "loading") {

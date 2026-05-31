@@ -28,6 +28,39 @@ PERSONA_MAINTENANCE_TOOL_NAMES: FrozenSet[str] = frozenset(
 )
 
 
+def _coerce_persona_payload(
+    input: str = "",
+    payload: Any = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """兼容 tool.run(str) / tool.run(**dict) / tool.run(input=..., **kwargs)。"""
+    out: Dict[str, Any] = {}
+    if isinstance(input, dict):
+        out.update(input)
+    if isinstance(payload, dict):
+        out.update(payload)
+    elif isinstance(payload, str) and payload.strip().startswith("{"):
+        try:
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
+                out.update(parsed)
+        except json.JSONDecodeError:
+            pass
+    text = ""
+    if not isinstance(input, dict):
+        text = str(input or "").strip()
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                out.update(parsed)
+        except json.JSONDecodeError:
+            pass
+    if kwargs:
+        out.update(kwargs)
+    return out
+
+
 def entry_node_persona_system_addon() -> str:
     """供入口节点追加到 system 的短契约（具体 action 语义见各工具描述）。"""
     names = "、".join(sorted(PERSONA_MAINTENANCE_TOOL_NAMES))
@@ -77,7 +110,13 @@ class UserPersonaGetTool(BaseTool):
         )
         self._pm = persona_memory
 
-    def run(self, **_kwargs: Any) -> ToolResult:
+    def run(
+        self,
+        input: str = "",
+        payload: Any = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        _coerce_persona_payload(input, payload, **kwargs)
         blob = self._pm.get_profile()
         return ToolResult(
             success=True,
@@ -98,7 +137,13 @@ class UserPersonaNoneTool(BaseTool):
         )
         self._pm = persona_memory
 
-    def run(self, **_kwargs: Any) -> ToolResult:
+    def run(
+        self,
+        input: str = "",
+        payload: Any = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        _coerce_persona_payload(input, payload, **kwargs)
         self._pm.apply_persona_memory_update({"action": "none"})
         return ToolResult(
             success=True,
@@ -125,7 +170,19 @@ class UserPersonaMergeTool(BaseTool):
         )
         self._pm = persona_memory
 
-    def run(self, delta: Optional[Dict[str, Any]] = None, remove: Optional[Dict[str, Any]] = None, **_kwargs: Any) -> ToolResult:
+    def run(
+        self,
+        input: str = "",
+        payload: Any = None,
+        delta: Optional[Dict[str, Any]] = None,
+        remove: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        data = _coerce_persona_payload(input, payload, **kwargs)
+        if delta is None and isinstance(data.get("delta"), dict):
+            delta = data["delta"]
+        if remove is None and isinstance(data.get("remove"), dict):
+            remove = data["remove"]
         upd: Dict[str, Any] = {"action": "merge", "delta": delta if isinstance(delta, dict) else {}}
         if isinstance(remove, dict) and remove:
             upd["remove"] = remove
@@ -153,7 +210,16 @@ class UserPersonaSetTool(BaseTool):
         )
         self._pm = persona_memory
 
-    def run(self, fields: Optional[Dict[str, Any]] = None, **_kwargs: Any) -> ToolResult:
+    def run(
+        self,
+        input: str = "",
+        payload: Any = None,
+        fields: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        data = _coerce_persona_payload(input, payload, **kwargs)
+        if fields is None and isinstance(data.get("fields"), dict):
+            fields = data["fields"]
         if not isinstance(fields, dict):
             return ToolResult(
                 success=False,
@@ -183,7 +249,16 @@ class UserPersonaClearTool(BaseTool):
         )
         self._pm = persona_memory
 
-    def run(self, clear_keys: Optional[List[Any]] = None, **_kwargs: Any) -> ToolResult:
+    def run(
+        self,
+        input: str = "",
+        payload: Any = None,
+        clear_keys: Optional[List[Any]] = None,
+        **kwargs: Any,
+    ) -> ToolResult:
+        data = _coerce_persona_payload(input, payload, **kwargs)
+        if clear_keys is None and isinstance(data.get("clear_keys"), list):
+            clear_keys = data["clear_keys"]
         if not isinstance(clear_keys, list):
             return ToolResult(
                 success=False,

@@ -1,0 +1,28 @@
+﻿Fixture: E:\agent_ai\main_work_version2\Tex_Agent-main\tests\fixtures\latex\diagnose_demo
+TeX tools: chktex=False latexmk=False pdflatex=False
+
+内置语法检查 (ground truth): 3 条
+  - [error] main.tex:32 未闭合的左花括号 '{'
+E:\myconda\open-webui\python.exe : Traceback (most recent call last):
+所在位置 C:\Users\lenovo\AppData\Local\Temp\ps-script-66d8ff9a-e4bc-48fd-a54d-c02ce29e920c.ps1:97 字符: 53
++ ... gent-main"; E:\myconda\open-webui\python.exe tests\run_latex_diagnose ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  - [error] main.tex:34 环境不匹配：\end{document} 与 \begin{equation}（约 19:1）不对应
+  - [error] main.tex:7 未闭合的环境 \begin{document}
+2026-05-31 16:01:46,968 | INFO     | core.agent_cli | 为分支 'main' 创建新上下文
+  File "E:\agent_ai\main_work_version2\Tex_Agent-main\tests\run_latex_diagnose_demo.py", line 147, in <module>
+2026-05-31 16:01:46,968 | INFO     | core.agent_cli | 已为分支 'main' 重建工作流
+    raise SystemExit(main())
+                     ^^^^^^
+  File "E:\agent_ai\main_work_version2\Tex_Agent-main\tests\run_latex_diagnose_demo.py", line 130, in main
+    r0 = _run_workflow("latex_diagnose_v0")
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\agent_ai\main_work_version2\Tex_Agent-main\tests\run_latex_diagnose_demo.py", line 49, in _run_workflow
+    return cli.run_task(payload, workflow_name=name, use_loading=False)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\agent_ai\main_work_version2\Tex_Agent-main\core\agent_cli.py", line 331, in run_task
+    print(f"\n\U0001f504 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
+UnicodeEncodeError: 'gbk' codec can't encode character '\U0001f504' in position 2: illegal multibyte sequence

@@ -17,6 +17,10 @@ from langgraph.graph import StateGraph, START, END
 from core.state import WorkflowState
 from context.context_manager import ContextManager
 from config.planner_config import DEFAULT_HISTORY_MODE
+from config.context_settings import (
+    resolve_graph_context_profile,
+    resolve_node_context_profile,
+)
 from utils.logger import get_logger
 from workflow.condition_evaluator import route_by_conditions
 from workflow.workflow_parser import EdgeConfig, NodeConfig
@@ -33,6 +37,29 @@ def _resolve_entry_node(node_ids: list, edges: list) -> str:
     target_nodes = {e.to_node for e in edges}
     entry_candidates = [nid for nid in node_ids if nid not in target_nodes]
     return entry_candidates[0] if entry_candidates else node_ids[0]
+
+
+def _effective_agent_node_config(
+    raw_config: Dict[str, Any],
+    *,
+    graph_profile: str,
+    is_terminal: bool,
+) -> Dict[str, Any]:
+    """合并图级 context_profile，并为非 legacy 填充安全默认值（可被 JSON 显式覆盖）。"""
+    cfg = dict(raw_config or {})
+    profile = resolve_node_context_profile(cfg, graph_profile=graph_profile)
+    cfg["context_profile"] = profile
+    from config.context_settings import PROFILE_LEGACY
+
+    if profile != PROFILE_LEGACY:
+        cfg.setdefault("is_terminal", is_terminal)
+        if "include_metadata_chain" not in cfg:
+            from config.context_settings import default_include_metadata_chain
+
+            cfg["include_metadata_chain"] = default_include_metadata_chain(
+                profile, is_terminal=is_terminal, node_config=cfg
+            )
+    return cfg
 
 
 def _resolve_terminal_nodes(node_ids: list, edges: list) -> set:
@@ -163,6 +190,7 @@ def build_dynamic_graph(
     runtime_memory: Optional[Any] = None,
     default_workflow_name: str = "default",
     default_history_mode: Optional[str] = None,
+    default_context_profile: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
 ) -> Any:
     """
@@ -194,6 +222,10 @@ def build_dynamic_graph(
 
     eff_history_mode = (
         default_history_mode if default_history_mode is not None else DEFAULT_HISTORY_MODE
+    )
+    graph_profile = resolve_graph_context_profile(
+        default_workflow_name,
+        explicit=default_context_profile,
     )
 
     # 兜底：nodes 为空时退回 default workflow 配置图
@@ -303,12 +335,17 @@ def build_dynamic_graph(
             logger.warning(
                 f"[DynamicGraph] 节点 '{nid}' 的 node_type='{node_type}' 不受支持，降级为 agent"
             )
-        agent = _build_agent_instance(node_cfg.agent_name, nid, node_cfg.config)
+        eff_cfg = _effective_agent_node_config(
+            node_cfg.config,
+            graph_profile=graph_profile,
+            is_terminal=nid in terminal_nodes,
+        )
+        agent = _build_agent_instance(node_cfg.agent_name, nid, eff_cfg)
         node_fn = make_agent_node(
             agent=agent,
             ctx=ctx,
             node_id=nid,
-            node_config=node_cfg.config,
+            node_config=eff_cfg,
             persona_memory=persona_memory,
             runtime_memory=runtime_memory,
             default_history_mode=eff_history_mode,
@@ -380,8 +417,10 @@ def build_app_from_workflow(
     persona_memory: Optional[Any] = None,
     runtime_memory: Optional[Any] = None,
     default_history_mode: Optional[str] = None,
+    default_context_profile: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
     config_dict: Optional[Dict[str, Any]] = None,
+    execution_mode: Optional[str] = None,
 ) -> Any:
     """
     统一的工作流构建入口。
@@ -408,6 +447,10 @@ def build_app_from_workflow(
         eff_persona = None
         eff_runtime = None
 
+    eff_profile = default_context_profile
+    if eff_profile is None:
+        eff_profile = resolve_graph_context_profile(_wl, mode=execution_mode)
+
     return build_dynamic_graph(
         nodes=nodes,
         edges=edges,
@@ -416,5 +459,6 @@ def build_app_from_workflow(
         runtime_memory=eff_runtime,
         default_workflow_name=wf_label,
         default_history_mode=default_history_mode,
+        default_context_profile=eff_profile,
         human_input_provider=human_input_provider,
     )

@@ -18,6 +18,9 @@
   }
 
   var submitLock = false;
+  var thinkingTimerId = null;
+  var thinkingStartMs = 0;
+  var thinkingContentEl = null;
 
   /** 侧栏 iframe / 若干嵌入场景下须用绝对地址，避免相对 /api 解析到错误源 */
   function apiChatUrl() {
@@ -147,6 +150,64 @@
     if (input) input.readOnly = b;
   }
 
+  function formatThinkingElapsed(ms) {
+    var sec = Math.max(0, Math.floor(ms / 1000));
+    if (sec < 60) return sec + " 秒";
+    var min = Math.floor(sec / 60);
+    sec = sec % 60;
+    if (min < 60) return min + " 分 " + sec + " 秒";
+    var hr = Math.floor(min / 60);
+    min = min % 60;
+    return hr + " 小时 " + min + " 分 " + sec + " 秒";
+  }
+
+  function thinkingPlaceholderHtml(modeVal) {
+    if (modeVal === "plan") {
+      return (
+        '<p class="thinking-line">' +
+        '<span class="thinking-status-text" data-status="思考中">思考中</span>' +
+        '<span class="thinking-time" aria-live="polite"> · 0 秒</span>' +
+        "</p>"
+      );
+    }
+    return "<p>思考中…</p>";
+  }
+
+  function stopThinkingTimer() {
+    if (thinkingTimerId != null) {
+      window.clearInterval(thinkingTimerId);
+      thinkingTimerId = null;
+    }
+    thinkingContentEl = null;
+    thinkingStartMs = 0;
+  }
+
+  function updateThinkingTimeDisplay() {
+    if (!thinkingContentEl || !thinkingStartMs) return;
+    var timeEl = thinkingContentEl.querySelector(".thinking-time");
+    if (!timeEl) return;
+    timeEl.textContent = " · " + formatThinkingElapsed(Date.now() - thinkingStartMs);
+  }
+
+  function setThinkingStatus(contentEl, statusText) {
+    if (!contentEl) return;
+    var statusEl = contentEl.querySelector(".thinking-status-text");
+    if (statusEl) {
+      statusEl.setAttribute("data-status", statusText);
+      statusEl.textContent = statusText;
+    }
+    updateThinkingTimeDisplay();
+  }
+
+  function startThinkingTimer(contentEl, modeVal) {
+    stopThinkingTimer();
+    if (modeVal !== "plan" || !contentEl) return;
+    thinkingContentEl = contentEl;
+    thinkingStartMs = Date.now();
+    updateThinkingTimeDisplay();
+    thinkingTimerId = window.setInterval(updateThinkingTimeDisplay, 1000);
+  }
+
   function onSubmitForm(e) {
     if (e) e.preventDefault();
     if (submitLock) return;
@@ -166,9 +227,10 @@
       appendMessage("user", renderMd(text));
       input.value = "";
       setBusy(true);
-      wrap = appendMessage("assistant", "<p>思考中…</p>");
+      wrap = appendMessage("assistant", thinkingPlaceholderHtml(modeVal));
       wrap.classList.add("loading");
       contentEl = wrap.querySelector(".md");
+      startThinkingTimer(contentEl, modeVal);
     } catch (err) {
       console.error(err);
       appendMessage("assistant", "<p class='error-banner'>页面渲染错误: " + String(err.message || err) + "</p>");
@@ -214,7 +276,7 @@
             payload.active_checklists = sel.active_checklists;
           }
         }
-        if (modeVal === "plan" || modeVal === "task") {
+        if (modeVal === "plan" || modeVal === "task" || modeVal === "auto") {
           payload.stream = true;
         }
         const res = await fetch(CHAT_URL, {
@@ -230,7 +292,7 @@
           /* empty */
         }
         var useNdjson =
-          (modeVal === "plan" || modeVal === "task") &&
+          (modeVal === "plan" || modeVal === "task" || modeVal === "auto") &&
           res.ok &&
           (ct.indexOf("ndjson") >= 0 || ct.indexOf("x-ndjson") >= 0);
 
@@ -263,14 +325,15 @@
                   window.applyTexAgentPlanGraph(obj.plan_graph);
                 }
                 if (contentEl) {
-                  contentEl.innerHTML =
-                    "<p>规划已完成，正在执行工作流…</p>";
+                  setThinkingStatus(contentEl, "规划已完成，正在执行");
                 }
               } else if (obj.type === "workflow_graph" && obj.workflow_graph) {
                 if (typeof window.applyTexAgentPlanGraph === "function") {
                   window.applyTexAgentPlanGraph(obj.workflow_graph);
                 }
-                if (contentEl) {
+                if (modeVal === "plan" && contentEl) {
+                  setThinkingStatus(contentEl, "正在执行任务");
+                } else if (contentEl) {
                   contentEl.innerHTML = "<p>正在执行任务…</p>";
                 }
               } else if (obj.type === "error" && obj.detail != null) {
@@ -294,6 +357,11 @@
             }
             if (streamFail) break;
           }
+          var planElapsedMs =
+            modeVal === "plan" && thinkingStartMs
+              ? Date.now() - thinkingStartMs
+              : 0;
+          stopThinkingTimer();
           if (wrap) wrap.classList.remove("loading");
           if (streamFail) {
             throw streamFail;
@@ -304,6 +372,12 @@
               '<div class="error-banner">' +
               (typeof finalErr === "string" ? finalErr : JSON.stringify(finalErr)) +
               "</div>";
+          }
+          if (modeVal === "plan" && planElapsedMs > 0) {
+            html +=
+              '<p class="thinking-done-meta">总耗时 ' +
+              formatThinkingElapsed(planElapsedMs) +
+              "</p>";
           }
           html += renderMd(finalReply);
           if (contentEl) contentEl.innerHTML = html;
@@ -318,6 +392,11 @@
           }
           const reply = data.reply != null ? String(data.reply) : "";
           const err = data.error;
+          var planElapsedMs2 =
+            modeVal === "plan" && thinkingStartMs
+              ? Date.now() - thinkingStartMs
+              : 0;
+          stopThinkingTimer();
           if (wrap) wrap.classList.remove("loading");
           let html = "";
           if (err) {
@@ -325,6 +404,12 @@
               '<div class="error-banner">' +
               (typeof err === "string" ? err : JSON.stringify(err)) +
               "</div>";
+          }
+          if (modeVal === "plan" && planElapsedMs2 > 0) {
+            html +=
+              '<p class="thinking-done-meta">总耗时 ' +
+              formatThinkingElapsed(planElapsedMs2) +
+              "</p>";
           }
           /* 接口已只返回单段终局文本，这里直接当 Markdown 渲染 */
           html += renderMd(reply);
@@ -338,6 +423,7 @@
           }
         }
       } catch (err) {
+        stopThinkingTimer();
         if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
           window.setTexAgentWorkflowActiveNodes([]);
         }
@@ -355,6 +441,7 @@
           }
         }
       } finally {
+        stopThinkingTimer();
         done();
         setBusy(false);
         submitLock = false;
