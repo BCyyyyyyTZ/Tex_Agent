@@ -174,6 +174,7 @@ class TeXAgentWebUI(TeXAgentCLI):
                 persona_memory=self.persona_memory,
                 runtime_memory=self.context,
                 human_input_provider=self._human_input_provider,
+                execution_mode="task",
             )
         return super()._build_app_for_workflow(workflow_name)
 
@@ -320,7 +321,7 @@ def _validate_workflow_dict(d: Dict[str, Any]) -> None:
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户输入")
-    mode: Literal["task", "plan"] = "task"
+    mode: Literal["task", "plan", "auto"] = "auto"
     workflow: Optional[str] = Field(
         None,
         description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 名称；省略时服务端用 DEFAULT_WORKFLOW（通常为 default）",
@@ -342,7 +343,7 @@ class ChatRequest(BaseModel):
         default=False,
         description=(
             "为 true 时以 NDJSON 流式返回：plan 先发 plan_graph；"
-            "task 先发 workflow_graph；二者均推送 exec_nodes 与 result"
+            "task/auto 先发 workflow_graph；均推送 exec_nodes 与 result"
         ),
     )
     stream_plan: bool = Field(
@@ -1394,7 +1395,7 @@ def create_app() -> FastAPI:
                 media_type="application/x-ndjson",
             )
 
-        if body.mode == "task" and use_stream:
+        if body.mode in ("task", "auto") and use_stream:
 
             async def ndjson_task_stream() -> AsyncIterator[bytes]:
                 def _line(obj: Dict[str, Any]) -> bytes:
@@ -1402,31 +1403,35 @@ def create_app() -> FastAPI:
                         json.dumps(obj, ensure_ascii=False) + "\n"
                     ).encode("utf-8")
 
-                workflow_label = body.workflow or cli.DEFAULT_WORKFLOW
+                if body.mode == "auto":
+                    from config.auto_config import AUTO_WORKFLOW_LABEL
+
+                    workflow_label = AUTO_WORKFLOW_LABEL
+                else:
+                    workflow_label = body.workflow or cli.DEFAULT_WORKFLOW
 
                 try:
-                    graph_payload = _workflow_stream_graph_payload(
-                        cli, body.workflow
-                    )
+                    if body.mode == "auto":
+                        def _build_auto_bundle():
+                            n, e, a = cli.build_auto_graph_and_app(user_text)
+                            return n, e, a
+
+                        nodes, edges, app = await anyio.to_thread.run_sync(
+                            _build_auto_bundle
+                        )
+                        graph_payload = _serialize_plan_graph_for_ui(nodes, edges)
+                    else:
+                        graph_payload = _workflow_stream_graph_payload(
+                            cli, body.workflow
+                        )
+                        app = await anyio.to_thread.run_sync(
+                            lambda: cli._build_app_for_workflow(body.workflow)
+                        )
                 except ValueError as e:
                     yield _line({"type": "error", "detail": str(e)})
                     return
                 except Exception as e:  # noqa: BLE001
                     yield _line({"type": "error", "detail": str(e)})
-                    return
-
-                try:
-                    app = await anyio.to_thread.run_sync(
-                        lambda: cli._build_app_for_workflow(body.workflow)
-                    )
-                except Exception as e:  # noqa: BLE001
-                    yield _line(
-                        {
-                            "type": "result",
-                            "reply": "",
-                            "error": str(e),
-                        }
-                    )
                     return
 
                 yield _line(
@@ -1505,6 +1510,8 @@ def create_app() -> FastAPI:
         def run_sync() -> Dict[str, Any]:
             if body.mode == "plan":
                 return cli.run_plan_task(user_text, use_loading=False)
+            if body.mode == "auto":
+                return cli.run_auto_task(user_text, use_loading=False)
             return cli.run_task(
                 user_text,
                 workflow_name=body.workflow,
@@ -1523,6 +1530,8 @@ def create_app() -> FastAPI:
         plan_graph = None
         if body.mode == "plan":
             plan_graph = (result.get("metadata") or {}).get("__plan_graph__")
+        elif body.mode == "auto":
+            plan_graph = (result.get("metadata") or {}).get("__auto_graph__")
         return ChatResponse(
             reply=text,
             error=str(err) if err else None,

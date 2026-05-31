@@ -69,6 +69,7 @@ def print_help():
 ╠══════════════════════════════════════════════════════════════════
 ║  task <Prompt>          - 执行默认工作流任务
 ║  task --wf <name> <Prompt> - 执行指定工作流任务
+║  auto <Prompt>          - Auto 模式（当前默认单节点直连）
 ║  plan <Prompt>          - 执行动态规划任务
 ║  branch list            - 列出所有分支                                  
 ║  branch create <name>   - 创建新分支                               
@@ -181,6 +182,17 @@ def main():
                     cli.merge_branch(branch_name)
             
             # 动态规划命令（验证 AutoAgentsMASPlanner + build_dynamic_graph）
+            elif first_word in ['auto']:
+                task = ' '.join(parts[1:]) if len(parts) > 1 else ""
+                if not task:
+                    print("❌ 请提供任务描述")
+                    print("   示例: auto 你好")
+                else:
+                    print("\n" + display.separator())
+                    result = cli.run_auto_task(task)
+                    print(display.separator())
+                    display.print_result(result)
+
             elif first_word in ['plan', 'mas']:
                 task = ' '.join(parts[1:]) if len(parts) > 1 else ""
                 if not task:
@@ -214,10 +226,10 @@ def main():
                     print(display.separator())
                     display.print_result(result)
             
-            # 其他输入作为任务执行
+            # 其他输入默认 Auto 单节点（后续可路由 plan/task）
             else:
                 print("\n" + display.separator())
-                result = cli.run_task(original_input)
+                result = cli.run_auto_task(original_input)
                 print(display.separator())
                 display.print_result(result)
         

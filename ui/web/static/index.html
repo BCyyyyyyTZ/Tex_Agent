@@ -8,7 +8,7 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css?v=rag-delete-5" />
+    <link rel="stylesheet" href="styles.css?v=layout-panels-2" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
@@ -215,7 +215,7 @@
               <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
             </div>
           </div>
-          <div class="header-actions" role="toolbar" aria-label="工作流与模式">
+          <div class="header-actions" role="toolbar" aria-label="工作流与布局">
             <label class="select-wrap select-wrap--header">
               <span class="label">工作流</span>
               <select id="workflow-select" title="已注册或左侧自定义">
@@ -226,10 +226,54 @@
             <label class="select-wrap select-wrap--header">
               <span class="label">模式</span>
               <select id="mode" title="执行模式">
-                <option value="task" selected>task（工作流）</option>
+                <option value="auto" selected>auto（单节点直连，默认）</option>
+                <option value="task">task（注册表工作流）</option>
                 <option value="plan">plan（动态规划，较慢）</option>
               </select>
             </label>
+            <div
+              class="panel-toggles"
+              id="panel-toggles"
+              role="group"
+              aria-label="侧栏显示"
+            >
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="rag"
+                aria-pressed="true"
+                title="显示或隐藏 RAG 栏"
+              >
+                RAG
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="wf"
+                aria-pressed="true"
+                title="显示或隐藏工作流栏"
+              >
+                工作流
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="branch"
+                aria-pressed="true"
+                title="显示或隐藏分支栏"
+              >
+                分支
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="right"
+                aria-pressed="true"
+                title="显示或隐藏资料栏"
+              >
+                资料
+              </button>
+            </div>
           </div>
         </header>
 
@@ -278,7 +322,12 @@
               spellcheck="false"
             ></textarea>
             <div class="form-footer">
-              <span class="hint">点「发送」最稳；Enter 发送。PDF 与 其它常用文档 使用上方选择并上传。默认使用左侧自定义工作流，修改后请先「保存到服务器」。竖条可拖曳调节各列宽。</span>
+              <ul class="composer-hints" aria-label="操作提示">
+                <li><kbd>Enter</kbd> 发送，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</li>
+                <li>PDF / 文档：在上方选择文件并上传；右侧资料可勾选后附带路径</li>
+                <li>工作流：顶栏选择；改左侧编排后请点击「保存到服务器」</li>
+                <li>顶栏可显隐侧栏；拖动列间竖线调节宽度</li>
+              </ul>
               <button type="submit" id="send" class="btn-primary">发送</button>
             </div>
           </form>
@@ -377,6 +426,7 @@
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
+    <script src="panel_toggles.js"></script>
     <script src="layout_resizer.js"></script>
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>

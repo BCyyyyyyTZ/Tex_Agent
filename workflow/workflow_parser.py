@@ -219,6 +219,7 @@ def _translate_plan_to_graph_config(
                     "depends_on": spec.get("depends_on", []),
                     "temperature": NODE_DEFAULT_TEMPERATURE,
                     "history_mode": spec.get("history_mode", "minimal"),
+                    "context_profile": spec.get("context_profile", "dialogue"),
                 },
             )
         nodes.append(node)
@@ -490,9 +491,11 @@ class YAMLWorkflowParser(WorkflowParser):
         edges: List[EdgeConfig],
         context_manager: Optional[Any] = None,
         default_history_mode: Optional[str] = None,
+        default_context_profile: Optional[str] = None,
         persona_memory: Optional[Any] = None,
         runtime_memory: Optional[Any] = None,
         human_input_provider: Optional[Any] = None,
+        default_workflow_name: str = "plan_dynamic",
     ) -> Any:
         """调用 build_dynamic_graph() 编译 LangGraph 图。"""
         from workflow.graph_builder import build_dynamic_graph
@@ -501,9 +504,11 @@ class YAMLWorkflowParser(WorkflowParser):
             edges=edges,
             context_manager=context_manager,
             default_history_mode=default_history_mode,
+            default_context_profile=default_context_profile or "dialogue",
             persona_memory=persona_memory,
             runtime_memory=runtime_memory,
             human_input_provider=human_input_provider,
+            default_workflow_name=default_workflow_name,
         )
 
     def from_task_plan(

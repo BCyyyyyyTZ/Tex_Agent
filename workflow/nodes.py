@@ -24,11 +24,17 @@ from config.planner_config import (
     DEFAULT_SINGLE_TURN_CONTRACT_MODE,
     NODE_OUTPUT_FORMAT_INSTRUCTION,
     SINGLE_TURN_NODE_CONTRACT,
-    FINAL_DELIVERY_SYSTEM_ADDON,
     UPSTREAM_RESULT_MAX_CHARS,
     FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS,
     FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS,
     parse_llm_json,
+    resolve_final_delivery_addon,
+)
+from config.context_settings import (
+    resolve_node_context_behavior,
+    build_agent_prompt,
+    make_dialogue_save_messages,
+    should_save_assistant_to_dialogue_context,
 )
 from tools.user_persona_tools import (
     entry_node_persona_simple_agent_addon,
@@ -534,49 +540,73 @@ def make_agent_node(
             f"(history_mode={mode_norm}, terminal={is_terminal}, entry={is_entry_node})"
         )
         meta = state.get("metadata", {}) or {}
+        user_input = str(state.get("input", "") or "")
+        graph_profile = str(node_config.get("context_profile") or "pipeline")
+        behavior = resolve_node_context_behavior(
+            node_config,
+            graph_profile=graph_profile,
+            user_input=user_input,
+            is_terminal=is_terminal,
+        )
+        profile = behavior.profile
 
-        persona_head = persona_memory.format_for_prompt() if persona_memory else ""
-        if is_entry_node:
+        persona_head = ""
+        if persona_memory and behavior.persona_prompt_read:
+            persona_head = persona_memory.format_for_prompt()
+
+        entry_addon = ""
+        if is_entry_node and behavior.persona_file_write:
             if isinstance(agent, SimpleAgent_new):
                 entry_addon = entry_node_persona_system_addon()
             else:
                 entry_addon = entry_node_persona_simple_agent_addon()
-        else:
-            entry_addon = ""
-        terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
 
-        # system_prompt 已由 _build_agent_instance 注入 SYSTEM 角色，此处不再重复，
-        # 避免在 USER 侧出现两份相同角色描述占用 token 并干扰格式指令。
+        contract_mode_eff = behavior.single_turn_contract
+        if contract_mode_eff == "always":
+            enable_contracts = True
+        elif contract_mode_eff == "never":
+            enable_contracts = False
+        else:
+            enable_contracts = enable_single_turn_contract
+
+        terminal_addon = (
+            resolve_final_delivery_addon(behavior.terminal_delivery_style)
+            if is_terminal
+            else ""
+        )
+
         inline_contracts = (
             persona_head
-            + (SINGLE_TURN_NODE_CONTRACT if enable_single_turn_contract else "")
+            + (SINGLE_TURN_NODE_CONTRACT if enable_contracts else "")
             + terminal_addon
-            + NODE_OUTPUT_FORMAT_INSTRUCTION
+            + behavior.json_format_instruction
             + entry_addon
         )
         built_context = ctx.build(
             state,
             memory=runtime_memory,
             config={
-                "conv_limit": int(node_config.get("conv_limit", 12)),
-                "mem_limit": int(node_config.get("mem_limit", 5)),
+                "conv_limit": behavior.conv_limit,
+                "mem_limit": behavior.mem_limit,
                 "max_tokens": int(node_config.get("max_tokens", 8000)),
                 "format": node_config.get("format", "plain"),
                 "history_mode": mode_norm,
-                "include_metadata_chain": bool(node_config.get("include_metadata_chain", True)),
+                "context_profile": profile,
+                "is_terminal": is_terminal,
+                "include_metadata_chain": behavior.include_metadata_chain,
             },
         )
         urc = node_config.get("upstream_result_max_chars")
         upstream_max = int(urc) if urc is not None else None
         upstream_ctx = _upstream_blocks(meta, depends_on, max_result_chars=upstream_max)
 
-        # 提示词顺序：任务 → 上游结果（最相关） → 原始背景 → 历史 → 格式约束（放最后方便 LLM 直接按格式生成）
-        prompt = (
-            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}\n\n"
-            f"[上游节点输出]\n{upstream_ctx}\n\n"
-            f"[原始任务背景]\n{state.get('input', '')}\n\n"
-            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
-            f"{inline_contracts}\n\n"
+        prompt = build_agent_prompt(
+            user_input=user_input,
+            subtask=subtask if subtask else user_input,
+            upstream_ctx=upstream_ctx,
+            built_context=built_context if built_context else "（无历史上下文）",
+            inline_contracts=inline_contracts,
+            behavior=behavior,
         )
 
         user_msg = WorkflowMessage(
@@ -635,8 +665,6 @@ def make_agent_node(
 
         if mode_norm == "full":
             ctx.save(resp)
-        elif mode_norm == "minimal" and is_terminal:
-            ctx.save(resp)
 
         fb = {
             "result": resp.content,
@@ -650,11 +678,28 @@ def make_agent_node(
         structured_payload = dict(structured_raw)
         pm_update = structured_payload.pop("persona_memory_update", None)
         structured = normalize_node_output(structured_payload)
-        if persona_memory:
-            if is_entry_node:
-                persona_memory.apply_persona_memory_update(pm_update)
-            elif pm_update is not None:
-                logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
+        if persona_memory and is_entry_node and behavior.persona_file_write:
+            persona_memory.apply_persona_memory_update(pm_update)
+        elif pm_update is not None and is_entry_node:
+            logger.debug(f"[{node_id}] 忽略 persona_memory_update（本轮未触发画像写回）")
+        elif pm_update is not None:
+            logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
+
+        if mode_norm == "minimal" and is_terminal:
+            if profile == "legacy":
+                ctx.save(resp)
+            else:
+                res_txt = str(structured.get("result", "") or resp.content or "").strip()
+                u_msg, a_msg = make_dialogue_save_messages(user_input, res_txt)
+                ctx.save(u_msg)
+                if should_save_assistant_to_dialogue_context(res_txt, behavior):
+                    ctx.save(a_msg)
+        elif mode_norm == "full" and profile != "legacy" and is_terminal:
+            res_txt = str(structured.get("result", "") or resp.content or "").strip()
+            u_msg, a_msg = make_dialogue_save_messages(user_input, res_txt)
+            ctx.save(u_msg)
+            if should_save_assistant_to_dialogue_context(res_txt, behavior):
+                ctx.save(a_msg)
 
         if is_terminal:
             delivery_risks = _detect_terminal_delivery_risks(structured.get("result", ""))
