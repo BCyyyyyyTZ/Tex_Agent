@@ -8,6 +8,7 @@ TeX Agent Web UI：FastAPI 服务 + 静态页面（Cursor 风格聊天 + Markdow
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
@@ -27,6 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core.agent_cli import TeXAgentCLI, _serialize_plan_graph_for_ui
+from utils.run_cancel import clear_run_cancel, install_sigint_handler, is_run_cancelled
 from ui.web import file_storage
 from latex.watch_service import WatchService
 from latex.watch_events import WatchSnapshot
@@ -65,6 +67,12 @@ DEFAULT_WEB_WORKFLOW: Dict[str, Any] = {
 }
 
 
+def _sanitize_reply_text(text: str) -> str:
+    from utils.reply_format import format_reply_for_ui
+
+    return format_reply_for_ui(text)
+
+
 def _format_reply_from_result(result: Dict[str, Any]) -> str:
     """
     从工作流 state 中只取「最后一处节点产物」的文本，原样给前端做 Markdown 渲染。
@@ -83,7 +91,7 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
 
     out = str(result.get("output") or "").strip()
     if out:
-        return _append_artifact_download_links_to_reply(out, meta)
+        return _append_artifact_download_links_to_reply(_sanitize_reply_text(out), meta)
 
     order = meta.get("__execution_order__")
     if isinstance(order, list) and order:
@@ -93,7 +101,7 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             if isinstance(node_data, dict):
                 r = str(node_data.get("result") or "").strip()
                 if r:
-                    return _append_artifact_download_links_to_reply(r, meta)
+                    return _append_artifact_download_links_to_reply(_sanitize_reply_text(r), meta)
 
     messages: List[Any] = result.get("messages") or []
     for m in reversed(messages):
@@ -103,7 +111,7 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             continue
         content = str(m.get("content") or "").strip()
         if content:
-            return _append_artifact_download_links_to_reply(content, meta)
+            return _append_artifact_download_links_to_reply(_sanitize_reply_text(content), meta)
 
     return _append_artifact_download_links_to_reply("（本轮无有效输出。）", meta)
 
@@ -688,10 +696,24 @@ def _record_matches_metadata(
     return value.lower() in str(raw).lower()
 
 
+async def _drain_worker_queue(out_q: queue.Queue) -> Tuple[str, Any]:
+    """
+    异步轮询工作线程队列。勿使用 to_thread.run_sync(queue.get)，否则 Ctrl+C 无法打断。
+    """
+    while True:
+        try:
+            return out_q.get_nowait()
+        except queue.Empty:
+            if is_run_cancelled():
+                raise KeyboardInterrupt
+            await asyncio.sleep(0.15)
+
+
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from ui.web.ide_launch import schedule_open_ide
 
+    install_sigint_handler()
     # 默认用系统/Windows 打开；TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1 时再试 Simple（见 ide_launch）
     schedule_open_ide(1.0)
     yield
@@ -1301,6 +1323,8 @@ def create_app() -> FastAPI:
         if body.mode == "plan" and use_stream:
 
             async def ndjson_plan_stream() -> AsyncIterator[bytes]:
+                clear_run_cancel()
+
                 def _line(obj: Dict[str, Any]) -> bytes:
                     return (
                         json.dumps(obj, ensure_ascii=False) + "\n"
@@ -1340,29 +1364,41 @@ def create_app() -> FastAPI:
                             on_graph_progress=_emit_batch,
                         )
                         out_q.put(("done", res))
+                    except KeyboardInterrupt as ex:
+                        out_q.put(("err", ex))
                     except Exception as ex:  # noqa: BLE001
                         out_q.put(("err", ex))
 
                 threading.Thread(target=_run_plan_execute, daemon=True).start()
                 result: Optional[Dict[str, Any]] = None
-                while True:
-                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
-                    if kind == "exec":
-                        yield _line({"type": "exec_nodes", "node_ids": payload})
-                    elif kind == "done":
-                        result = payload
-                        break
-                    elif kind == "err":
-                        yield _line(
-                            {
-                                "type": "result",
-                                "reply": "",
-                                "error": str(payload),
-                            }
-                        )
-                        return
-                    else:
-                        break
+                try:
+                    while True:
+                        kind, payload = await _drain_worker_queue(out_q)
+                        if kind == "exec":
+                            yield _line({"type": "exec_nodes", "node_ids": payload})
+                        elif kind == "done":
+                            result = payload
+                            break
+                        elif kind == "err":
+                            yield _line(
+                                {
+                                    "type": "result",
+                                    "reply": "",
+                                    "error": str(payload),
+                                }
+                            )
+                            return
+                        else:
+                            break
+                except KeyboardInterrupt:
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": "已中断（Ctrl+C）",
+                        }
+                    )
+                    return
 
                 if not isinstance(result, dict):
                     yield _line(
@@ -1398,6 +1434,8 @@ def create_app() -> FastAPI:
         if body.mode in ("task", "auto") and use_stream:
 
             async def ndjson_task_stream() -> AsyncIterator[bytes]:
+                clear_run_cancel()
+
                 def _line(obj: Dict[str, Any]) -> bytes:
                     return (
                         json.dumps(obj, ensure_ascii=False) + "\n"
@@ -1456,6 +1494,8 @@ def create_app() -> FastAPI:
                             on_graph_progress=_emit_batch,
                         )
                         out_q.put(("done", res))
+                    except KeyboardInterrupt as ex:
+                        out_q.put(("err", ex))
                     except Exception as ex:  # noqa: BLE001
                         out_q.put(("err", ex))
 
@@ -1463,24 +1503,34 @@ def create_app() -> FastAPI:
                     target=_run_task_execute, daemon=True
                 ).start()
                 result: Optional[Dict[str, Any]] = None
-                while True:
-                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
-                    if kind == "exec":
-                        yield _line({"type": "exec_nodes", "node_ids": payload})
-                    elif kind == "done":
-                        result = payload
-                        break
-                    elif kind == "err":
-                        yield _line(
-                            {
-                                "type": "result",
-                                "reply": "",
-                                "error": str(payload),
-                            }
-                        )
-                        return
-                    else:
-                        break
+                try:
+                    while True:
+                        kind, payload = await _drain_worker_queue(out_q)
+                        if kind == "exec":
+                            yield _line({"type": "exec_nodes", "node_ids": payload})
+                        elif kind == "done":
+                            result = payload
+                            break
+                        elif kind == "err":
+                            yield _line(
+                                {
+                                    "type": "result",
+                                    "reply": "",
+                                    "error": str(payload),
+                                }
+                            )
+                            return
+                        else:
+                            break
+                except KeyboardInterrupt:
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": "已中断（Ctrl+C）",
+                        }
+                    )
+                    return
 
                 if not isinstance(result, dict):
                     yield _line(
@@ -1518,8 +1568,11 @@ def create_app() -> FastAPI:
                 use_loading=False,
             )
 
+        clear_run_cancel()
         try:
             result = await anyio.to_thread.run_sync(run_sync)
+        except KeyboardInterrupt:
+            raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
@@ -1552,7 +1605,14 @@ def main() -> None:
 
     host = os.environ.get("TEX_AGENT_WEB_HOST", "127.0.0.1")
     port = int(os.environ.get("TEX_AGENT_WEB_PORT", "8765"))
-    uvicorn.run("ui.web.server:app", host=host, port=port, reload=False)
+    install_sigint_handler()
+    uvicorn.run(
+        "ui.web.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        timeout_graceful_shutdown=3,
+    )
 
 
 if __name__ == "__main__":

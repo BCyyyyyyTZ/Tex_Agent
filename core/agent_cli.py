@@ -7,7 +7,7 @@ from datetime import datetime
 
 from utils.logger import get_logger
 from utils.loading_spinner import run_with_loading
-from utils.display import display
+from utils.display import display, safe_print
 from workflow.graph_builder import build_app_from_workflow
 from workflow.run_dump import create_run_output_dir
 from context.context_manager import ContextManager
@@ -140,10 +140,10 @@ class TeXAgentCLI:
         默认的人类输入提供器，可被替换/注入以支持 GUI、Web、测试桩。
         """
         _ = rules
-        print(f"\n🙋 用户节点请求: {prompt}")
+        safe_print(f"\n🙋 用户节点请求: {prompt}")
         options = schema.get("options", []) if isinstance(schema, dict) else []
         if isinstance(options, list) and options:
-            print(f"   可选项: {options}")
+            safe_print(f"   可选项: {options}")
         return input("   请输入反馈: ")
 
     def _execute_with_app(
@@ -288,7 +288,7 @@ class TeXAgentCLI:
         
         context_size = len(self.context) if self.context else 0
         workflow_label = workflow_name or self.DEFAULT_WORKFLOW
-        print(f"\n🔄 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
+        safe_print(f"\n🔄 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
 
         try:
             app = self._build_app_for_workflow(workflow_name)
@@ -324,22 +324,22 @@ class TeXAgentCLI:
         from workflow.workflow_parser import YAMLWorkflowParser
         from config.planner_config import MAX_PLAN_ROUNDS_DEFAULT
 
-        print("\n🧠 [1/4] 初始化规划器...")
+        safe_print("\n🧠 [1/4] 初始化规划器...")
         planner = AutoAgentsMASPlanner(max_plan_rounds=MAX_PLAN_ROUNDS_DEFAULT)
         parser = YAMLWorkflowParser()
 
-        print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
+        safe_print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
         plan = planner.decompose(user_input)
 
-        print("   [3/4] 为各节点分配 Agent 类型...")
+        safe_print("   [3/4] 为各节点分配 Agent 类型...")
         plan = planner.assign(plan, [])
 
         nodes, edges = parser.from_task_plan(plan)
-        print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
+        safe_print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
         for n in nodes:
-            print(f"      - [{n.agent_name}] {n.node_id}")
+            safe_print(f"      - [{n.agent_name}] {n.node_id}")
 
-        print("   [4/4] 构建动态图（即将执行）...")
+        safe_print("   [4/4] 构建动态图（即将执行）...")
         app = parser.build_graph(
             nodes,
             edges,
@@ -446,20 +446,20 @@ class TeXAgentCLI:
         if result.get("error") is None:
             node_ids = [n.node_id for n in nodes]
             hit = [nid for nid in node_ids if nid in result.get("metadata", {})]
-            print(f"\n   节点结构化输出已写入 metadata：{hit}")
+            safe_print(f"\n   节点结构化输出已写入 metadata：{hit}")
 
         return result
     
     def switch_branch(self, branch_name: str) -> bool:
         """切换分支；未知分支时返回 False。"""
         if branch_name == self.current_branch:
-            print(f"✅ 已经在分支 '{branch_name}'")
+            safe_print(f"✅ 已经在分支 '{branch_name}'")
             return True
 
         sh = self.memory_system.get("shared")
         if self.use_branch and sh is not None and hasattr(sh, "list_branches"):
             if branch_name not in sh.list_branches():
-                print(f"❌ 无此分支: {branch_name!r}")
+                safe_print(f"❌ 无此分支: {branch_name!r}")
                 return False
 
         old_branch = self.current_branch
@@ -474,8 +474,8 @@ class TeXAgentCLI:
                     )
         self._rebuild_workflow()
 
-        print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
-        print(f"   📝 对话历史: {len(self.context)} 条")
+        safe_print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
+        safe_print(f"   📝 对话历史: {len(self.context)} 条")
         return True
 
     def create_branch(self, branch_name: str, from_branch: str = "main") -> bool:
@@ -502,7 +502,7 @@ class TeXAgentCLI:
         else:
             self.contexts[branch_name] = ContextManager(max_messages=200, default_limit=20)
 
-        print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
+        safe_print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
         return True
 
     def get_branch_chat_history_for_api(self, branch_name: Optional[str] = None) -> Dict[str, Any]:
@@ -539,6 +539,10 @@ class TeXAgentCLI:
             body = str(d.get("content") or "").strip()
             if not body:
                 continue
+            if role == "assistant":
+                from utils.reply_format import format_reply_for_ui
+
+                body = format_reply_for_ui(body)
             messages_out.append({"role": role, "content": body})
         return {"branch": name, "messages": messages_out}
 
@@ -595,7 +599,7 @@ class TeXAgentCLI:
     def merge_branch(self, branch_name: str):
         """合并分支"""
         if branch_name == "main":
-            print("❌ 不能合并主分支")
+            safe_print("❌ 不能合并主分支")
             return
         
         results = {}
@@ -604,7 +608,7 @@ class TeXAgentCLI:
                 results[name] = memory.merge_to_main(branch_name)
         
         merged_total = sum(r.get('merged_count', 0) for r in results.values())
-        print(f"✅ 分支 {branch_name} 已合并，共 {merged_total} 条记忆")
+        safe_print(f"✅ 分支 {branch_name} 已合并，共 {merged_total} 条记忆")
         
         if self.current_branch == branch_name:
             self.switch_branch("main")
@@ -614,24 +618,24 @@ class TeXAgentCLI:
         shared_mem = self.memory_system.get("shared")
         if hasattr(shared_mem, 'list_branches'):
             branches = shared_mem.list_branches()
-            print(f"\n📋 分支列表:")
+            safe_print(f"\n📋 分支列表:")
             for branch in branches:
                 ctx_size = len(self.contexts.get(branch, ContextManager()))
                 marker = "▶️" if branch == self.current_branch else "  "
-                print(f"  {marker} {branch} - {ctx_size} 条对话")
-            print()
+                safe_print(f"  {marker} {branch} - {ctx_size} 条对话")
+            safe_print()
     
     def show_status(self):
         """显示状态"""
-        print(display.banner("系统状态", width=50))
-        print(f"\n🌿 当前分支: {self.current_branch}")
-        print(f"   对话历史: {len(self.context)} 条")
+        safe_print(display.banner("系统状态", width=50))
+        safe_print(f"\n🌿 当前分支: {self.current_branch}")
+        safe_print(f"   对话历史: {len(self.context)} 条")
         
-        print(f"\n📚 记忆统计:")
+        safe_print(f"\n📚 记忆统计:")
         for name, memory in self.memory_system.items():
-            print(f"   {name}: {memory.get_size()} 条")
-        print(f"   用户画像文件: {self.persona_memory.path}")
-        print()
+            safe_print(f"   {name}: {memory.get_size()} 条")
+        safe_print(f"   用户画像文件: {self.persona_memory.path}")
+        safe_print()
     
     def clear_all(self):
         """清空所有"""
@@ -640,22 +644,22 @@ class TeXAgentCLI:
         self.persona_memory.reset_to_default()
         for ctx in self.contexts.values():
             ctx.clear()
-        print("✅ 已清空所有记忆、用户画像与对话")
+        safe_print("✅ 已清空所有记忆、用户画像与对话")
     
     def show_branch_status(self):
         """显示分支状态"""
         shared_mem = self.memory_system.get("shared")
         if hasattr(shared_mem, 'get_branch_info'):
             info = shared_mem.get_branch_info()
-            print(f"\n📊 分支系统状态:")
-            print(f"   启用: {info.get('enabled')}")
-            print(f"   当前: {info.get('current')}")
-            print(f"   分支: {', '.join(info.get('branches', []))}")
+            safe_print(f"\n📊 分支系统状态:")
+            safe_print(f"   启用: {info.get('enabled')}")
+            safe_print(f"   当前: {info.get('current')}")
+            safe_print(f"   分支: {', '.join(info.get('branches', []))}")
             if info.get('branch_details'):
-                print(f"\n   分支详情:")
+                safe_print(f"\n   分支详情:")
                 for name, details in info.get('branch_details', {}).items():
-                    print(f"     📁 {name}: {details.get('size', 0)} 条记忆")
-            print()
+                    safe_print(f"     📁 {name}: {details.get('size', 0)} 条记忆")
+            safe_print()
     
     def process_input(self, input_line: str) -> bool:
         """处理用户输入"""

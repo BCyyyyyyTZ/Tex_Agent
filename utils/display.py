@@ -2,8 +2,25 @@
 """
 输出格式化工具
 """
+import sys
 from typing import Dict, Any, List
 from datetime import datetime
+
+
+def safe_print(*args, **kwargs) -> None:
+    """Windows GBK 控制台无法输出 emoji 时降级为替换字符，避免中断 Plan/Task。"""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        text = " ".join(str(a) for a in args)
+        end = kwargs.get("end", "\n")
+        stream = kwargs.get("file", sys.stdout)
+        enc = getattr(stream, "encoding", None) or "utf-8"
+        if hasattr(stream, "buffer"):
+            stream.buffer.write((text + end).encode(enc, errors="replace"))
+            stream.buffer.flush()
+        else:
+            stream.write(text.encode(enc, errors="replace").decode(enc, errors="replace") + end)
 
 
 class DisplayFormatter:

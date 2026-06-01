@@ -1,5 +1,5 @@
 """
-上下文策略对外接口（实现已迁至 config/context_settings.py + context_config.json）。
+上下文策略对外接口（配置见 context_profiles.py，加载见 context_settings.py）。
 保留本模块以兼容现有 import 路径。
 """
 from typing import Optional

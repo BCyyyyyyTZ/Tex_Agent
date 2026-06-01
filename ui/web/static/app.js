@@ -41,7 +41,8 @@
   };
 
   /* marked v12+ 已移除 highlight 回调；gfm / breaks 建议随 parse 传入 */
-  var MARK_PARSE_OPTS = { gfm: true, breaks: true, async: false };
+  /* breaks:false — 仅空行分段；单换行由服务端 normalize_reply_display 处理 */
+  var MARK_PARSE_OPTS = { gfm: true, breaks: false, async: false };
 
   /**
    * Markdown → 安全 HTML；DOMPurify 后再用 highlight.js 扫一遍 code 块
