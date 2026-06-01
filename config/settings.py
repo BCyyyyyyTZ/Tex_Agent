@@ -81,6 +81,14 @@ class Settings:
 
     # ---- ArXiv 工具配置 ----
     arxiv_max_results: int = 5
+    # 默认仅输出标题+链接+摘要（省 token、减轻下游节点负担）；ARXIV_OUTPUT_FULL=1 恢复完整格式
+    arxiv_output_full: bool = field(
+        default_factory=lambda: os.getenv("ARXIV_OUTPUT_FULL", "").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    arxiv_abstract_max_chars: int = field(
+        default_factory=lambda: int(os.getenv("ARXIV_ABSTRACT_MAX_CHARS", "360"))
+    )
 
     # ---- RAG 配置 ----
     # rag_chunk_size:     文档分块大小（字符数），较大值保留更多上下文，但向量质量下降

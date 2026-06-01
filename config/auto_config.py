@@ -1,5 +1,5 @@
 """
-Auto 模式标识（行为与提示词均在 config/context_config.json 的 profiles.auto_single 中配置）。
+Auto 模式标识（行为与提示词见 config/context_profiles.py → PROFILES["auto_single"]）。
 """
 from config.context_settings import PROFILE_AUTO_SINGLE, get_profile_agent_spec
 

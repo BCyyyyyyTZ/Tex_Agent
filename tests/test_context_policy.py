@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from config.context_settings import (
     PROFILE_AUTO_SINGLE,
+    PROFILE_DIALOGUE,
     PROFILE_LEGACY,
     PROFILE_PIPELINE,
     build_agent_prompt,
@@ -47,6 +48,22 @@ def test_intent_from_config_json():
     assert match_intent("persona_write", "请记住我是张三")
 
 
+def test_filter_system_chat_source_id_maps_to_agent():
+    """source_id=chat 是对话通道；勿把 source_type 写成 chat（会触发 WorkflowMessage 校验失败）。"""
+    raw = [
+        WorkflowMessage(
+            role="assistant",
+            source_type="system",
+            source_id="chat",
+            content="上一轮助手回复摘要",
+        ),
+    ]
+    filtered = filter_messages_for_memory(raw, PROFILE_DIALOGUE)
+    assert len(filtered) == 1
+    assert filtered[0].source_type == "agent"
+    assert filtered[0].source_id == "chat"
+
+
 def test_filter_skips_prompt_builder():
     raw = [
         WorkflowMessage(
@@ -83,6 +100,16 @@ def test_persona_skip_from_config_markers():
         {}, graph_profile=PROFILE_AUTO_SINGLE, user_input="", is_terminal=True
     )
     assert not should_save_assistant_to_dialogue_context(text, b)
+
+
+def test_auto_long_form_uses_full_delivery():
+    style = resolve_terminal_delivery_style(
+        "请写一篇3000字的影评",
+        {},
+        profile=PROFILE_AUTO_SINGLE,
+        is_terminal=True,
+    )
+    assert style == "full"
 
 
 def test_auto_graph_compiles():

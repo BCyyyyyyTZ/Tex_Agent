@@ -1,25 +1,61 @@
 """
-上下文与 Prompt 行为的统一配置加载器。
-所有策略、意图匹配、路由规则均在 config/context_config.json 中维护，代码只做解析与合并。
+上下文运行时：从 config.context_profiles 读取配置并合并节点覆盖。
+配置正文请只编辑 context_profiles.py，不要在本文件写策略字符串。
 """
 from __future__ import annotations
 
 import json
-import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
+from config.context_profiles import (
+    ALL_PROFILES,
+    PROFILE_AUTO_SINGLE,
+    PROFILE_DIALOGUE,
+    PROFILE_LEGACY,
+    PROFILE_PIPELINE,
+    PROFILES,
+    build_context_config,
+    user_requests_long_form,
+)
 from config.planner_config import NODE_OUTPUT_FORMAT_INSTRUCTION
 
-_CONFIG_PATH = Path(__file__).resolve().parent / "context_config.json"
-
-PROFILE_LEGACY = "legacy"
-PROFILE_PIPELINE = "pipeline"
-PROFILE_DIALOGUE = "dialogue"
-PROFILE_AUTO_SINGLE = "auto_single"
+# 对外常量（与 context_profiles 一致）
+__all__ = [
+    "PROFILE_LEGACY",
+    "PROFILE_PIPELINE",
+    "PROFILE_DIALOGUE",
+    "PROFILE_AUTO_SINGLE",
+    "NodeContextBehavior",
+    "load_context_config",
+    "reload_context_config",
+    "valid_profiles",
+    "resolve_graph_context_profile",
+    "resolve_node_context_profile",
+    "match_intent",
+    "match_any_intent",
+    "resolve_node_context_behavior",
+    "resolve_terminal_delivery_style",
+    "get_json_format_instruction",
+    "get_planner_extra_principles",
+    "get_planner_local_config",
+    "get_profile_node_defaults",
+    "get_profile_agent_spec",
+    "get_message_filter_config",
+    "memory_search_enabled",
+    "default_include_metadata_chain",
+    "dialogue_max_turns",
+    "build_agent_prompt",
+    "filter_messages_for_memory",
+    "format_dialogue_history",
+    "should_save_assistant_to_dialogue_context",
+    "is_persona_confirmation_reply",
+    "make_dialogue_save_messages",
+    "should_persona_file_write",
+]
 
 
 @dataclass
@@ -45,24 +81,35 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _config_path() -> Path:
-    raw = os.getenv("CONTEXT_CONFIG_PATH", "").strip()
-    if raw:
-        p = Path(raw)
-        return p if p.is_absolute() else _project_root() / p
-    return _CONFIG_PATH
+def _optional_json_override_path() -> Optional[Path]:
+    raw = __import__("os").getenv("CONTEXT_CONFIG_PATH", "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_absolute() else _project_root() / p
+
+
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for k, v in override.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
 
 @lru_cache(maxsize=1)
 def load_context_config() -> Dict[str, Any]:
-    path = _config_path()
-    if not path.is_file():
-        raise FileNotFoundError(f"上下文配置文件不存在: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError("context_config.json 根节点必须是对象")
-    return data
+    """返回完整配置 dict；默认来自 context_profiles，可选 JSON 覆盖。"""
+    cfg = build_context_config()
+    path = _optional_json_override_path()
+    if path and path.is_file():
+        with path.open("r", encoding="utf-8") as f:
+            override = json.load(f)
+        if isinstance(override, dict):
+            cfg = _deep_merge(cfg, override)
+    return cfg
 
 
 def reload_context_config() -> Dict[str, Any]:
@@ -71,8 +118,7 @@ def reload_context_config() -> Dict[str, Any]:
 
 
 def valid_profiles() -> frozenset:
-    profiles = load_context_config().get("profiles") or {}
-    return frozenset(str(k) for k in profiles)
+    return frozenset(ALL_PROFILES)
 
 
 def resolve_graph_context_profile(
@@ -89,8 +135,7 @@ def resolve_graph_context_profile(
     mode_l = str(mode or "").strip().lower()
     mode_defaults = routing.get("mode_defaults") or {}
 
-    wl = str(workflow_name or "").strip()
-    wl_lower = wl.lower()
+    wl_lower = str(workflow_name or "").strip().lower()
     for name, prof in (routing.get("workflow_names") or {}).items():
         if wl_lower == str(name).lower():
             return str(prof)
@@ -115,8 +160,10 @@ def resolve_node_context_profile(
 
 
 def _profile_spec(profile: str) -> Dict[str, Any]:
-    profiles = load_context_config().get("profiles") or {}
-    spec = profiles.get(profile)
+    cfg = load_context_config()
+    spec = (cfg.get("profiles") or {}).get(profile)
+    if not isinstance(spec, dict):
+        spec = PROFILES.get(profile)
     if not isinstance(spec, dict):
         raise KeyError(f"未知 context profile: {profile}")
     return spec
@@ -194,18 +241,17 @@ def resolve_terminal_delivery_style(
 
     spec = _profile_spec(profile)
     default = str(spec.get("terminal_delivery_default") or "full").strip().lower()
-    if default in ("brief", "full", "none"):
-        base = default
-    else:
-        base = "full"
+    base = default if default in ("brief", "full", "none") else "full"
 
     if not spec.get("terminal_delivery_auto", True):
         return base
 
-    auto_cfg = load_context_config().get("terminal_delivery_auto") or {}
     if match_intent("echo", user_input):
         return "brief"
+    if user_requests_long_form(user_input):
+        return "full"
 
+    auto_cfg = load_context_config().get("terminal_delivery_auto") or {}
     t = str(user_input or "").strip()
     max_short = int(auto_cfg.get("short_input_max_chars", 48) or 48)
     q_chars = auto_cfg.get("question_chars") or ["?", "？"]
@@ -215,14 +261,15 @@ def resolve_terminal_delivery_style(
     return base
 
 
-def get_json_format_instruction(key: str) -> str:
+def get_json_format_instruction(key: str, *, profile: Optional[str] = None) -> str:
+    if profile:
+        spec = _profile_spec(profile)
+        inline = spec.get("json_format_instruction")
+        if inline is not None and str(inline).strip():
+            return str(inline)
     if key == "full" or not key:
         return NODE_OUTPUT_FORMAT_INSTRUCTION
-    cfg = load_context_config().get("json_format") or {}
-    custom = cfg.get(key)
-    if custom is None:
-        return NODE_OUTPUT_FORMAT_INSTRUCTION
-    return str(custom)
+    return NODE_OUTPUT_FORMAT_INSTRUCTION
 
 
 def get_planner_extra_principles() -> List[str]:
@@ -295,6 +342,19 @@ def resolve_node_context_behavior(
         user_input, node_config, profile=profile, is_terminal=is_terminal
     )
 
+    layout = spec.get("prompt_layout") or {}
+    prompt_template_key = str(
+        node_config.get("prompt_template", layout.get("layout", "priority_input"))
+    )
+
+    json_instr = spec.get("json_format_instruction")
+    if json_instr is None:
+        json_instr = get_json_format_instruction(
+            str(node_config.get("json_format", spec.get("json_format", "full")))
+        )
+    else:
+        json_instr = str(json_instr)
+
     return NodeContextBehavior(
         profile=profile,
         memory_search_enabled=bool(mem_enabled),
@@ -307,12 +367,8 @@ def resolve_node_context_behavior(
         skip_persona_reply_in_dialogue=bool(
             spec.get("skip_persona_reply_in_dialogue", True)
         ),
-        prompt_template=str(
-            node_config.get("prompt_template", spec.get("prompt_template", "priority_input"))
-        ),
-        json_format_instruction=get_json_format_instruction(
-            str(node_config.get("json_format", spec.get("json_format", "full")))
-        ),
+        prompt_template=prompt_template_key,
+        json_format_instruction=json_instr,
         single_turn_contract=str(
             node_config.get(
                 "single_turn_contract", spec.get("single_turn_contract", "terminal_only")
@@ -353,9 +409,14 @@ def dialogue_max_turns(profile: str) -> int:
     return int(_profile_spec(profile).get("dialogue_max_turns", 4) or 4)
 
 
-def _get_prompt_template(name: str) -> Dict[str, str]:
-    templates = load_context_config().get("prompt_templates") or {}
-    t = templates.get(name) or templates.get("priority_input") or {}
+def _get_prompt_layout(profile: str, behavior: NodeContextBehavior) -> Dict[str, str]:
+    spec = _profile_spec(profile)
+    layout = spec.get("prompt_layout")
+    if isinstance(layout, dict) and layout:
+        return {str(k): str(v) for k, v in layout.items()}
+    cfg = load_context_config()
+    templates = cfg.get("prompt_templates") or {}
+    t = templates.get(behavior.prompt_template) or templates.get("priority_input") or {}
     return t if isinstance(t, dict) else {}
 
 
@@ -368,7 +429,7 @@ def build_agent_prompt(
     inline_contracts: str,
     behavior: NodeContextBehavior,
 ) -> str:
-    tpl = _get_prompt_template(behavior.prompt_template)
+    tpl = _get_prompt_layout(behavior.profile, behavior)
     layout = str(tpl.get("layout") or "priority_input")
     empty_history = "（无历史上下文）"
     history = (built_context or "").strip() or empty_history
@@ -409,8 +470,6 @@ def build_agent_prompt(
     )
 
 
-# ---- 消息过滤（供 ContextManager 使用）----
-
 def _is_prompt_builder_message(msg: Any, mf: Dict[str, Any]) -> bool:
     from core.message import WorkflowMessage, ensure_message
 
@@ -426,6 +485,21 @@ def _is_prompt_builder_message(msg: Any, mf: Dict[str, Any]) -> bool:
     if len(markers) >= 2 and markers[0] in body and markers[1] in body:
         return True
     return False
+
+
+def _normalize_dialogue_source_type(
+    role: str,
+    source_type: Optional[str],
+) -> Literal["agent", "tool", "user", "system"]:
+    """对话通道标识在 source_id（如 chat）；source_type 必须是协议四值之一。"""
+    st = str(source_type or "").strip().lower()
+    if st == "chat":
+        st = ""
+    if st in ("agent", "tool", "user"):
+        return st  # type: ignore[return-value]
+    if st == "system":
+        return "user" if role == "user" else "agent"
+    return "user" if role == "user" else "agent"
 
 
 def _extract_dialogue_text(msg: Any, mf: Dict[str, Any], *, profile: str) -> Optional[str]:
@@ -494,7 +568,7 @@ def filter_messages_for_memory(msgs_raw: List[Any], profile: str) -> List[Any]:
         out.append(
             WorkflowMessage(
                 role=msg.role,
-                source_type=msg.source_type if msg.source_type != "system" else "chat",
+                source_type=_normalize_dialogue_source_type(msg.role, msg.source_type),
                 source_id=sid,
                 content=text,
                 metadata=dict(msg.metadata or {}),
@@ -510,15 +584,20 @@ def format_dialogue_history(messages: List[Any], max_turns: int) -> str:
         return ""
     lines: List[str] = []
     window = messages[-max(1, max_turns) * 2 :]
+    prev: Optional[str] = None
     for raw in window:
         msg = ensure_message(
             raw,
             default_role="assistant",
-            default_source_type="chat",
+            default_source_type="agent",
             default_source_id="chat",
         )
         role = "用户" if msg.role == "user" else "助手"
-        lines.append(f"{role}: {str(msg.content or '').strip()}")
+        line = f"{role}: {str(msg.content or '').strip()}"
+        if line == prev:
+            continue
+        prev = line
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -526,6 +605,17 @@ def should_save_assistant_to_dialogue_context(result_text: str, behavior: NodeCo
     if not behavior.skip_persona_reply_in_dialogue:
         return True
     return not is_persona_confirmation_reply(result_text)
+
+
+def should_persona_file_write(user_input: str, profile: str) -> bool:
+    """当前 profile + 用户输入是否应写 user_persona.json。"""
+    b = resolve_node_context_behavior(
+        {},
+        graph_profile=profile,
+        user_input=user_input,
+        is_terminal=False,
+    )
+    return b.persona_file_write
 
 
 def make_dialogue_save_messages(user_input: str, result_text: str) -> tuple:

@@ -238,17 +238,128 @@ def _is_blank_payload(payload: Any) -> bool:
     return False
 
 
-def _repair_tool_payload_if_needed(tool_name: str, payload: Any, state: WorkflowState) -> Any:
+def _normalize_arxiv_tool_payload(payload: Any) -> Any:
+    """将 arxiv_search 入参规范为纯查询字符串（见 tools.arxiv_tool.prepare_arxiv_query）。"""
+    from tools.arxiv_tool import prepare_arxiv_query
+
+    if _is_blank_payload(payload):
+        return payload
+    return prepare_arxiv_query(payload)
+
+
+def _normalize_tool_payload(tool_name: str, payload: Any) -> Any:
+    if tool_name == "arxiv_search":
+        return _normalize_arxiv_tool_payload(payload)
+    return payload
+
+
+def _parse_directions_blob(text: str) -> List[str]:
+    """从上游节点 result 解析多研究方向条目（JSON 对象或编号列表）。"""
+    body = (text or "").strip()
+    if not body:
+        return []
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            inner = data.get("result")
+            if isinstance(inner, str) and inner.strip().startswith("{"):
+                try:
+                    nested = json.loads(inner)
+                    if isinstance(nested, dict):
+                        data = nested
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(data, dict) and data:
+                from tools.arxiv_tool import _extract_english_segment
+
+                items: List[str] = []
+                for k, v in data.items():
+                    label = str(k).strip()
+                    val = str(v).strip() if v else ""
+                    if not label:
+                        continue
+                    if _extract_english_segment(label) or not re.search(
+                        r"[\u4e00-\u9fff]", label
+                    ):
+                        items.append(label)
+                    elif val:
+                        items.append(val)
+                    else:
+                        items.append(label)
+                if items:
+                    return items
+                return [str(v) for v in data.values() if v]
+    except json.JSONDecodeError:
+        pass
+    parts = re.split(r"\n\s*\d+[\.\)、]\s*", body)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _branch_index_from_node_id(node_id: str) -> Optional[int]:
+    m = re.search(r"_(\d+)$", str(node_id or ""))
+    if m:
+        return max(0, int(m.group(1)) - 1)
+    return None
+
+
+def _fallback_arxiv_query(
+    state: WorkflowState, node_id: str, depends_on: List[str]
+) -> str:
+    """arxiv payload 为空时：从上游分析节点按并行分支序号取关键词，禁止用用户原话。"""
+    from tools.arxiv_tool import prepare_arxiv_query
+
+    meta = state.get("metadata") or {}
+    branch_idx = _branch_index_from_node_id(node_id)
+    dep_ids: List[str] = [str(d).strip() for d in (depends_on or []) if str(d).strip()]
+    for key in meta:
+        if key.startswith("__"):
+            continue
+        if any(tok in key for tok in ("analysis", "trend", "direction", "research", "topic")):
+            if key not in dep_ids:
+                dep_ids.append(key)
+
+    for dep in dep_ids:
+        nd = meta.get(dep)
+        if not isinstance(nd, dict):
+            continue
+        res = str(nd.get("result") or nd.get("summary") or "").strip()
+        if not res:
+            continue
+        directions = _parse_directions_blob(res)
+        if directions and branch_idx is not None and branch_idx < len(directions):
+            logger.warning(
+                "[tool_node] arxiv_search payload 为空，已用上游 %s 第 %d 个方向",
+                dep,
+                branch_idx + 1,
+            )
+            return prepare_arxiv_query(directions[branch_idx])
+        if directions:
+            logger.warning(
+                "[tool_node] arxiv_search payload 为空，已用上游 %s 的首个方向", dep
+            )
+            return prepare_arxiv_query(directions[0])
+        logger.warning("[tool_node] arxiv_search payload 为空，已用上游 %s.result", dep)
+        return prepare_arxiv_query(res)
+
+    logger.warning("[tool_node] arxiv_search payload 为空，已回退默认英文检索词")
+    return prepare_arxiv_query("LLM autonomous agent multi-agent systems")
+
+
+def _repair_tool_payload_if_needed(
+    tool_name: str,
+    payload: Any,
+    state: WorkflowState,
+    *,
+    node_id: str = "",
+    depends_on: Optional[List[str]] = None,
+) -> Any:
     """工具入参兜底：防止空 payload。"""
     if not _is_blank_payload(payload):
-        return payload
-    fallback_query = str(state.get("input", "") or "").strip()
+        return _normalize_tool_payload(tool_name, payload)
     if tool_name == "arxiv_search":
-        if fallback_query:
-            logger.warning("[tool_node] arxiv_search payload 为空，已回退为 state.input")
-            return fallback_query
-        return "machine learning"
-    return payload
+        return _fallback_arxiv_query(state, node_id, depends_on or [])
+    fallback_query = str(state.get("input", "") or "").strip()
+    return fallback_query or payload
 
 
 def _set_nested_path(root: Dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -570,7 +681,9 @@ def make_agent_node(
             enable_contracts = enable_single_turn_contract
 
         terminal_addon = (
-            resolve_final_delivery_addon(behavior.terminal_delivery_style)
+            resolve_final_delivery_addon(
+                behavior.terminal_delivery_style, profile=behavior.profile
+            )
             if is_terminal
             else ""
         )
@@ -770,7 +883,7 @@ def make_tool_node(
         )
     )
 
-    if raw_tool_input is not None:
+    if raw_tool_input is not None and not _is_blank_payload(raw_tool_input):
         default_payload = raw_tool_input
     elif depends_on:
         first_dep = str(depends_on[0]).strip()
@@ -789,7 +902,9 @@ def make_tool_node(
         run_dir = meta.get("__run_output_dir__")
 
         payload = _resolve_tool_payload(default_payload, state)
-        payload = _repair_tool_payload_if_needed(tool.name, payload, state)
+        payload = _repair_tool_payload_if_needed(
+            tool.name, payload, state, node_id=node_id, depends_on=depends_on
+        )
 
         try:
             prompt_for_trace = tool_trace_template.format(
