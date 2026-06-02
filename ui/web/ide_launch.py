@@ -83,7 +83,8 @@ def _should_open_browser_fallback() -> bool:
 def _web_url() -> str:
     host = (os.environ.get("TEX_AGENT_WEB_HOST") or "127.0.0.1").strip() or "127.0.0.1"
     port = (os.environ.get("TEX_AGENT_WEB_PORT") or "8765").strip() or "8765"
-    return f"http://{host}:{port}/"
+    # 浏览器和 Simple Browser 都可能复用旧标签页；启动时加时间戳，强制取最新 index.html。
+    return f"http://{host}:{port}/?_t={int(time.time())}"
 
 
 def _which_ide() -> tuple[Optional[str], Optional[str]]:

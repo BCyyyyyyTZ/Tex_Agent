@@ -3,12 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <title>TeX Agent</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css?v=layout-panels-2" />
+    <link rel="stylesheet" href="styles.css?v=settings-8" />
+    <link rel="stylesheet" href="conferences_calendar.css?v=4" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
@@ -214,9 +216,18 @@
               <h1>TeX Agent</h1>
               <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
             </div>
+            <button
+              type="button"
+              class="conf-cal-brand-btn"
+              data-conf-cal-open
+              title="顶会投稿倒计时（未来一年，静态数据）"
+              aria-haspopup="dialog"
+            >
+              ◈ 顶会日历
+            </button>
           </div>
           <div class="header-actions" role="toolbar" aria-label="工作流与布局">
-            <label class="select-wrap select-wrap--header">
+            <label class="select-wrap select-wrap--header" id="workflow-select-wrap">
               <span class="label">工作流</span>
               <select id="workflow-select" title="已注册或左侧自定义">
                 <option value="__web__" selected>自定义（左侧编排）</option>
@@ -235,7 +246,7 @@
               class="panel-toggles"
               id="panel-toggles"
               role="group"
-              aria-label="侧栏显示"
+              aria-label="侧栏开关"
             >
               <button
                 type="button"
@@ -274,6 +285,18 @@
                 资料
               </button>
             </div>
+            <button
+              type="button"
+              id="user-settings-trigger"
+              class="header-settings-btn"
+              data-user-settings-open
+              title="用户设置"
+              aria-haspopup="dialog"
+              onclick="window.TexAgentSettings && window.TexAgentSettings.open && window.TexAgentSettings.open()"
+            >
+              <span class="header-settings-btn__orb" aria-hidden="true"></span>
+              <span>设置</span>
+            </button>
           </div>
         </header>
 
@@ -423,15 +446,111 @@
     </div>
     </div>
 
+    <button
+      type="button"
+      id="conf-cal-fab"
+      class="conf-cal-fab"
+      data-conf-cal-open
+      title="顶会投稿倒计时"
+      aria-label="打开顶会日历"
+    >
+      ◈ 顶会日历
+    </button>
+
+    <div
+      id="conf-cal-overlay"
+      class="conf-cal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="conf-cal-title"
+      aria-hidden="true"
+    >
+      <div class="conf-cal-panel">
+        <div class="conf-cal-scanline" aria-hidden="true"></div>
+        <header class="conf-cal-head">
+          <div>
+            <h2 id="conf-cal-title" class="conf-cal-title">CONFERENCE DEADLINE RADAR</h2>
+            <p class="conf-cal-sub">2026–2027 · 静态参考 · 请以官网为准</p>
+          </div>
+          <button type="button" id="conf-cal-close" class="conf-cal-close" aria-label="关闭日历">×</button>
+        </header>
+        <div id="conf-cal-filters" class="conf-cal-filters" role="group" aria-label="研究领域筛选"></div>
+        <p id="conf-cal-status" class="conf-cal-status" role="status"></p>
+        <div id="conf-cal-list" class="conf-cal-body" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div
+      id="user-settings-overlay"
+      class="settings-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="user-settings-title"
+      aria-hidden="true"
+    >
+      <div class="settings-panel">
+        <header class="settings-head">
+          <div>
+            <h2 id="user-settings-title" class="settings-title">用户设置</h2>
+            <p class="settings-sub">本地保存，仅影响当前浏览器</p>
+          </div>
+          <button type="button" id="user-settings-close" class="settings-close" aria-label="关闭设置">×</button>
+        </header>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">主题色</h3>
+          <div id="settings-theme-list" class="settings-theme-list" aria-label="选择主题色"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">界面图案</h3>
+          <div id="settings-pattern-list" class="settings-theme-list" aria-label="选择界面图案"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">用户资料</h3>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span>昵称</span>
+              <input id="settings-display-name" type="text" placeholder="例如 yulin" />
+            </label>
+            <label class="settings-field">
+              <span>机构 / 团队</span>
+              <input id="settings-affiliation" type="text" placeholder="例如 Lab / University" />
+            </label>
+            <label class="settings-field">
+              <span>研究方向</span>
+              <input id="settings-research-fields" type="text" placeholder="例如 NLP, Systems, Networking" />
+            </label>
+            <label class="settings-field">
+              <span>个人主页</span>
+              <input id="settings-homepage" type="url" placeholder="https://..." />
+            </label>
+            <label class="settings-field settings-field--wide">
+              <span>备注</span>
+              <textarea id="settings-note" rows="3" placeholder="只保存在本地，可记录偏好或常用背景"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <footer class="settings-actions">
+          <button type="button" id="user-settings-reset" class="btn-secondary">恢复默认</button>
+          <button type="button" id="user-settings-save" class="btn-primary">保存设置</button>
+        </footer>
+      </div>
+    </div>
+
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
     <script src="panel_toggles.js"></script>
-    <script src="layout_resizer.js"></script>
+    <script src="layout_resizer.js?v=right-drag-1"></script>
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
     <script src="web_assets.js"></script>
     <script src="rag_assets.js?v=rag-delete-5"></script>
-    <script src="app.js"></script>
+    <script src="conferences_calendar.js?v=4"></script>
+    <script src="user_settings.js?v=settings-4"></script>
+    <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>

@@ -15,7 +15,8 @@
     "onStartupFinished",
     "onView:texagent.chatView",
     "onCommand:texagent.openChatPanel",
-    "onCommand:texagent.openSimpleBrowser"
+    "onCommand:texagent.openSimpleBrowser",
+    "onCommand:texagent.openConferenceCalendar"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -85,6 +86,11 @@
         "command": "texagent.refreshWebview",
         "title": "TeX Agent: 刷新聊天页",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "texagent.openConferenceCalendar",
+        "title": "TeX Agent: 打开顶会投稿日历",
+        "icon": "$(calendar)"
       }
     ],
     "menus": {

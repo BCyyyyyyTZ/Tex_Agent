@@ -5,6 +5,7 @@
   const send = document.getElementById("send");
   const mode = document.getElementById("mode");
   const workflowSelect = document.getElementById("workflow-select");
+  const workflowSelectWrap = document.getElementById("workflow-select-wrap");
 
   var qs = {};
   try {
@@ -149,6 +150,13 @@
   function setBusy(b) {
     if (send) send.disabled = b;
     if (input) input.readOnly = b;
+  }
+
+  function syncWorkflowSelectVisibility() {
+    if (!workflowSelectWrap || !mode) return;
+    var show = mode.value === "task";
+    workflowSelectWrap.hidden = !show;
+    workflowSelectWrap.style.display = show ? "" : "none";
   }
 
   function formatThinkingElapsed(ms) {
@@ -459,6 +467,11 @@
 
   if (form) {
     form.addEventListener("submit", onSubmitForm, false);
+  }
+
+  if (mode) {
+    mode.addEventListener("change", syncWorkflowSelectVisibility, false);
+    syncWorkflowSelectVisibility();
   }
 
   if (input) {
