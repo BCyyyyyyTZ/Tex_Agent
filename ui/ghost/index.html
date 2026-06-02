@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeX Agent — 幽灵窗口</title>
+  <link rel="stylesheet" href="/static/ghost.css" />
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand">TeX Agent <span class="sub">幽灵窗口</span></div>
+    <div class="meta" id="meta-root">—</div>
+    <div class="stats" id="stats">连接中…</div>
+    <label class="file-pick">
+      当前文件
+      <select id="file-select"></select>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="show-polish" checked /> 润色建议
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="ghost-enabled" checked /> 显示幽灵卡
+    </label>
+  </header>
+
+  <main class="editor-wrap" id="editor-wrap">
+    <div class="source-panel" id="source-panel"></div>
+    <div class="ghost-layer" id="ghost-layer"></div>
+  </main>
+
+  <footer class="hint">
+    拖动卡片标题栏移动 · 右下角缩放 · 「应用」写回 .tex · 保存文件后自动刷新诊断
+  </footer>
+
+  <script src="/static/ghost.js"></script>
+</body>
+</html>

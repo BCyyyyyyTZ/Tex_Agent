@@ -76,3 +76,9 @@
 
 + 实现**阶段 9**：Web-UI / CLI 集成与展示。新增 `latex/watch_cli.py` 命令行工具，支持启动监视并输出人读视图；更新 `latex_report_tool` 增加 `summary` 和 `issues_top_k`；在 `ui/web/server.py` 中新增了启动、停止和轮询 LaTeX 监视状态的 FastAPI 接口。
 + 更新项目 `README.md`，添加了“LaTeX 辅助写作功能的说明”。
+
+#### [2026-06-02](./2026-06-02.md)
+
++ 实现**阶段 10（独立 Ghost UI）**：新增 `latex/ghost_cli.py`、`latex/ghost_server.py`、`latex/apply_edit.py` 与 `ui/ghost/*`，支持在浏览器行间显示纠错/润色建议卡片（可拖动、可缩放、可忽略、可应用到目标 `.tex`）。
++ 阶段 10 测试补齐：新增/增强 `tests/test_latex/test_apply_edit.py`、`tests/test_latex/test_ghost_server.py`、`tests/test_latex/test_ghost_cli.py`，覆盖偏移映射、文件写回、Ghost API 关键路径与 CLI 参数透传。
++ 重新设计并更新[LaTeX 子系统分阶段路线图](../../doc/TeX_Agent%20LaTeX%20子系统分阶段实现路线图.md)：将“独立幽灵窗口”前置为阶段 10（先可用），VS Code/Cursor 扩展迁移为阶段 11（后迁入），明确 9→10→11 的演进关系。

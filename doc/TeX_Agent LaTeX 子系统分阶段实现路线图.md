@@ -1,9 +1,9 @@
 # TeX_Agent LaTeX 子系统分阶段实现路线图
 
-> 版本：v0.4  
+> 版本：v0.6  
 > 用途：在 [TeX_Agent LaTeX 诊断与润色子系统设计（增量版）.md](./TeX_Agent%20LaTeX%20诊断与润色子系统设计（增量版）.md) 之上，给出**自底向上、每步尽量少做**的落地顺序。  
-> 原则：**先冻结契约 → 再纯函数/服务 → 再 Tool → 再工作流 → 再监视服务/Web·CLI → 最后编辑器（幽灵窗口）**。  
-> **产品方向（v0.3 起，v0.4 补充运行预期）**：短期在 **Web-UI 或 CLI** 中启动后台程序，**持续监视**用户 LaTeX 目录并推送纠错/润色建议；远期在 **VS Code / Cursor** 中以**行间幽灵窗口**呈现（可拖动、可改文件、可开关）。**Checklist** 与**目录批处理**均不纳入 LaTeX 辅助主路径（见阶段 8–10、附加阶段 A）。  
+> 原则：**先冻结契约 → 再纯函数/服务 → 再 Tool → 再工作流 → 再监视服务 → 再展示层（CLI/Web → 独立幽灵窗口 → VS Code 扩展）**。  
+> **产品方向（v0.6）**：作者可见建议有**三条通道**——**CLI / Web-UI（9）** 人读列表；**独立幽灵窗口（10）** 浏览器内行间卡片（**不依赖 VS Code 扩展**）；**可安装扩展（11）** 在 VS Code / Cursor 内嵌侧栏 + 编辑器幽灵层。**LaTeX 纠错/润色**优先走 10→11；TeX_Agent 其它工作流在扩展内**仅预留接口**。**Checklist** 与**目录批处理**不纳入 LaTeX 主路径。  
 > **全程要求**：文件路径在 **Linux / Windows** 下行为一致；复杂仓库与引用体系分阶段补齐（见 §1.5、§二附表）。
 
 ---
@@ -23,8 +23,9 @@
   → BaseTool 适配
   → workflow JSON
   → 目录监视服务 (watch + 防抖)
-  → Web-UI / CLI 展示
-  → vscode-extension（幽灵窗口，最终）
+  → Web-UI / CLI 人读展示（阶段 9）
+  → 独立幽灵窗口 Ghost UI（阶段 10，浏览器）
+  → vscode-extension 可安装扩展（阶段 11）
 ```
 
 ### 1.2 每步「只做一件事」
@@ -69,7 +70,7 @@ python -c "from latex.project_index import build_index; print(build_index('path'
 | 子进程 | 参数列表 `argv` | 不用 `shell=True` 拼接用户路径；`cwd` 为解析后的 `root` |
 | 测试 | 夹具 + 双风格路径用例 | `tests/test_latex/test_paths.py`；复杂样本 `tests/test_latex/VaLoRA_TMC/` |
 
-**后续阶段（3–10、附加 A）** 凡涉及 `root`、`main_tex`、log 内 `file:line` 映射，均复用 `latex/paths.py`，不得另起一套路径规则。
+**后续阶段（3–11、附加 A）** 凡涉及 `root`、`main_tex`、log 内 `file:line` 映射，均复用 `latex/paths.py`，不得另起一套路径规则。
 
 ### 1.6 复杂仓库与「引用解读」能力分层
 
@@ -100,10 +101,11 @@ python -c "from latex.project_index import build_index; print(build_index('path'
 阶段 5  Issue 合并与源码切片          [已完成]
 阶段 6  诊断工作流（无 LLM）          [已完成]
 阶段 7  PromptBuilder + LLM 修复（L3，依赖 2.5 脏区级联） [已完成]
-阶段 8  目录监视与实时诊断/建议（后台服务）
-阶段 9  Web-UI / CLI 集成与展示
-阶段 10 VS Code / Cursor 扩展（行间幽灵窗口，最终目标）
-附加 A  Checklist 预留接口（可选，最后实现）
+阶段 8  目录监视与实时诊断/建议（后台服务）     [已完成]
+阶段 9  Web-UI / CLI 集成与展示                 [已完成]
+阶段 10 独立幽灵窗口（Ghost UI，浏览器行间建议） [已完成/MVP]
+阶段 11 VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌） [未开始]
+附加 A  Checklist 预留接口（可选，最后实现）     [未开始]
 ```
 
 ```mermaid
@@ -120,7 +122,8 @@ flowchart BT
   S7[阶段7 LLM修复]
   S8[阶段8 目录监视]
   S9[阶段9 Web或CLI]
-  S10[阶段10 VSCode幽灵窗]
+  S10[阶段10 Ghost UI]
+  S11[阶段11 VSCode扩展]
   SA[附加A Checklist接口]
   S0 --> S1 --> S2 --> S25
   S25 --> S26
@@ -129,8 +132,10 @@ flowchart BT
   S6 --> S8
   S7 --> S8
   S8 --> S9
+  S8 --> S10
   S9 --> S10
-  S10 -.-> SA
+  S10 --> S11
+  S11 -.-> SA
 ```
 
 ### 实现状态速查
@@ -150,7 +155,8 @@ flowchart BT
 | 7 | 已完成 | `latex/prompt_builder.py`, `latex/suggestion.py`, `latex/fix_batch.py`, `workflow_latex_diagnose_v1.json`, `latex_fix_prepare` / `latex_collect_suggestions` |
 | 8 | 已完成 | 目录监视、防抖增量诊断、空闲润色触发（见 §三 阶段 8） |
 | 9 | 已完成 | Web-UI / CLI 启动监视、展示 issues / suggestions / 润色（见 §三 阶段 9） |
-| 10 | 未开始 | VS Code / Cursor 行间幽灵窗口（见 §三 阶段 10） |
+| 10 | 已完成（MVP） | `latex/ghost_cli.py`, `latex/ghost_server.py`, `latex/apply_edit.py`, `ui/ghost/*`（见 §三 阶段 10） |
+| 11 | 未开始 | 可发布 VS Code 扩展：Activity Bar 侧栏 + 复用阶段 10 幽灵 UX（见 §三 阶段 11） |
 | 附加 A | 未开始 | Checklist 预留接口，不接论文审稿主流程（见 §三 附加阶段 A） |
 
 **已取消 / 移出主路径（v0.3）**
@@ -159,16 +165,24 @@ flowchart BT
 |--------|------|
 | 原阶段 8「润色工作流 + checklist」 | 拆入阶段 8 空闲润色；**不**读取 `thesis-checklists.md` |
 | 原阶段 10「CLI 批处理」 | **从 LaTeX 辅助路线图移除**；一次性 `latex_diagnose_v0/v1` 仍可用 `main.py task`，非产品主路径 |
-| 原阶段 11 | 合并为 **阶段 10**，强调幽灵窗口交互 |
+| 原阶段 11（仅扩展） | 拆为 **阶段 10**（独立 Ghost UI）+ **阶段 11**（VS Code 可安装扩展） |
 
-**两条使用路径（v0.4 说明）**
+**展示通道（v0.6，互不替代）**
+
+| 通道 | 阶段 | 形态 | 用途 |
+|------|------|------|------|
+| **机器 / 人读列表** | 9 | CLI 表格、`watch` API、Web 页 | 摘要、Top-K issues、建议列表；可 `--json` |
+| **幽灵窗口** | 10 | 浏览器 `http://127.0.0.1:8771/` | **行间卡片**展示纠错/润色，可拖/缩放/应用；**不**走 VS Code 扩展 |
+| **编辑器内嵌** | 11 | Marketplace / VSIX 扩展 | Activity Bar 侧栏 + 在 **VS Code 正文** 复用幽灵交互；可选连外部编辑器 |
+
+**其它路径**
 
 | 路径 | 阶段 | 用途 |
 |------|------|------|
-| **一次性诊断** | 6–7（已完成） | `main.py task --wf latex_diagnose_v0/v1`：全库扫描一次，输出 `latex_report` JSON；适合 CI、抽查、验证 L3 |
-| **产品主路径** | 8–9（待做） | 目录 **watch** + 防抖诊断 + 空闲润色 + **人读展示**；短期 MVP 以此为准 |
+| **一次性诊断** | 6–7（已完成） | `main.py task --wf latex_diagnose_v0/v1`：全库扫描；CI / 验证 L3 |
+| **实时后端** | 8（已完成） | `WatchService`：防抖诊断 + 空闲润色；供 9/10/11 共用 |
 
-阶段 7 的 report **不是**给作者直接阅读的终态；人读视图在 **阶段 9** 交付（一次性 v1 也应复用同一 view 层，默认简短输出）。
+阶段 7 的 `latex_report` JSON 供调试与 API；作者日常改稿优先 **阶段 10 幽灵窗口** 或 **阶段 11 扩展**，而非终端刷屏。
 
 ---
 
@@ -520,7 +534,7 @@ pytest tests/test_workflow/test_latex_diagnose_v1.py::test_latex_diagnose_v1_inv
 | **`latex_report` 定位** | **机器契约** / 调试 / 阶段 9 输入；当前 embed **全量** `issues` 属有意设计，**非**作者终态 UI |
 | **大库典型现象** | 如 `VaLoRA_TMC`：`issue_count` 可达数百（多为 ChkTeX warning），`suggestions` 仍可为空；验证 L3 宜用 `broken_braces.tex` 或含真实 **error** 的样本 |
 
-**本步不做**：Reflection 多轮、目录监视（→8）、Web/CLI 人读展示（→9）、VS Code 幽灵窗口（→10）、`latex_report` 人读渲染（→9）。
+**本步不做**：Reflection 多轮、目录监视（→8）、Web/CLI 人读展示（→9）、独立幽灵窗口（→10）、VS Code 扩展（→11）、`latex_report` 人读渲染（→9）。
 
 **说明**：阶段 7 中的 `fix_batch` 仅用于**单次工作流内**限制 LLM 处理条数，不是「目录批处理」产品能力；路线图不再规划独立的 LaTeX 批处理阶段。
 
@@ -566,7 +580,7 @@ pytest tests/test_latex/test_watch_service.py -v
 
 **本步明确不做**
 
-- Web 页面布局、VS Code 扩展（→9、→10）
+- Web 页面布局、幽灵窗口（→10）、VS Code 扩展（→11）
 - 接入论文审稿 **checklist** 工作流（→附加阶段 A）
 - 对多个无关目录的**批处理扫描**、定时全库 cron 报告
 - 独立 `workflow_latex_polish_v1` + `thesis-checklists.md` 方案（已废弃）
@@ -633,41 +647,273 @@ pytest tests/test_latex/test_watch_service.py -v
 
 **本步不做**
 
-- VS Code / Cursor 扩展（→10）
+- 行间幽灵卡片 UI（→**阶段 10**，独立浏览器，非本 Web 主站）
+- VS Code / Cursor 可安装扩展（→**阶段 11**）
 - Checklist 勾选 UI（→附加阶段 A）
-- 编辑器内「应用 replacement」一键改文件（可在 Web 做「复制建议」，完整改文件交互留给阶段 10）
 
 ---
 
-### 阶段 10：VS Code / Cursor 扩展（行间幽灵窗口，最终目标）
+### 阶段 10：独立幽灵窗口（Ghost UI，浏览器行间建议）
 
-**目标**：在 LaTeX **阅读与编辑界面行间**以**幽灵窗口**（ghost panel / inline ghost UI）展示建议：可**拖动**、可**帮助用户修改文件**（采纳 `replacement` 或片段插入）、支持**自动显示**与**用户开关**；连接阶段 8–9 的监视服务或扩展内轻量客户端。
+**目标**：在**不安装 VS Code 扩展**的前提下，用**专用浏览器页**展示 LaTeX 源码与**行间幽灵建议卡片**（纠错 `suggestions` + 润色 `polish_suggestions`），替代「只在 CLI 打印 / Web 列表里看建议」。与用户在 VS Code 中编辑可**并行**：在 VS Code 改 `.tex`，在浏览器幽灵页看建议并**应用**写回磁盘（保存后 watch 刷新）。
 
-**建议分步（均在阶段 10 内，但 PR 可拆分）**
+**与阶段 9 的分工**
 
-| 子步 | 内容 |
+| 阶段 9 | 阶段 10 |
+|--------|---------|
+| CLI 人读 / Web `api/latex/watch` | 独立端口 **Ghost UI**（默认 `8771`，与 Web `8765` 分离） |
+| 列表、摘要、Top-K | 行号对齐源码 + 浮动卡片 |
+| 可复制建议 | **应用** `replacement` → `latex/apply_edit.py` 写回文件 |
+
+**架构**
+
+```text
+python -m latex.ghost_cli --root … --main-tex paper.tex
+  → 内嵌 WatchService（阶段 8，同 9 后端逻辑）
+  → FastAPI ghost_server（latex/ghost_server.py）
+  → 静态页 ui/ghost/（index.html + ghost.js + ghost.css）
+  → 浏览器：左侧行号源码 + 锚定行的可拖/缩放幽灵卡
+```
+
+```mermaid
+flowchart LR
+  CLI[ghost_cli]
+  W[WatchService]
+  SRV[ghost_server HTTP]
+  UI[ui/ghost 浏览器]
+  DISK[.tex 磁盘]
+
+  CLI --> W
+  CLI --> SRV
+  UI -->|poll snapshot| SRV
+  SRV --> W
+  UI -->|POST apply| SRV
+  SRV -->|apply_edit| DISK
+  W -->|监视变更| DISK
+```
+
+**已实现（仓库现状，保留不删）**
+
+| 模块 | 说明 |
 |------|------|
-| **10a** | 扩展配置：`texagent.latexProjectRoot`、`texagent.watch.enabled`；连接 watch 服务（本地进程或 `localhost` API）；Problems 面板映射 `DiagnosticIssue` |
-| **10b** | **行间幽灵窗口**：在 `.tex` 对应行附近渲染建议卡片（非完整 WebView 占满屏为佳）；支持拖拽 reposition；展示问题说明 + 修改建议 + 润色建议 |
-| **10c** | **改文件**：采纳建议 → `WorkspaceEdit`；润色仅文案时可只插入/替换选区；与 `document_version` 协调，避免过期 suggestion 误应用 |
-| **10d** | **体验**：打开/关闭幽灵层开关；自动显示策略（仅 error / 含 warning / 含 polish）；与 2s 空闲润色节奏对齐 |
+| `latex/watch_service.py` | 阶段 8 监视（阶段 10 内嵌启动） |
+| `latex/ghost_server.py` | Ghost HTTP：`/api/snapshot`、`/api/file`、`/api/apply` |
+| `latex/ghost_cli.py` | 入口：启动 watch + 服务 + 可选打开浏览器 |
+| `latex/apply_edit.py` | 将 `Suggestion` 按 `range` 写回 `.tex` |
+| `ui/ghost/` | 行间幽灵 UI（拖动标题栏、CSS resize、应用/忽略） |
+| `tests/test_latex/test_apply_edit.py`、`test_ghost_server.py` | 单测 |
 
-**本步实现范围**
+**用户操作（验收）**
 
-- `vscode-extension`（兼容 Cursor）：Language Client 可选，首版 **HTTP/stdio 连 watch 服务** 即可
-- 复用阶段 0 的 `Suggestion.range`（0-based）映射到 `Range`
-- 不在扩展内嵌完整 latexmk 流水线；编译仍走阶段 4 服务侧
+```bash
+python -m latex.ghost_cli --root tests/test_latex/VaLoRA_TMC --main-tex paper.tex
+# 浏览器打开 http://127.0.0.1:8771/
+# 选择 tex 文件 → 见行间修改/润色卡片 → 应用 → 磁盘文件更新 → watch 再诊断
+```
 
-**验收**
+**接口（Ghost 专用，与阶段 9 watch API 可并存）**
 
-- 打开 `multifile` 工程：改 `.tex` → 行间出现纠错幽灵条；停笔 2s → 出现润色幽灵条；拖动后位置保持；关闭开关后不再自动弹出
-- 采纳一条 `replacement` 后文件内容正确、诊断刷新
+- `GET /api/snapshot` → `WatchSnapshot` JSON（issues、suggestions、polish_suggestions）
+- `GET /api/file?path=` → 行数组，供前端渲染
+- `POST /api/apply` → body `{ "suggestion": { ... } }`
 
-**本步明确不做（首版）**
+**后续可增强（仍属阶段 10，非 11）**
 
-- LSP、SyncTeX、扩展内嵌 TeX 发行版安装器
-- Checklist 侧边栏（→附加阶段 A）
-- 多根工作区批处理诊断
+- SSE 替代轮询；多文件分栏；与系统默认浏览器外的「置顶小窗」；润色卡仅 `rationale_zh` 无 `replacement` 的展示优化
+- 可选：从已有 `POST /api/latex/watch`（8765）只读 snapshot，ghost 仅做前端（双进程）
+
+**本步明确不做**
+
+- VS Code Activity Bar、扩展 Marketplace（→**阶段 11**）
+- 在 VS Code 正文内嵌幽灵层（→**阶段 11**，可复用本阶段 UI 逻辑）
+- TeX_Agent 通用工作流侧栏（→**阶段 11** 预留 `AgentBridge`）
+- 替代用户主编辑器（Ghost 页为**伴随视图**，非完整 IDE）
+
+---
+
+### 阶段 11：VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌）
+
+**最终交付**：用户可从 **VS Code Marketplace**（及 **Open VSX** / Cursor **Install from VSIX**）安装 **TeX_Agent** 扩展；与资源管理器、搜索等共用左侧 **Activity Bar**，点击 **TeX_Agent** 图标后，**主侧边栏**成为交互区；在 **VS Code 打开的 `.tex` 正文**中嵌入与阶段 10 同类的**行间幽灵建议**（可拖动、缩放、应用）。
+
+**与阶段 10 的关系**
+
+- **阶段 10 先行**：在浏览器验证幽灵 UX 与 `apply_edit` 契约，**无需**扩展即可改稿。
+- **阶段 11**：将阶段 10 的「快照 + 卡片 + 应用」迁入 VS Code API（`WorkspaceEdit`、`DiagnosticCollection`、可选 Webview Overlay）；可继续连本机 `WatchService` 或 `http://127.0.0.1:8771` / `8765`。
+- **不删除** `ui/ghost/`：扩展成熟前仍可用 `ghost_cli` 演示。
+
+**与仓库现有 `vscode-extension/` 的关系**：在现有 `tex-agent-chat`（侧栏 + Web 聊天壳）上演进；**首版优先 LaTeX 助手 + 幽灵层**；通用工作流仅接口。
+
+---
+
+#### 11.0 架构总览
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Activity Bar [Explorer][Search]…[TeX_Agent]  ← contributes.viewsContainers
+├──────────────┬──────────────────────────────────────────────────┤
+│  TeX_Agent   │  编辑器 (.tex)                                    │
+│  侧边栏      │    ┌─ 幽灵建议卡片（锚定行号，可拖/缩放）────────┐  │
+│  ┌─────────┐ │    │ rationale_zh / preview replacement      │  │
+│  │模式切换 │ │    │ [应用] [忽略] [下一条]                     │  │
+│  │LaTeX助手│ │    └──────────────────────────────────────────┘  │
+│  │工作流*  │ │    正文 LaTeX 源码                               │
+│  │其他*    │ │                                                  │
+│  └─────────┘ │  Problems ← DiagnosticIssue（阶段 8）            │
+├──────────────┴──────────────────────────────────────────────────┤
+│  本机 Python：latex watch 服务（阶段 8–9 API，HTTP localhost）      │
+│  不内嵌 latexmk；诊断/润色逻辑仍在 TeX_Agent 后端                  │
+└─────────────────────────────────────────────────────────────────┘
+  * 工作流 / 其他：首版仅 UI 占位 + AgentBridge 接口，不阻塞 LaTeX 发布
+```
+
+```mermaid
+flowchart LR
+  EXT[VS Code 扩展]
+  SB[侧栏 WebviewView]
+  GHOST[行间幽灵层]
+  API[阶段8-9 watch API]
+  PY[Python watch 进程]
+
+  EXT --> SB
+  EXT --> GHOST
+  SB -->|启动/停止/模式| API
+  GHOST -->|订阅 snapshot| API
+  API --> PY
+  GHOST -->|WorkspaceEdit 应用| TEX[.tex 编辑器]
+```
+
+---
+
+#### 11.1 发布与注册（可下载安装）
+
+| 项 | 做法 |
+|----|------|
+| **包形态** | `vscode-extension/` 用 `@vscode/vsce package` 产出 `.vsix`；`engines.vscode` 与仓库 README 对齐 |
+| **发布渠道** | VS Code Marketplace（`publisher` 与图标、LICENSE）；Cursor 用户同 VSIX 或 Open VSX |
+| **激活** | `onLanguage:latex` + `onView:texagent.*` + 配置 `texagent.latex.enabled`；打开 `.tex` 或点 Activity Bar 即激活 |
+| **依赖后端** | 扩展**不**打包 Python；首次使用提示「启动 watch 服务」（命令调 `python -m …` 或连已有 `texagent.watchServerUrl`） |
+
+**验收（发布）**：干净环境 `code --install-extension tex-agent-x.x.vsix` → Activity Bar 出现 TeX_Agent → 侧栏可打开 LaTeX 模式。
+
+---
+
+#### 11.2 侧边栏（Activity Bar + 主侧栏，首版交互中心）
+
+**UI 容器**（`package.json` → `contributes.viewsContainers.activitybar` + `views`）：
+
+- Activity Bar 图标：**TeX_Agent**（与 Explorer、Search 同级，沿用/扩展现有 `media/texagent.svg`）。
+- 主侧边栏：**WebviewView**（`retainContextWhenHidden: true`），非整页 iframe 聊天为主，而是**模式化面板**。
+
+**侧栏模式（Tab 或下拉切换）**
+
+| 模式 | 首版 | 功能 |
+|------|------|------|
+| **LaTeX 助手** | **实现（首要）** | 绑定工作区 LaTeX 根目录、`main_tex`；启停 **watch**（阶段 8–9）；展示摘要（error/warning 数、最近 suggestions / polish）；列表点选跳转编辑器行 |
+| **工作流** | **接口占位** | UI：工作流下拉 + 输入框 + 发送；调用 `AgentBridge.runWorkflow(id, message)`；首版显示「即将支持」或仅连现有 Web `api/chat`（可选，非阻塞） |
+| **其他** | **接口占位** | `AgentBridge.listCapabilities()` 注册项；审稿 checklist 等**不**默认接入 |
+
+**LaTeX 助手模式（对接阶段 0–9）**
+
+| 用户操作 | 后端 |
+|----------|------|
+| 选择项目根 / 自动检测含 `main.tex` 的文件夹 | `latex_project` 元数据或 watch 配置里的 `root` |
+| 打开「自动纠错与润色」 | `POST /api/latex/watch`（或 CLI 等价）→ 防抖诊断 + 空闲润色（阶段 8） |
+| 关闭助手 | `DELETE watch`；幽灵层清除 |
+| 查看问题说明 | snapshot / report 的 `diagnostics`（人读摘要，阶段 9 view 逻辑可复用到 Webview） |
+| 查看修改建议 / 润色建议 | `suggestions` + `polish_suggestions`；点击条目 → 编辑器定位并打开对应幽灵卡片 |
+
+配置项（`contributes.configuration`）示例：
+
+- `texagent.latex.projectRoot`、`texagent.latex.mainTex`
+- `texagent.watchServerUrl`（默认 `http://127.0.0.1:8765` 或与 Web 服务同端口）
+- `texagent.latex.autoStartWatch`、`texagent.latex.idlePolishSec`（默认 2）
+- `texagent.ghost.enabled`、`texagent.ghost.showPolish`、`texagent.ghost.maxVisible`（同时显示的卡片数上限）
+
+---
+
+#### 11.3 编辑器：行间幽灵建议（迁入 VS Code，复用阶段 10）
+
+**目标 UX**：与 **阶段 10** 一致——正文旁浮动卡片、拖动、缩放、应用 `replacement`；差异仅为宿主从**浏览器**变为 **VS Code 编辑器**（`WorkspaceEdit` + 可选 Overlay）。
+
+**实现分层**（阶段 10 已在浏览器验证；扩展侧分步）：
+
+| 子步 | 名称 | 内容 | 优先级 |
+|------|------|------|--------|
+| **11a** | 基础连接 | watch HTTP 客户端；`DiagnosticCollection`；与 `project_version` 对齐 | P0 |
+| **11b** | 幽灵 MVP | CodeLens + CodeAction + Decoration；或 **iframe/复用** `ui/ghost` 逻辑 | P0 |
+| **11c** | 应用与同步 | `WorkspaceEdit`（可复用 `latex/apply_edit` 语义）；保存后触发 watch | P0 |
+| **11d** | 编辑器内 overlay | Webview Overlay / Inset：拖/缩放；`ghost.renderer: overlay \| codelens` | P1 |
+| **11e** | 侧栏 LaTeX 助手 | 11.2 完整 UI + 启停 watch + 三列表 | P0 |
+| **11f** | 发布 | `vsce package`、Marketplace、Cursor 抽测 | P0 |
+| **11g** | AgentBridge 接口 | 工作流 / 其它能力占位，**不**阻塞 LaTeX | P2 |
+
+**数据流**：扩展订阅 snapshot（8771 Ghost 服务或 8765 Web watch）→ 与阶段 10 相同索引规则 → 渲染于当前 `.tex` 编辑器。
+
+**不在扩展内实现**：ChkTeX / latexmk / LangGraph（仍在 Python）。
+
+---
+
+#### 11.4 预留接口（TeX_Agent 其他能力，后续迁入）
+
+```typescript
+// vscode-extension/src/platform/agentBridge.ts（示意，阶段 11g）
+interface AgentBridge {
+  listWorkflows(): Promise<{ id: string; label: string }[]>;
+  runWorkflow(workflowId: string, message: string, options?: object): AsyncIterable<BridgeEvent>;
+  getWatchSnapshot(watchId: string): Promise<LatexWatchSnapshot>;
+}
+```
+
+- **LaTeX watch / 幽灵**：阶段 11e + 11a–d；应用逻辑与 **`latex/apply_edit.py`** 对齐。
+- **工作流 / 审稿 / checklist**：仅接口 + 侧栏占位；默认可提示使用 Web UI 或 `python -m latex.ghost_cli`。
+
+---
+
+#### 11.5 建议文件与模块划分
+
+```
+vscode-extension/
+  package.json              # activitybar、views、configuration、commands
+  src/
+    extension.ts            # activate / deactivate
+    sidebar/
+      latexAssistView.ts    # LaTeX 助手 WebviewView（首要）
+      workflowView.ts       # 工作流 Tab（占位 → 11g）
+    latex/
+      watchClient.ts        # 对齐阶段 9 watch API
+      diagnostics.ts        # DiagnosticCollection
+      suggestionIndex.ts  # file+line → Suggestion[]
+      ghost/
+        codelensProvider.ts # 11b MVP
+        overlayManager.ts   # 11d（可移植 ui/ghost 交互）
+      applyEdit.ts          # WorkspaceEdit + version 校验
+    platform/
+      agentBridge.ts        # 11g 预留接口
+  README.md                 # 安装、启动 watch、Marketplace 链接
+```
+
+可与现有 `extension.js` 并存一版后迁移 TypeScript，或直接在 `extension.js` 增量（路线图不限定，以可发布为准）。
+
+---
+
+#### 11.6 验收（分档）
+
+| 档位 | 条件 |
+|------|------|
+| **11-MVP（可上架）** | 安装扩展 → Activity Bar → 侧栏 LaTeX 启停 watch → Problems + **应用** 一条 `replacement` |
+| **11-完整** | 编辑器内 overlay 幽灵卡拖/缩放 + 与阶段 10 行为一致 + 停笔 2s 润色卡 |
+
+**推荐样本**：同阶段 10；扩展另验「在 VS Code 编辑、Ghost 页或扩展内应用」三者文件一致。
+
+---
+
+#### 11.7 本步明确不做（首版扩展）
+
+- 扩展内嵌 TeX 发行版、latexmk、LSP、SyncTeX
+- 审稿 checklist 默认接入侧栏（→附加阶段 A）
+- 多根工作区批量扫目录
+- 将 LangGraph 工作流编排**迁入**扩展进程（仅远程/本机 Python 服务）
+- 替代 VS Code 原生 LaTeX Workshop 的编译入口（仅诊断辅助，不抢编译 UI）
 
 ---
 
@@ -677,7 +923,7 @@ pytest tests/test_latex/test_watch_service.py -v
 
 **背景**
 
-- 仓库内审稿用 checklist（如 `thesis-checklists.md`、`storage/checklists/*`）属于**另一条工作流**，本 LaTeX 辅助程序阶段 8–10 **不读取、不依赖**。
+- 仓库内审稿用 checklist（如 `thesis-checklists.md`、`storage/checklists/*`）属于**另一条工作流**，本 LaTeX 辅助程序阶段 8–11 **不读取、不依赖**。
 - 用户日后可**自行提供**与写作相关的 checklist（路径或 JSON），使润色/建议更贴近章节要求。
 
 **本步实现范围（接口为主，实现可薄）**
@@ -705,13 +951,14 @@ pytest tests/test_latex/test_watch_service.py -v
 |--------|------|
 | 阶段 2 与 3 | 不同开发者：解析 vs chktex，但都依赖阶段 0 |
 | 阶段 9 CLI 与 9 Web | 共用阶段 8 事件模型，可两人并行 |
-| 附加阶段 A 与 阶段 10 | Checklist 接口可在扩展稳定后独立合入 |
+| 附加阶段 A 与 阶段 11 | Checklist 接口可在扩展稳定后独立合入 |
+| 阶段 10 与 阶段 11 | 10 浏览器幽灵可先于 11 扩展验收 UX |
 
-**串行硬依赖**：`0 → 1 → 2 → 2.5 → (2.6 可选) → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10`。
+**串行硬依赖**：`0 → 1 → 2 → 2.5 → (2.6 可选) → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11`。
 
-**说明**：阶段 2 与 3 可并行；**2.5 必须在 7 之前**（跨文件脏区）；2.6 与 3/4 可并行。**附加阶段 A** 依赖 8 的润色 prompt 钩子，且 intentionally **晚于** 10。
+**说明**：**阶段 10（Ghost UI）不依赖阶段 11**；11 依赖 8–9 且**建议**在 10 验证后再做扩展内嵌。**附加阶段 A** intentionally **晚于** 11。
 
-**产品优先级**：**8 → 9**（Web 或 CLI 二选一先打通即可演示）→ **10**（编辑器幽灵窗口）→ **附加 A**（checklist 增强）。
+**产品优先级**：**8 → 9** → **10（幽灵窗口，无扩展）** → **11（VS Code 可安装）** → **附加 A**。
 
 ---
 
@@ -767,7 +1014,8 @@ tests/test_tools/
 | 7 | `test_prompt_builder.py`, `test_suggestion.py`, `test_fix_batch.py`, `test_latex_diagnose_v1.py`（Mock LLM） |
 | 8 | `test_watch_service.py`（防抖、空闲润色触发，Mock LLM） |
 | 9 | `test_latex_watch_api.py`（FastAPI TestClient）或 CLI 集成测试 |
-| 10 | 扩展手册 + 手工验收清单（自动化可后置） |
+| 10 | `test_ghost_server.py`、`test_apply_edit.py`；手工 `python -m latex.ghost_cli` 浏览器行间卡 |
+| 11 | `vscode-extension` 打包；侧栏 + 编辑器幽灵（11-MVP/完整） |
 
 ---
 
@@ -817,29 +1065,30 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 1. 用户指定 `root` 后，后台**持续监视**目录。
 2. 修改 `.tex` 后，在 **2s 内**（防抖后）可在 Web 或 CLI 看到**问题说明**与**修改建议**（有 LLM 时）。
 3. 用户**停笔约 2s**，可看到**润色建议**（文案为主，可无 `replacement`）。
-4. **不**要求 VS Code 扩展、幽灵窗口、checklist、目录批处理。
+4. **不**要求幽灵窗口、VS Code 扩展、checklist、目录批处理。
 
-**明确不属于 MVP**
+**阶段 10 / 11（产品增强，非 8+9 MVP）**
 
-- 阶段 10 行间幽灵窗口、拖动、扩展内改文件
-- 附加阶段 A checklist 注入
-- 对多项目/多目录的批处理扫描与 `report.json` 批出
+- **阶段 10**：浏览器幽灵窗口（**可先于扩展完成**）
+- **阶段 11**：VS Code 可安装扩展
+- **附加阶段 A**：checklist 注入
 
 ---
 
 ## 十、与设计文档里程碑的对应
 
-| 设计文档 §10 | 本路线图（v0.3） |
+| 设计文档 §10 | 本路线图（v0.6） |
 |--------------|------------------|
 | M1 | 阶段 1 + 2（**已完成**） |
-| M1+ | 阶段 2.5（+ 可选 2.6）复杂结构与引用解读（**已完成**） |
+| M1+ | 阶段 2.5（+ 可选 2.6）（**已完成**） |
 | M2 | 阶段 3 + 6（**已完成**） |
 | M3 | 阶段 4 + 6（**已完成**） |
-| M4 | 阶段 7（**已完成**）+ 阶段 8–9（实时监视与展示） |
-| M5 | 阶段 10（VS Code / Cursor 幽灵窗口） |
-| M5+（可选） | 附加阶段 A（用户 checklist 接口，非审稿主流程） |
+| M4 | 阶段 7 + 8–9（**已完成**） |
+| M5 | 阶段 10（**独立 Ghost UI**，浏览器行间建议） |
+| M6 | 阶段 11（可安装 VS Code / Cursor 扩展） |
+| M6+（可选） | 附加阶段 A；`AgentBridge` 迁入通用工作流 |
 
-*说明：原路线图 M5「润色工作流 + checklist」已废止；润色并入阶段 8 空闲触发，checklist 仅保留附加阶段。*
+*说明：幽灵交互先在 **阶段 10** 落地，再迁入 **阶段 11**；不必等 Marketplace 扩展才能看到行间建议。*
 
 ---
 
@@ -849,14 +1098,16 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 2. **用 `CommandRunningTool` 直接跑 latexmk**：超时 30s 不够；且 `shell=True` 不利于路径安全；单独封装。
 3. **整篇 tex 送入 LLM**：阶段 7 必须按 issue 切片 + 条数上限。
 4. **展平多文件为一棵 AST**：行号对不上；坚持 ProjectIndex + 相对路径。
-5. **先改 vscode-extension**：监视服务与事件 JSON（阶段 8–9）未稳定时，幽灵窗口（阶段 10）会反复改。
-6. **把 checklist 塞进 LaTeX watch 默认路径**：checklist 属于审稿工作流；LaTeX 仅通过附加阶段 A 预留可选注入。
-7. **为 LaTeX 辅助单独做目录批处理 CLI**：一次性诊断用 `main.py task --wf latex_diagnose_*` 即可，不作为产品阶段。
-8. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
-9. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
-10. **把 `latex_diagnose_v1` 当润色或当「必有 suggestions」**：v1 仅 error→L3；润色在阶段 8；大库全 warning 时 `suggestion_count=0` 正常。
-11. **把阶段 7 的 `latex_report` 直接给用户**：全量 JSON 过长；应用阶段 9 人读视图，或 `--json` 显式索取。
-12. **用 `VaLoRA_TMC` 全 warning 验收 L3**：应使用含 **error** 的夹具（如 `broken_braces.tex`）或确认 latexmk 产出 error 后再看 `suggestions`。
+5. **跳过阶段 10 直接做阶段 11 扩展**：浏览器 Ghost UI 更易迭代行间卡；扩展 API 限制多，应先 10 后 11。
+6. **把幽灵窗口仅做进 VS Code**：阶段 10 的 `ghost_cli` 可独立演示，不装扩展也能改稿。
+7. **先改 vscode-extension**：阶段 10 契约稳定后再迁入 11，避免双份 UI 返工。
+8. **把 checklist 塞进 LaTeX watch 默认路径**：checklist 属于审稿工作流；LaTeX 仅通过附加阶段 A 预留可选注入。
+9. **为 LaTeX 辅助单独做目录批处理 CLI**：一次性诊断用 `main.py task --wf latex_diagnose_*` 即可，不作为产品阶段。
+10. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
+11. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
+12. **把 `latex_diagnose_v1` 当润色或当「必有 suggestions」**：v1 仅 error→L3；润色在阶段 8；大库全 warning 时 `suggestion_count=0` 正常。
+13. **把阶段 7 的 `latex_report` 直接给用户**：全量 JSON 过长；用阶段 9 列表或 **阶段 10 幽灵窗**。
+14. **用 `VaLoRA_TMC` 全 warning 验收 L3**：应用 `broken_braces.tex` 等含 error 样本。
 
 ---
 
@@ -874,7 +1125,9 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 | `\cite` key 在 `reference.bib` 中有对应条目 | 2.6 | 已通过 |
 | `latexmk` 报未定义引用 / 文献警告 | 4 | 已通过（log 解析） |
 | `latex_diagnose_v1`：`issue_count` 大、`suggestion_count=0`（多 warning、少 error） | 7 | 预期行为；L3 用 error 夹具另验 |
-| 人读摘要 / Top-K issues / 非 JSON 终态 | 9 | 待实现 |
+| 人读摘要 / Top-K issues / 非 JSON 终态 | 9 | 已通过（CLI/Web） |
+| 浏览器幽灵窗：行间卡、应用 replacement | 10 | 已通过（MVP）；见 `latex.ghost_cli` |
+| Activity Bar 侧栏 + VS Code 内嵌幽灵 | 11 | 待实现 |
 
 ---
 
