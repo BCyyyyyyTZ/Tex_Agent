@@ -27,11 +27,18 @@ chromadb>=0.5.0
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
 
-# LaTeX 单文件解析（阶段 2，AST 可选）
+# LaTeX 纠错/润色基础
 pylatexenc>=2.10
 
-# 目录监视（阶段 8）
+# 目录监视
 watchdog>=4.0.0
+
+# 幽灵窗口服务（阶段 10）依赖 FastAPI/uvicorn/httpx（上方已包含），无需额外 pip 包
+# 说明：LaTeX 编译诊断还依赖系统命令（非 pip）：
+#   1) TeX 发行版（TeX Live / MiKTeX）
+#   2) latexmk（编译日志诊断）
+#   3) chktex（静态检查）
+# 请确认上述命令在 PATH 中可执行，否则将退化为仅部分能力可用。
 
 # PDF 处理依赖
 pymupdf>=1.24.0
