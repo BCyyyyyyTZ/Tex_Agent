@@ -75,8 +75,15 @@
 
   function bindGutter(gutter, which) {
     if (!gutter || gutter.classList.contains("is-collapsed")) return;
-    gutter.addEventListener("mousedown", function (downEv) {
+    function startDrag(downEv) {
       downEv.preventDefault();
+      if (downEv.pointerId != null && gutter.setPointerCapture) {
+        try {
+          gutter.setPointerCapture(downEv.pointerId);
+        } catch (_e) {
+          /* ignore */
+        }
+      }
       var w = load();
       var startX = downEv.clientX;
       var start = { wf: w.wf, branch: w.branch, right: w.right, rag: w.rag };
@@ -101,6 +108,9 @@
       function onUp() {
         document.removeEventListener("mousemove", onMove, true);
         document.removeEventListener("mouseup", onUp, true);
+        document.removeEventListener("pointermove", onMove, true);
+        document.removeEventListener("pointerup", onUp, true);
+        document.removeEventListener("pointercancel", onUp, true);
         gutter.classList.remove("is-dragging");
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
@@ -109,7 +119,15 @@
 
       document.addEventListener("mousemove", onMove, true);
       document.addEventListener("mouseup", onUp, true);
-    });
+      document.addEventListener("pointermove", onMove, true);
+      document.addEventListener("pointerup", onUp, true);
+      document.addEventListener("pointercancel", onUp, true);
+    }
+    if (window.PointerEvent) {
+      gutter.addEventListener("pointerdown", startDrag);
+    } else {
+      gutter.addEventListener("mousedown", startDrag);
+    }
   }
 
   function bindAllGutters() {

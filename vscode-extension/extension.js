@@ -71,7 +71,14 @@ function getServerUrl() {
 function getChatPageUrl() {
   let u = String(getServerUrl()).trim() || "http://127.0.0.1:8765";
   if (!u.endsWith("/")) u += "/";
-  return u;
+  const sep = u.indexOf("?") >= 0 ? "&" : "?";
+  return u + sep + "_t=" + Date.now();
+}
+
+function getConferenceCalendarUrl() {
+  const base = getChatPageUrl();
+  const sep = base.indexOf("?") >= 0 ? "&" : "?";
+  return base + sep + "open=calendar";
 }
 
 function isTexAgentWorkspace() {
@@ -168,11 +175,19 @@ function getProxySidebarHtml(webview, extensionUri) {
       background: var(--vscode-button-background); color: var(--vscode-button-foreground);
       border: none; border-radius: 4px; }
     #send:disabled { opacity: 0.5; }
+    p.hi.cal { margin-top: 0; }
+    #open-cal {
+      width: 100%; padding: 8px 10px; cursor: pointer; font: inherit; font-weight: 600;
+      color: #ecfeff; background: linear-gradient(135deg, rgba(6,78,99,0.85), rgba(30,27,75,0.9));
+      border: 1px solid rgba(34,211,238,0.55); border-radius: 6px;
+    }
+    #open-cal:hover { filter: brightness(1.08); }
   </style>
 </head>
 <body>
   <h1>TeX Agent</h1>
   <p class="hi">侧栏 <strong>代理模式</strong>：Enter 发送、Shift+Enter 换行。需先运行 <code>python -m ui.web.server</code>。完整 Web UI 请 <strong>Ctrl+Alt+T</strong> 用 Simple Browser。</p>
+  <p class="hi cal"><button type="button" id="open-cal">◈ 打开顶会投稿日历</button>（在浏览器打开完整页，含倒计时浮层）</p>
   <div id="chat"></div>
   <div class="bar">
     <div class="row">
@@ -209,6 +224,11 @@ function attachChatBridge(webview, logCh) {
       return;
     }
     if (msg.type === "pong") {
+      return;
+    }
+    if (msg.type === "openConferenceCalendar") {
+      const calUrl = getConferenceCalendarUrl();
+      void vscode.env.openExternal(vscode.Uri.parse(calUrl));
       return;
     }
     if (msg.type === "chat") {
@@ -288,6 +308,13 @@ function activate(context) {
     vscode.commands.registerCommand("texagent.openSimpleBrowser", function () {
       const url = getChatPageUrl();
       return vscode.commands.executeCommand("simpleBrowser.show", url);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("texagent.openConferenceCalendar", function () {
+      const url = getConferenceCalendarUrl();
+      return vscode.env.openExternal(vscode.Uri.parse(url));
     })
   );
 

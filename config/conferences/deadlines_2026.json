@@ -1,0 +1,344 @@
+{
+  "meta": {
+    "title": "学术顶会投稿日历 2026–2027",
+    "timezone": "AoE",
+    "note": "日期为常见轮次参考，请以各会议官网为准；数据为静态配置，非实时抓取。",
+    "valid_from": "2026-06-01",
+    "valid_through": "2027-06-30"
+  },
+  "fields": [
+    { "id": "all", "label": "全部", "color": "#94a3b8" },
+    { "id": "cv", "label": "计算机视觉", "color": "#22d3ee" },
+    { "id": "nlp", "label": "自然语言", "color": "#a78bfa" },
+    { "id": "ml", "label": "机器学习", "color": "#34d399" },
+    { "id": "ai", "label": "人工智能", "color": "#fbbf24" },
+    { "id": "networking", "label": "计算机网络", "color": "#fb7185" },
+    { "id": "systems", "label": "系统", "color": "#60a5fa" },
+    { "id": "security", "label": "安全", "color": "#f472b6" },
+    { "id": "data", "label": "数据挖掘", "color": "#2dd4bf" },
+    { "id": "robotics", "label": "机器人", "color": "#c084fc" }
+  ],
+  "conferences": [
+    {
+      "id": "ijcai_2027",
+      "name": "IJCAI 2027",
+      "fields": ["ai", "ml"],
+      "abstract_deadline": "2027-01-12",
+      "full_deadline": "2027-01-19",
+      "conference_start": "2027-08-15",
+      "venue": "待定",
+      "url": "https://www.ijcai.org/"
+    },
+    {
+      "id": "aaai_2027",
+      "name": "AAAI 2027",
+      "fields": ["ai", "ml"],
+      "abstract_deadline": "2026-08-18",
+      "full_deadline": "2026-08-25",
+      "conference_start": "2027-02-20",
+      "venue": "待定",
+      "url": "https://aaai.org/conference/aaai/"
+    },
+    {
+      "id": "iclr_2027",
+      "name": "ICLR 2027",
+      "fields": ["ml", "nlp"],
+      "abstract_deadline": "2026-09-24",
+      "full_deadline": "2026-10-01",
+      "conference_start": "2027-04-24",
+      "venue": "待定",
+      "url": "https://iclr.cc/"
+    },
+    {
+      "id": "cvpr_2027",
+      "name": "CVPR 2027",
+      "fields": ["cv"],
+      "abstract_deadline": "2026-11-07",
+      "full_deadline": "2026-11-14",
+      "conference_start": "2027-06-20",
+      "venue": "待定",
+      "url": "https://cvpr.thecvf.com/"
+    },
+    {
+      "id": "iccv_2027",
+      "name": "ICCV 2027",
+      "fields": ["cv"],
+      "abstract_deadline": "2027-03-03",
+      "full_deadline": "2027-03-10",
+      "conference_start": "2027-10-10",
+      "venue": "待定",
+      "url": "https://iccv.thecvf.com/"
+    },
+    {
+      "id": "wacv_2027",
+      "name": "WACV 2027",
+      "fields": ["cv"],
+      "abstract_deadline": "2026-08-12",
+      "full_deadline": "2026-08-19",
+      "conference_start": "2027-01-05",
+      "venue": "待定",
+      "url": "https://wacv.thecvf.com/"
+    },
+    {
+      "id": "acl_2027",
+      "name": "ACL 2027",
+      "fields": ["nlp"],
+      "abstract_deadline": "2027-01-15",
+      "full_deadline": "2027-01-22",
+      "conference_start": "2027-07-15",
+      "venue": "待定",
+      "url": "https://www.aclweb.org/"
+    },
+    {
+      "id": "naacl_2027",
+      "name": "NAACL 2027",
+      "fields": ["nlp"],
+      "abstract_deadline": "2026-10-01",
+      "full_deadline": "2026-10-08",
+      "conference_start": "2027-06-15",
+      "venue": "待定",
+      "url": "https://www.aclweb.org/portal/naacl"
+    },
+    {
+      "id": "emnlp_2027",
+      "name": "EMNLP 2027",
+      "fields": ["nlp"],
+      "abstract_deadline": "2027-05-15",
+      "full_deadline": "2027-05-22",
+      "conference_start": "2027-11-10",
+      "venue": "待定",
+      "url": "https://sigdat.org/"
+    },
+    {
+      "id": "coling_2027",
+      "name": "COLING 2027",
+      "fields": ["nlp"],
+      "abstract_deadline": "2026-09-18",
+      "full_deadline": "2026-09-25",
+      "conference_start": "2027-06-20",
+      "venue": "待定",
+      "url": "https://ufal.mff.cuni.cz/iccl"
+    },
+    {
+      "id": "icml_2027",
+      "name": "ICML 2027",
+      "fields": ["ml"],
+      "abstract_deadline": "2027-01-28",
+      "full_deadline": "2027-02-04",
+      "conference_start": "2027-07-20",
+      "venue": "待定",
+      "url": "https://icml.cc/"
+    },
+    {
+      "id": "neurips_2027",
+      "name": "NeurIPS 2027",
+      "fields": ["ml", "ai"],
+      "abstract_deadline": "2027-05-15",
+      "full_deadline": "2027-05-22",
+      "conference_start": "2027-12-05",
+      "venue": "待定",
+      "url": "https://neurips.cc/"
+    },
+    {
+      "id": "kdd_2027",
+      "name": "KDD 2027",
+      "fields": ["data", "ml"],
+      "abstract_deadline": "2027-02-01",
+      "full_deadline": "2027-02-08",
+      "conference_start": "2027-08-10",
+      "venue": "待定",
+      "url": "https://www.kdd.org/"
+    },
+    {
+      "id": "www_2027",
+      "name": "The Web Conference 2027",
+      "fields": ["data", "networking"],
+      "abstract_deadline": "2026-10-12",
+      "full_deadline": "2026-10-19",
+      "conference_start": "2027-04-15",
+      "venue": "待定",
+      "url": "https://thewebconf.org/"
+    },
+    {
+      "id": "sigir_2027",
+      "name": "SIGIR 2027",
+      "fields": ["data", "nlp"],
+      "abstract_deadline": "2027-01-20",
+      "full_deadline": "2027-01-27",
+      "conference_start": "2027-07-25",
+      "venue": "待定",
+      "url": "https://sigir.org/"
+    },
+    {
+      "id": "sigcomm_2027",
+      "name": "SIGCOMM 2027",
+      "fields": ["networking"],
+      "abstract_deadline": "2026-11-12",
+      "full_deadline": "2026-11-19",
+      "conference_start": "2027-08-20",
+      "venue": "待定",
+      "url": "https://www.sigcomm.org/events/sigcomm-conference"
+    },
+    {
+      "id": "nsdi_2027",
+      "name": "NSDI 2027",
+      "fields": ["networking", "systems"],
+      "abstract_deadline": "2026-09-16",
+      "full_deadline": "2026-09-23",
+      "conference_start": "2027-04-10",
+      "venue": "待定",
+      "url": "https://www.usenix.org/conference/nsdi27"
+    },
+    {
+      "id": "infocom_2027",
+      "name": "IEEE INFOCOM 2027",
+      "fields": ["networking"],
+      "abstract_deadline": "2026-07-15",
+      "full_deadline": "2026-07-22",
+      "conference_start": "2027-05-15",
+      "venue": "待定",
+      "url": "https://www.comsoc.org/conferences-events/portfolio-conferences-events"
+    },
+    {
+      "id": "conext_2026",
+      "name": "CoNEXT 2026",
+      "fields": ["networking"],
+      "abstract_deadline": "2026-08-05",
+      "full_deadline": "2026-08-12",
+      "conference_start": "2026-12-10",
+      "venue": "待定",
+      "url": "https://conferences2.sigcomm.org/co-next/"
+    },
+    {
+      "id": "mobicom_2027",
+      "name": "MobiCom 2027",
+      "fields": ["networking"],
+      "abstract_deadline": "2026-11-01",
+      "full_deadline": "2026-11-08",
+      "conference_start": "2027-10-15",
+      "venue": "待定",
+      "url": "https://www.sigmobile.org/mobicom/"
+    },
+    {
+      "id": "imc_2026",
+      "name": "IMC 2026",
+      "fields": ["networking", "data"],
+      "abstract_deadline": "2026-06-15",
+      "full_deadline": "2026-06-22",
+      "conference_start": "2026-10-20",
+      "venue": "待定",
+      "url": "https://conferences.sigcomm.org/imc/"
+    },
+    {
+      "id": "osdi_2027",
+      "name": "OSDI 2027",
+      "fields": ["systems"],
+      "abstract_deadline": "2026-12-02",
+      "full_deadline": "2026-12-09",
+      "conference_start": "2027-07-10",
+      "venue": "待定",
+      "url": "https://www.usenix.org/conference/osdi27"
+    },
+    {
+      "id": "sosp_2027",
+      "name": "SOSP 2027",
+      "fields": ["systems"],
+      "abstract_deadline": "2027-04-05",
+      "full_deadline": "2027-04-12",
+      "conference_start": "2027-10-15",
+      "venue": "待定",
+      "url": "https://sosp.org/"
+    },
+    {
+      "id": "atc_2027",
+      "name": "USENIX ATC 2027",
+      "fields": ["systems"],
+      "abstract_deadline": "2027-01-25",
+      "full_deadline": "2027-02-01",
+      "conference_start": "2027-07-15",
+      "venue": "待定",
+      "url": "https://sigops.org/s/conferences/atc/2026/index.html"
+    },
+    {
+      "id": "eurosys_2027",
+      "name": "EuroSys 2027",
+      "fields": ["systems"],
+      "abstract_deadline": "2026-10-08",
+      "full_deadline": "2026-10-15",
+      "conference_start": "2027-04-20",
+      "venue": "欧洲",
+      "url": "https://www.eurosys.org/"
+    },
+    {
+      "id": "security_2027",
+      "name": "USENIX Security 2027",
+      "fields": ["security"],
+      "abstract_deadline": "2026-10-28",
+      "full_deadline": "2026-11-04",
+      "conference_start": "2027-08-10",
+      "venue": "待定",
+      "url": "https://www.usenix.org/conference/usenixsecurity27"
+    },
+    {
+      "id": "ccs_2027",
+      "name": "ACM CCS 2027",
+      "fields": ["security"],
+      "abstract_deadline": "2027-05-01",
+      "full_deadline": "2027-05-08",
+      "conference_start": "2027-11-15",
+      "venue": "待定",
+      "url": "https://www.sigsac.org/ccs/"
+    },
+    {
+      "id": "ndss_2027",
+      "name": "NDSS 2027",
+      "fields": ["security", "networking"],
+      "abstract_deadline": "2026-07-25",
+      "full_deadline": "2026-08-01",
+      "conference_start": "2027-02-22",
+      "venue": "待定",
+      "url": "https://www.ndss-symposium.org/"
+    },
+    {
+      "id": "icra_2027",
+      "name": "ICRA 2027",
+      "fields": ["robotics", "cv"],
+      "abstract_deadline": "2026-09-15",
+      "full_deadline": "2026-09-22",
+      "conference_start": "2027-05-25",
+      "venue": "待定",
+      "url": "https://www.ieee-ras.org/conferences-workshops/icra"
+    },
+    {
+      "id": "iros_2027",
+      "name": "IROS 2027",
+      "fields": ["robotics"],
+      "abstract_deadline": "2027-03-01",
+      "full_deadline": "2027-03-08",
+      "conference_start": "2027-10-01",
+      "venue": "待定",
+      "url": "https://www.ieee-ras.org/conferences-workshops/financially-co-sponsored/iros/"
+    },
+    {
+      "id": "corl_2026",
+      "name": "CoRL 2026",
+      "fields": ["robotics", "ml"],
+      "abstract_deadline": "2026-06-20",
+      "full_deadline": "2026-06-27",
+      "conference_start": "2026-11-15",
+      "venue": "待定",
+      "url": "https://www.corl.org/"
+    },
+    {
+      "id": "eccv_2026",
+      "name": "ECCV 2026",
+      "fields": ["cv"],
+      "abstract_deadline": "2026-03-05",
+      "full_deadline": "2026-03-12",
+      "conference_start": "2026-09-08",
+      "venue": "Malmo",
+      "url": "https://eccv.ecva.net/",
+      "note": "本轮投稿已截止，仅供会议日程参考"
+    }
+  ]
+}

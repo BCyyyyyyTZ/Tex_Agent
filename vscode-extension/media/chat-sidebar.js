@@ -13,8 +13,20 @@
   const input = document.getElementById("input");
   const send = document.getElementById("send");
   const mode = document.getElementById("mode");
+  const openCal = document.getElementById("open-cal");
   if (!input || !chat || !send) {
     return;
+  }
+
+  if (openCal) {
+    openCal.addEventListener(
+      "click",
+      function (e) {
+        e.preventDefault();
+        vscode.postMessage({ type: "openConferenceCalendar" });
+      },
+      false
+    );
   }
 
   var inflight = false;

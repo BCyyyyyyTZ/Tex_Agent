@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from core.agent_cli import TeXAgentCLI, _serialize_plan_graph_for_ui
 from utils.run_cancel import clear_run_cancel, install_sigint_handler, is_run_cancelled
 from ui.web import file_storage
+from ui.web.conferences_data import list_deadlines
 from latex.watch_service import WatchService
 from latex.watch_events import WatchSnapshot
 
@@ -737,6 +738,25 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/conferences/deadlines")
+    async def conferences_deadlines(
+        fields: Optional[str] = Query(
+            None,
+            description="逗号分隔领域：cv,nlp,networking,ml 等；空=全部",
+        ),
+        include_past: bool = Query(False, description="是否包含已截止会议"),
+    ) -> Dict[str, Any]:
+        """顶会投稿日历（静态 JSON，非实时）。"""
+        field_list: Optional[List[str]] = None
+        if fields and fields.strip():
+            field_list = [x.strip() for x in fields.split(",") if x.strip()]
+        try:
+            return list_deadlines(fields=field_list, include_past=include_past)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"日历配置 JSON 无效: {e}") from e
 
     # --- 阶段 9: LaTeX Watch API ---
     @app.post("/api/latex/watch", response_model=WatchStartResponse)
@@ -1592,6 +1612,22 @@ def create_app() -> FastAPI:
         )
 
     if STATIC_DIR.is_dir():
+        index_path = STATIC_DIR / "index.html"
+
+        @app.get("/", include_in_schema=False)
+        async def serve_index() -> FileResponse:
+            """禁用 index 强缓存，避免用户看不到新加的顶栏入口。"""
+            if not index_path.is_file():
+                raise HTTPException(status_code=404, detail="index.html not found")
+            return FileResponse(
+                index_path,
+                media_type="text/html; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                },
+            )
+
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
     return app
