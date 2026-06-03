@@ -55,6 +55,7 @@ def test_ghost_snapshot_and_file(ghost_client: TestClient) -> None:
     body = r.json()
     assert body["root"]
     assert body["status"] == "running"
+    assert "error_signature" in body
 
     r2 = ghost_client.get("/api/file", params={"path": "main.tex"})
     assert r2.status_code == 200
@@ -90,8 +91,102 @@ def test_ghost_apply_suggestion(ghost_client: TestClient) -> None:
         target.write_text(original, encoding="utf-8")
 
 
+def test_ghost_apply_suggestion_compare_mode(ghost_client: TestClient) -> None:
+    target = FIXTURES / "chapters" / "intro.tex"
+    original = target.read_text(encoding="utf-8")
+    try:
+        payload = {
+            "mode": "compare",
+            "suggestion": {
+                "file": "chapters/intro.tex",
+                "range": {
+                    "start": {"line": 0, "character": 0},
+                    "end": {"line": 0, "character": 7},
+                },
+                "replacement": "Updated",
+                "rationale_zh": "测试对比应用",
+                "message": "test",
+                "source": "llm_fix",
+            },
+        }
+        r = ghost_client.post("/api/apply", json=payload)
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        assert r.json()["mode"] == "compare"
+        updated = target.read_text(encoding="utf-8")
+        assert "% [TeX_Agent][compare]" in updated
+        assert "Updated" in updated
+    finally:
+        target.write_text(original, encoding="utf-8")
+
+
 def test_ghost_missing_file(ghost_client: TestClient) -> None:
     r = ghost_client.get("/api/file", params={"path": "not_exists.tex"})
+    assert r.status_code == 404
+
+
+def test_ghost_apply_rejects_out_of_range(ghost_client: TestClient) -> None:
+    payload = {
+        "suggestion": {
+            "file": "main.tex",
+            "range": {
+                "start": {"line": 999, "character": 0},
+                "end": {"line": 999, "character": 1},
+            },
+            "replacement": "x",
+            "rationale_zh": "测试越界",
+            "message": "test",
+            "source": "llm_fix",
+        }
+    }
+    r = ghost_client.post("/api/apply", json=payload)
+    assert r.status_code == 400
+
+
+def test_ghost_polish_api_success(
+    ghost_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import latex.ghost_server as gs
+
+    class _FakeAgent:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, _msg):
+            return SimpleNamespace(
+                content=(
+                    '{"file":"main.tex","original_text":"\\\\documentclass[10pt,journal,compsoc]{IEEEtran}",'
+                    '"polished_text":"\\\\documentclass[10pt,journal,compsoc]{IEEEtran}",'
+                    '"problem_zh":"可读性可提升","advice_zh":"保持格式，提升表达。"}'
+                )
+            )
+
+    monkeypatch.setattr(gs, "SimpleAgent", _FakeAgent)
+    r = ghost_client.post(
+        "/api/ghost/polish",
+        json={
+            "query": "请更学术一点",
+            "target_file": "main.tex",
+            "context_file": "main.tex",
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["suggestion"]["source"] == "llm_polish"
+    snap = ghost_client.get("/api/snapshot").json()
+    assert len(snap["polish_suggestions"]) >= 1
+
+
+def test_ghost_polish_api_missing_file(ghost_client: TestClient) -> None:
+    r = ghost_client.post(
+        "/api/ghost/polish",
+        json={
+            "query": "请润色",
+            "target_file": "not_exists.tex",
+            "context_file": "main.tex",
+        },
+    )
     assert r.status_code == 404
 
 

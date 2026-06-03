@@ -11,16 +11,46 @@ from latex.paths import normalize_rel_path
 from latex.serialize import from_dict
 
 
-def offset_from_position(text: str, line: int, character: int) -> int:
-    """0-based line/character → 字节偏移（UTF-8 按 str 索引）。"""
+class SuggestionRangeError(ValueError):
+    """Suggestion 的 range 越界或非法。"""
+
+
+def _split_lines_keepends(text: str) -> list[str]:
+    if text == "":
+        return []
     lines = text.splitlines(keepends=True)
+    return lines if lines else [text]
+
+
+def _line_visible_len(line_text: str) -> int:
+    return len(line_text.rstrip("\r\n"))
+
+
+def offset_from_position(text: str, line: int, character: int) -> int:
+    """0-based line/character → 文本偏移。"""
+    if line < 0 or character < 0:
+        raise SuggestionRangeError("range 含负数位置")
+    lines = _split_lines_keepends(text)
     if not lines:
-        return 0
-    line = max(0, min(line, len(lines) - 1))
+        if line == 0 and character == 0:
+            return 0
+        raise SuggestionRangeError(f"空文件不支持位置 line={line}, char={character}")
+    if line >= len(lines):
+        raise SuggestionRangeError(
+            f"range 行号越界: line={line}, 最大可用={len(lines) - 1}"
+        )
+
     line_start = sum(len(lines[i]) for i in range(line))
-    line_len = len(lines[line])
-    char = max(0, min(character, line_len))
+    visible_len = _line_visible_len(lines[line])
+    char = min(character, visible_len)
     return min(line_start + char, len(text))
+
+
+def sanitize_replacement_text(text: str) -> str:
+    """
+    清理常见控制字符，避免应用后出现 BOM/乱码前缀。
+    """
+    return (text or "").replace("\ufeff", "").replace("\x00", "")
 
 
 def apply_suggestion_to_file(
@@ -46,15 +76,12 @@ def apply_suggestion_to_file(
         raise FileNotFoundError(f"目标文件不存在: {rel}")
 
     text = target.read_text(encoding=encoding, errors="replace")
-    start_off = offset_from_position(
-        text, sug.range.start.line, sug.range.start.character
-    )
-    end_off = offset_from_position(
-        text, sug.range.end.line, sug.range.end.character
-    )
+    start_off = offset_from_position(text, sug.range.start.line, sug.range.start.character)
+    end_off = offset_from_position(text, sug.range.end.line, sug.range.end.character)
     if end_off < start_off:
         start_off, end_off = end_off, start_off
 
-    new_text = text[:start_off] + sug.replacement + text[end_off:]
+    replacement = sanitize_replacement_text(sug.replacement)
+    new_text = text[:start_off] + replacement + text[end_off:]
     target.write_text(new_text, encoding=encoding)
     return target

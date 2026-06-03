@@ -1,9 +1,9 @@
 # TeX_Agent LaTeX 子系统分阶段实现路线图
 
-> 版本：v0.6  
+> 版本：v0.7  
 > 用途：在 [TeX_Agent LaTeX 诊断与润色子系统设计（增量版）.md](./TeX_Agent%20LaTeX%20诊断与润色子系统设计（增量版）.md) 之上，给出**自底向上、每步尽量少做**的落地顺序。  
 > 原则：**先冻结契约 → 再纯函数/服务 → 再 Tool → 再工作流 → 再监视服务 → 再展示层（CLI/Web → 独立幽灵窗口 → VS Code 扩展）**。  
-> **产品方向（v0.6）**：作者可见建议有**三条通道**——**CLI / Web-UI（9）** 人读列表；**独立幽灵窗口（10）** 浏览器内行间卡片（**不依赖 VS Code 扩展**）；**可安装扩展（11）** 在 VS Code / Cursor 内嵌侧栏 + 编辑器幽灵层。**LaTeX 纠错/润色**优先走 10→11；TeX_Agent 其它工作流在扩展内**仅预留接口**。**Checklist** 与**目录批处理**不纳入 LaTeX 主路径。  
+> **产品方向（v0.7）**：**当前迭代重心为阶段 10 演进**（Web 幽灵窗口：全项目监视、纠错卡、主动润色、应用/对比）；**阶段 11（VS Code 可安装扩展）暂缓实施**，仅保留架构与 `AgentBridge` 等接口，待 10 契约稳定后再迁入。**CLI / Web-UI（9）** 仍作人读列表通道。**Checklist** 与**目录批处理**不纳入 LaTeX 主路径。  
 > **全程要求**：文件路径在 **Linux / Windows** 下行为一致；复杂仓库与引用体系分阶段补齐（见 §1.5、§二附表）。
 
 ---
@@ -103,8 +103,8 @@ python -c "from latex.project_index import build_index; print(build_index('path'
 阶段 7  PromptBuilder + LLM 修复（L3，依赖 2.5 脏区级联） [已完成]
 阶段 8  目录监视与实时诊断/建议（后台服务）     [已完成]
 阶段 9  Web-UI / CLI 集成与展示                 [已完成]
-阶段 10 独立幽灵窗口（Ghost UI，浏览器行间建议） [已完成/MVP]
-阶段 11 VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌） [未开始]
+阶段 10 独立幽灵窗口（Ghost UI，浏览器行间建议） [MVP 已完成；10.1–10.8 演进中]
+阶段 11 VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌） [暂缓；仅预留接口]
 附加 A  Checklist 预留接口（可选，最后实现）     [未开始]
 ```
 
@@ -155,8 +155,8 @@ flowchart BT
 | 7 | 已完成 | `latex/prompt_builder.py`, `latex/suggestion.py`, `latex/fix_batch.py`, `workflow_latex_diagnose_v1.json`, `latex_fix_prepare` / `latex_collect_suggestions` |
 | 8 | 已完成 | 目录监视、防抖增量诊断、空闲润色触发（见 §三 阶段 8） |
 | 9 | 已完成 | Web-UI / CLI 启动监视、展示 issues / suggestions / 润色（见 §三 阶段 9） |
-| 10 | 已完成（MVP） | `latex/ghost_cli.py`, `latex/ghost_server.py`, `latex/apply_edit.py`, `ui/ghost/*`（见 §三 阶段 10） |
-| 11 | 未开始 | 可发布 VS Code 扩展：Activity Bar 侧栏 + 复用阶段 10 幽灵 UX（见 §三 阶段 11） |
+| 10 | MVP 已完成；**10.1–10.10 演进中** | `latex/ghost_*`, `ui/ghost/*`；见 §三 阶段 10（§10.1 起子计划） |
+| 11 | **暂缓**（接口预留） | `vscode-extension/` + `AgentBridge` 规格保留；**不**排入当前迭代（见 §三 阶段 11） |
 | 附加 A | 未开始 | Checklist 预留接口，不接论文审稿主流程（见 §三 附加阶段 A） |
 
 **已取消 / 移出主路径（v0.3）**
@@ -172,8 +172,8 @@ flowchart BT
 | 通道 | 阶段 | 形态 | 用途 |
 |------|------|------|------|
 | **机器 / 人读列表** | 9 | CLI 表格、`watch` API、Web 页 | 摘要、Top-K issues、建议列表；可 `--json` |
-| **幽灵窗口** | 10 | 浏览器 `http://127.0.0.1:8771/` | **行间卡片**展示纠错/润色，可拖/缩放/应用；**不**走 VS Code 扩展 |
-| **编辑器内嵌** | 11 | Marketplace / VSIX 扩展 | Activity Bar 侧栏 + 在 **VS Code 正文** 复用幽灵交互；可选连外部编辑器 |
+| **幽灵窗口** | 10 | 浏览器 `http://127.0.0.1:8771/` | **主产品通道**：全项目纠错卡、主动润色对话、应用/对比/忽略；**当前迭代重点** |
+| **编辑器内嵌** | 11 | Marketplace / VSIX 扩展 | **暂缓**；规格与接口预留，复用阶段 10 契约后实施 |
 
 **其它路径**
 
@@ -182,7 +182,7 @@ flowchart BT
 | **一次性诊断** | 6–7（已完成） | `main.py task --wf latex_diagnose_v0/v1`：全库扫描；CI / 验证 L3 |
 | **实时后端** | 8（已完成） | `WatchService`：防抖诊断 + 空闲润色；供 9/10/11 共用 |
 
-阶段 7 的 `latex_report` JSON 供调试与 API；作者日常改稿优先 **阶段 10 幽灵窗口** 或 **阶段 11 扩展**，而非终端刷屏。
+阶段 7 的 `latex_report` JSON 供调试与 API；作者日常改稿优先 **阶段 10 幽灵窗口**（v0.7 起强化 Web 体验），**阶段 11** 待 10 稳定后再做，而非终端刷屏。
 
 ---
 
@@ -655,93 +655,338 @@ pytest tests/test_latex/test_watch_service.py -v
 
 ### 阶段 10：独立幽灵窗口（Ghost UI，浏览器行间建议）
 
-**目标**：在**不安装 VS Code 扩展**的前提下，用**专用浏览器页**展示 LaTeX 源码与**行间幽灵建议卡片**（纠错 `suggestions` + 润色 `polish_suggestions`），替代「只在 CLI 打印 / Web 列表里看建议」。与用户在 VS Code 中编辑可**并行**：在 VS Code 改 `.tex`，在浏览器幽灵页看建议并**应用**写回磁盘（保存后 watch 刷新）。
+**总目标**：在**不安装 VS Code 扩展**的前提下，用专用浏览器页作为 LaTeX 改稿的**主交互面**——展示项目内**任意相关文件**源码、**行间幽灵卡**（纠错 / 主动润色）、**应用 / 对比 / 忽略**，并与本地编辑器（VS Code / Cursor 等）**并行写盘**。监视与建议生成以**整个 LaTeX 项目目录（`root`）**为范围，**不限于 `main_tex` 单文件**；子文件报错或润色卡须出现在**该子文件**对应的 Ghost 视图中。
+
+**版本划分**
+
+| 子版本 | 状态 | 内容 |
+|--------|------|------|
+| **10.0 MVP** | 已完成 | 单端口 Ghost、`WatchService` 内嵌、`.tex` 文件选择、轮询 snapshot、纠错+空闲润色卡、应用/忽略、`apply_edit` |
+| **10.1+ 演进** | **当前计划** | 见下文 §10.1–§10.10；**阶段 11 暂缓** |
 
 **与阶段 9 的分工**
 
 | 阶段 9 | 阶段 10 |
 |--------|---------|
 | CLI 人读 / Web `api/latex/watch` | 独立端口 **Ghost UI**（默认 `8771`，与 Web `8765` 分离） |
-| 列表、摘要、Top-K | 行号对齐源码 + 浮动卡片 |
-| 可复制建议 | **应用** `replacement` → `latex/apply_edit.py` 写回文件 |
+| 列表、摘要、Top-K | 行号对齐源码 + 浮动卡片 + 文件树选择器 |
+| 可复制建议 | **应用 / 对比 / 忽略** → `apply_edit` / `apply_compare` 写回磁盘 |
 
-**架构**
+**与阶段 8 监视的关系（10.1 起 Ghost 专用策略）**
+
+Ghost 启动时**不再**沿用阶段 8 默认的「保存/变更防抖 + 空闲 2s 自动润色」全套行为，而是在 `ghost_cli` / `ghost_server` 侧使用 **`GhostWatchPolicy`**（可包装 `WatchService` 或子类）：
+
+| 维度 | 阶段 8（通用 watch，供 9 等） | 阶段 10 Ghost（10.1 目标） |
+|------|------------------------------|----------------------------|
+| 润色 | 空闲 N 秒自动 `polish_suggestions` | **关闭自动润色**；仅用户主动对话（§10.3） |
+| 首次检查 | 同左 | 启动后**立即**全项目 ChkTeX + 可选 latexmk；有 **error** 则走 Agent 产出纠错建议 |
+| 后续检查 | 防抖后重复诊断+润色 | **仅当** `root` 下监视 glob 内文件有**内容变更**；**1s 静默**（无新写入）后触发诊断+编译；**无新 error** 则不刷新幽灵 UI |
+| 幽灵卡增量更新 | — | 旧卡锚点**未被用户改掉**且该位置**无新 error** → **保留**旧卡；锚点文本被改且仍有 error → **刷新**该卡 |
+| 无用户修改 | 仍可能空闲润色 | **不做**任何检查，直到目录内再次出现文件变更 |
+
+**架构（10.1 目标）**
 
 ```text
 python -m latex.ghost_cli --root … --main-tex paper.tex
-  → 内嵌 WatchService（阶段 8，同 9 后端逻辑）
-  → FastAPI ghost_server（latex/ghost_server.py）
-  → 静态页 ui/ghost/（index.html + ghost.js + ghost.css）
-  → 浏览器：左侧行号源码 + 锚定行的可拖/缩放幽灵卡
+  → GhostWatchPolicy（全 root 监视 .tex/.bib/…；1s 静默防抖；无自动润色）
+  → 启动：全项目 diagnose + compile → error → LLM fix suggestions
+  → FastAPI ghost_server
+  → ui/ghost/：项目文件树 + 源码行 + 纠错卡（红）/ 润色卡（绿）+ 润色对话框
+  → POST apply | apply_compare | dismiss；警告单独面板（§10.8）
 ```
 
 ```mermaid
-flowchart LR
+flowchart TB
   CLI[ghost_cli]
-  W[WatchService]
-  SRV[ghost_server HTTP]
-  UI[ui/ghost 浏览器]
-  DISK[.tex 磁盘]
+  POL[GhostWatchPolicy]
+  SRV[ghost_server]
+  UI[ui/ghost]
+  AG[LLM 纠错 / 主动润色]
+  DISK[root 下全部相关文件]
 
-  CLI --> W
-  CLI --> SRV
-  UI -->|poll snapshot| SRV
-  SRV --> W
-  UI -->|POST apply| SRV
-  SRV -->|apply_edit| DISK
-  W -->|监视变更| DISK
+  CLI --> POL
+  POL -->|变更 1s 静默| POL
+  POL -->|仅 error| AG
+  UI -->|poll / SSE| SRV
+  SRV --> POL
+  UI -->|润色对话| SRV
+  SRV --> AG
+  UI -->|apply / compare| SRV
+  SRV --> DISK
+  POL -->|watchdog| DISK
 ```
 
-**已实现（仓库现状，保留不删）**
+**已实现（10.0 MVP，保留不删）**
 
 | 模块 | 说明 |
 |------|------|
-| `latex/watch_service.py` | 阶段 8 监视（阶段 10 内嵌启动） |
-| `latex/ghost_server.py` | Ghost HTTP：`/api/snapshot`、`/api/file`、`/api/apply` |
-| `latex/ghost_cli.py` | 入口：启动 watch + 服务 + 可选打开浏览器 |
-| `latex/apply_edit.py` | 将 `Suggestion` 按 `range` 写回 `.tex` |
-| `ui/ghost/` | 行间幽灵 UI（拖动标题栏、CSS resize、应用/忽略） |
+| `latex/watch_service.py` | 通用监视（10.1 将由 Ghost 策略包装或分支） |
+| `latex/ghost_server.py` | Ghost HTTP |
+| `latex/ghost_cli.py` | 入口 |
+| `latex/apply_edit.py` | 按 `range` **替换**写回（10.1 需排查乱码/重复行 bug，见 §10.9） |
+| `ui/ghost/` | 行间卡、应用/忽略 |
 | `tests/test_latex/test_apply_edit.py`、`test_ghost_server.py` | 单测 |
-
-**用户操作（验收）**
-
-```bash
-python -m latex.ghost_cli --root tests/test_latex/VaLoRA_TMC --main-tex paper.tex
-# 浏览器打开 http://127.0.0.1:8771/
-# 选择 tex 文件 → 见行间修改/润色卡片 → 应用 → 磁盘文件更新 → watch 再诊断
-```
-
-**接口（Ghost 专用，与阶段 9 watch API 可并存）**
-
-- `GET /api/snapshot` → `WatchSnapshot` JSON（issues、suggestions、polish_suggestions）
-- `GET /api/file?path=` → 行数组，供前端渲染
-- `POST /api/apply` → body `{ "suggestion": { ... } }`
-
-**后续可增强（仍属阶段 10，非 11）**
-
-- SSE 替代轮询；多文件分栏；与系统默认浏览器外的「置顶小窗」；润色卡仅 `rationale_zh` 无 `replacement` 的展示优化
-- 可选：从已有 `POST /api/latex/watch`（8765）只读 snapshot，ghost 仅做前端（双进程）
-
-**本步明确不做**
-
-- VS Code Activity Bar、扩展 Marketplace（→**阶段 11**）
-- 在 VS Code 正文内嵌幽灵层（→**阶段 11**，可复用本阶段 UI 逻辑）
-- TeX_Agent 通用工作流侧栏（→**阶段 11** 预留 `AgentBridge`）
-- 替代用户主编辑器（Ghost 页为**伴随视图**，非完整 IDE）
 
 ---
 
-### 阶段 11：VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌）
+#### 10.1 实施优先级与步骤总览
 
-**最终交付**：用户可从 **VS Code Marketplace**（及 **Open VSX** / Cursor **Install from VSIX**）安装 **TeX_Agent** 扩展；与资源管理器、搜索等共用左侧 **Activity Bar**，点击 **TeX_Agent** 图标后，**主侧边栏**成为交互区；在 **VS Code 打开的 `.tex` 正文**中嵌入与阶段 10 同类的**行间幽灵建议**（可拖动、缩放、应用）。
+| 优先级 | 编号 | 主题 | 依赖 |
+|--------|------|------|------|
+| **P0** | 10.2 | Ghost 监视策略（静默 1s、无自动润色、增量保留幽灵卡） | 阶段 8 |
+| **P0** | 10.3 | 主动润色对话框（与纠错分离） | 10.2 |
+| **P0** | 10.4 | error / warning 分离（warning 不进 LLM 纠错链） | 10.2 |
+| **P1** | 10.5 | 纠错幽灵卡布局与字段契约 | 10.4 |
+| **P1** | 10.6 | 卡片锚点、红/绿行内高亮、操作后清除 | 10.5、10.3 |
+| **P2** | 10.7 | 项目文件树 + 选择器红点/绿点 | 阶段 1 `ProjectIndex`、snapshot 元数据 |
+| **P3** | 10.8 | 警告可选查看面板（LLM 仅释义） | 10.4 |
+| **P0** | 10.9 | 应用 bug 修复 + **对比**模式 | 10.5 |
+| **贯穿** | 10.10 | 全项目（多 tex / bib）范围确认 | 各步验收 |
+
+**推荐落地顺序（单 PR 尽量垂直切片）**
+
+1. **PR-10a**：`GhostWatchPolicy` + 关闭 ghost 路径空闲润色 + 启动全量检查 + 1s 静默重检 + 前端「无新 error 不刷新」逻辑（10.2、10.10）。
+2. **PR-10b**：`Suggestion` / API 扩展纠错字段；warning 过滤；纠错卡 UI（10.4、10.5）；`apply_edit` 乱码排查与单测（10.9 应用部分）。
+3. **PR-10c**：`apply_compare` 后端 + 对比按钮；行内红高亮；应用/对比/忽略后清卡（10.6、10.9）。
+4. **PR-10d**：`POST /api/ghost/polish` + 润色对话框 + 润色卡契约与绿高亮（10.3、10.6）。
+5. **PR-10e**：`GET /api/project-tree` + 树状文件选择器 + 红点/绿点（10.7）。
+6. **PR-10f**：警告面板 + `POST /api/ghost/explain-warning`（10.8）。
+
+---
+
+#### 10.2 监视逻辑（P0）
+
+**启动**
+
+1. 绑定 `root`、`main_tex`（编译入口，仍用于 latexmk）。
+2. 对 **整个 `root` 项目闭包**（`main_tex` 的 `\input` 树 + 阶段 1 扫描到的相关 `.tex` / `.bib`，见 §10.10）执行一次 ChkTeX + 可选 latexmk。
+3. 从合并后的 `issues` 中筛 **`severity == error`** 进入 LLM fix（阶段 7 链路）；**warning 不进入**此链路（§10.4）。
+4. 将产出的 `suggestions` 推送给 Ghost UI；无 error 时可无卡。
+
+**运行时**
+
+1. `watchdog` 监视 `root` 下配置 glob（至少 `.tex`、`.bib`；与阶段 8 一致扩展）。
+2. 任意被监视文件变更 → 记录时间戳；**1 秒内无新变更** → 触发一次「诊断 + 编译」流水线（弱化「必须保存」：兼容编辑器自动保存）。
+3. 若新一轮 **error 集合**与上次相比无新增、且某张幽灵卡锚点 `range` 对应原文**未被用户编辑**（字节级或规范化 diff）→ **不**移除、**不**重绘该卡。
+4. 若某锚点区间被用户修改且该位置仍有 error → **更新**该卡内容（同 `request_id` 或新 id 策略在实现时冻结）。
+5. 若用户**未再修改**项目内任何监视文件 → **不**触发检查（无轮询空跑）。
+
+**与阶段 9 / 8 的兼容**：CLI / Web `8765` 可继续使用原 `WatchService`；仅 `ghost_cli` 默认启用 `GhostWatchPolicy`。
+
+---
+
+#### 10.3 主动润色（P0，替代自动润色）
+
+**产品行为**
+
+- **删除** Ghost 场景下的空闲自动 `polish_suggestions` 刷新。
+- 在 Ghost 页增加**润色对话框**（可固定于底栏或侧栏）：
+  - 用户输入自然语言问题（如「摘要语气更学术」）。
+  - **目标文件**下拉：可选 `root` 内任意监视文件（`.tex`、`.bib` 等，与 §10.7 文件树一致）。
+  - **上下文**：始终附带用户**当前在 Ghost 中打开的** `.tex` 全文（若当前为 bib，则附带关联主 tex 或用户所选 tex，策略在实现时写入 `ghost_polish_prompt.py`）。
+- 调用 LLM **单次**（或轻量 Reflection），响应 JSON 字段冻结为：
+
+| 字段 | 用途 |
+|------|------|
+| `original_text` | 待润色原文（用于 `range` 定位） |
+| `polished_text` | 润色后正文 |
+| `problem_zh` | 原文问题分析（展示） |
+| `advice_zh` | 修改意见 / 为什么这么改（展示） |
+| `file` | POSIX 相对路径 |
+| `range` | 0-based，锚定 `original_text` |
+
+**幽灵卡展示（润色）**
+
+- 卡片字段：**问题分析**、**修改建议**、**润色后文字**（不强制展示整段原文，原文用于定位）。
+- 行内 **绿色高亮** `original_text` 对应行区间（§10.6）。
+- 操作：**应用** / **对比** / **忽略**（与纠错卡一致，§10.9）。
+
+**API（建议新增）**
+
+- `POST /api/ghost/polish` — body：`{ "query", "target_file", "context_file" }` → 返回 `PolishSuggestion`（可复用 `Suggestion` + `source=llm_polish` 扩展 metadata）。
+- snapshot 中 `polish_suggestions` 仅含**用户主动请求**产生的条目（可分页或上限条数）。
+
+---
+
+#### 10.4 报错与警告分离（P0）
+
+| 类型 | Ghost 行间卡 | 进入 LLM 纠错 | 监视流水线 |
+|------|-------------|---------------|------------|
+| **error** | **显示**纠错幽灵卡，锚定在 error 行附近 | **是** | 触发 Agent fix |
+| **warning** | **默认不显示**（保持现状） | **否** | 仅写入 snapshot `issues`，供 §10.8 面板 |
+
+- warning **不得**混入 fix batch prompt，避免干扰报错判断。
+- 纠错卡生成位置：尽量贴近 **`file` + `line`**（error 行），见 §10.6。
+
+---
+
+#### 10.5 纠错幽灵卡布局与 LLM 契约（P1）
+
+**卡片展示（面向用户）**
+
+1. **报错信息**（原始 `message` / log 摘要）。
+2. **定位**：文件路径 + 行号；Ghost 源码区对应行 **红色高亮**（错误区间，优先 `Suggestion.range` 或 issue 的 `line`–`end_line`）。
+3. **原因分析**（`rationale_zh` 或新字段 `cause_zh`）。
+4. **改正方案**（`advice_zh` 或合并进 `rationale_zh`）：说明替换后应能消除该 error。
+5. **可替换片段**：`replacement` 针对 `range` 内原文；展示 preview。
+
+**LLM / `Suggestion` 返回须包含（实现时扩展 models 或 `metadata`）**
+
+- `file`、`range`（0-based）、`replacement`
+- `message`（报错原文）、`rationale_zh`（原因）、`advice_zh`（方案，可与 rationale 拆分）
+- `issue_id` 关联
+
+**操作按钮**：**应用** | **对比** | **忽略**（§10.9、§10.6）。
+
+---
+
+#### 10.6 幽灵卡位置、高亮与生命周期（P1）
+
+| 建议类型 | 锚点 | 行内高亮 | 用户操作后 |
+|----------|------|----------|------------|
+| 纠错 | error 行附近浮动卡 | **红色**：待改正区间 | 卡消失；去除红高亮 |
+| 润色 | `original_text` 行附近 | **绿色**：待润色区间 | 卡消失；去除绿高亮 |
+
+- 卡片仍支持拖动标题栏、缩放（保留 10.0 交互）。
+- **应用 / 对比 / 忽略** 任一确认后：从前端 `dismissed` / 服务端可选 ack 中移除，**不再**显示该条。
+
+---
+
+#### 10.7 项目文件树、可选文件与状态提示（P2）
+
+**文件树（原需求 2.1）**
+
+- 不仅可选 `.tex`，还可选 `.bib` 及阶段 1 `ProjectIndex` 识别的相关文件。
+- 下拉为**树状结构**，突出 `\input` / `\bibliography` 等调用关系（见阶段 1 文件图、2.6 bib 边）。
+
+| 数据来源 | 展示 |
+|----------|------|
+| `latex/project_index.py` | `\input` / `\include` 父子边 |
+| `refs_index` / `bib_index` | `.tex` → `\bibliography{foo}` → `foo.bib` |
+| 根目录扫描 | 孤立 `.tex` / `.bib` 作为根节点子项 |
+
+**API（建议）**：`GET /api/project-tree?root=` → `{ "main_tex", "nodes": [ { "path", "kind", "children" } ] }`。Ghost 打开 `.bib` 时以纯文本展示。
+
+**选择器状态（原需求 2.7）**
+
+- 基于上述**树状下拉**（折叠时显示当前文件）。
+- **折叠态**（已选某文件、下拉未展开）：选择框右上角可显示：
+  - **红点**：项目内**任意**文件存在未处理 **error** 纠错卡；
+  - **绿点**：存在未处理 **主动润色** 卡。
+- **展开态**：树中每个文件节点右上角独立红点 / 绿点（可同时存在）。
+- 数据来自 snapshot 聚合：`errors_by_file`、`polish_by_file`（实现时可在 `WatchSnapshot` 或 Ghost API 增加轻量索引）。
+
+---
+
+#### 10.8 警告可选查看（P3）
+
+- 顶栏按钮：**查看警告**。
+- 点击后打开**可滚动侧栏/模态**，逐条列出 `severity == warning` 的 `issues`（文件、行、message）。
+- 每条可请求 `POST /api/ghost/explain-warning` → LLM 返回**简短中文说明**（帮助理解，**不提供**修改/润色建议、不生成幽灵卡）。
+- 用户关闭面板即可；**不**改变 warning 不进入纠错链的策略（§10.4）。
+
+---
+
+#### 10.9 应用、对比与已知缺陷（P0）
+
+**已知问题（10.0 MVP）**
+
+- 用户反馈：点击**应用**后未正确**替换**原文，而是在文件中**新增多行**，出现修改前/后并存，且新行前可能有**乱码**。需在实现阶段排查：
+  - `apply_edit.offset_from_position` 与 `splitlines(keepends=True)` 是否导致 `range` 偏移错位；
+  - `replacement` 是否含错误换行 / BOM；
+  - 前端是否重复提交 apply；
+  - `document_version` 与磁盘不同步时二次应用。
+
+**目标行为**
+
+| 操作 | 行为 | 编译安全 |
+|------|------|----------|
+| **应用** | 用 `replacement` **直接替换** `range` 内文本（与现 `apply_edit` 语义一致，修 bug 后） | 替换后应可编译 |
+| **对比** | 原 `range` 内文本改为 **LaTeX 注释**（如 `% [TeX_Agent] 原文: …` 或多行 `%`）；**紧接其下**插入 `replacement` 为正文 | 注释掉旧文 + 新正文，**保证** latexmk 可过（实现 `latex/apply_compare.py`） |
+| **忽略** | 不写盘；仅隐藏卡 | — |
+
+**API**
+
+- `POST /api/apply` — `mode: "replace"`（默认）
+- `POST /api/apply` — `mode: "compare"` 或独立 `POST /api/apply-compare`
+
+**验收**
+
+- `tests/test_latex/test_apply_edit.py` 增加：单行/多行 range、Windows CRLF、`compare` 后仍可通过最小 `latexmk` 或 chktex 语法检查。
+
+---
+
+#### 10.10 全项目范围（贯穿）
+
+**须确认并写入验收**
+
+1. **监视**：`watchdog` 监听对象为 **`root` 目录**下所有相关扩展名，而非仅 `main_tex`。
+2. **诊断 / 编译**：以项目为单位 merge issues；latexmk 仍以 `main_tex` 为入口，但 **ChkTeX / 切片 / LLM fix** 须能产出**子 tex**（如 `weijun/Intro.tex`）上的 `file` + `line`。
+3. **幽灵卡**：卡在 **对应 `suggestion.file`** 的 Ghost 视图中展示；用户切换到该文件即可见，无需只在 main 上显示。
+4. **变更触发**：修改**任意**子 tex 或 bib → 10.2 的 1s 静默后重检；子文件新 error → 在该文件显示红卡。
+
+**VaLoRA_TMC 验收**：改 `weijun/Intro.tex` 引入 error → Ghost 切换到该文件可见红卡；改 `reference.bib` → 触发重检；main 未改但子文件改动能跟进。
+
+---
+
+#### 10.x 接口演进汇总（10.1 冻结目标）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/snapshot` | 含 `errors_by_file` / `polish_by_file` 索引（可选） |
+| GET | `/api/project-tree` | 文件树 + 引用关系 |
+| GET | `/api/file?path=` | tex / bib 文本行 |
+| POST | `/api/apply` | `mode: replace \| compare` |
+| POST | `/api/ghost/polish` | 主动润色 |
+| POST | `/api/ghost/explain-warning` | 警告释义 |
+| POST | `/api/ghost/dismiss` | 可选：服务端记录忽略 |
+
+---
+
+#### 10.0 用户操作（MVP 仍有效）
+
+```bash
+python -m latex.ghost_cli --root tests/test_latex/VaLoRA_TMC --main-tex paper.tex
+# http://127.0.0.1:8771/
+```
+
+**10.1 完整验收（摘录）**
+
+- [ ] 启动即诊断；无用户修改不再空跑检查  
+- [ ] 改子 tex，1s 静默后仅在有新 error 时更新相关卡  
+- [ ] 无自动润色；对话框主动润色 → 绿卡  
+- [ ] 纠错红卡：应用替换正确；对比后旧文在注释、新文在正文、可编译  
+- [ ] 文件树选 bib/tex；折叠/展开红点绿点  
+- [ ] 警告面板仅释义  
+
+**本步明确不做（仍属阶段 10）**
+
+- VS Code 正文内嵌（→**阶段 11 暂缓**）
+- 替代本地 IDE 写作（Ghost 为伴随+可独立改稿视图）
+
+---
+
+### 阶段 11：VS Code / Cursor 可安装扩展（侧栏 + 编辑器内嵌）— **暂缓实施，仅预留**
+
+> **v0.7 决策**：阶段 11 **整阶段暂缓**，当前迭代**只**做阶段 10.1+ Web 幽灵窗口。下文规格**全部保留**，作为将来扩展的蓝图；实现时须与 10.1 冻结的 API / `Suggestion` 契约对齐，避免双份逻辑。
+
+**最终交付（将来）**：用户可从 **VS Code Marketplace**（及 **Open VSX** / Cursor **Install from VSIX**）安装 **TeX_Agent** 扩展；Activity Bar 侧栏 + 在 **VS Code 打开的 `.tex` 正文**中嵌入与阶段 10 同类的**行间幽灵建议**（应用 / 对比 / 忽略；主动润色；全项目监视）。
 
 **与阶段 10 的关系**
 
-- **阶段 10 先行**：在浏览器验证幽灵 UX 与 `apply_edit` 契约，**无需**扩展即可改稿。
-- **阶段 11**：将阶段 10 的「快照 + 卡片 + 应用」迁入 VS Code API（`WorkspaceEdit`、`DiagnosticCollection`、可选 Webview Overlay）；可继续连本机 `WatchService` 或 `http://127.0.0.1:8771` / `8765`。
-- **不删除** `ui/ghost/`：扩展成熟前仍可用 `ghost_cli` 演示。
+- **当前**：以 **Ghost 浏览器（8771）** 为唯一行间交互产品面；验证 10.1–10.10 后再做 11。
+- **将来 11**：迁入 `WorkspaceEdit`、`DiagnosticCollection`、Webview Overlay；订阅 `ghost_server` 或 `WatchService`；**复用** `apply_edit` / `apply_compare` 语义。
+- **不删除** `ui/ghost/`：扩展未就绪前持续用 `ghost_cli` 演示与日常改稿。
 
-**与仓库现有 `vscode-extension/` 的关系**：在现有 `tex-agent-chat`（侧栏 + Web 聊天壳）上演进；**首版优先 LaTeX 助手 + 幽灵层**；通用工作流仅接口。
+**预留接口（现在即可在文档/代码中占位，不实现 UI）**
+
+| 接口 | 位置（建议） | 用途 |
+|------|--------------|------|
+| `AgentBridge` | `vscode-extension/src/platform/agentBridge.ts` | 工作流 / 其它能力；LaTeX watch 快照 |
+| `GhostClient` | 同上或 `ghostClient.ts` | 对齐 `GET /api/snapshot`、`POST /api/apply`（含 `compare`）、`POST /api/ghost/polish` |
+| `contributes.*` | `package.json` | 已存在 `tex-agent-chat` 壳；将来增加 `texagent.ghost.*` 配置项 |
+
+**与仓库现有 `vscode-extension/` 的关系**：维持 `tex-agent-chat`（Web 聊天 / Simple Browser）；**不**在本迭代扩展幽灵层；README 注明「LaTeX 幽灵见 `latex.ghost_cli`」。
 
 ---
 
@@ -1014,8 +1259,9 @@ tests/test_tools/
 | 7 | `test_prompt_builder.py`, `test_suggestion.py`, `test_fix_batch.py`, `test_latex_diagnose_v1.py`（Mock LLM） |
 | 8 | `test_watch_service.py`（防抖、空闲润色触发，Mock LLM） |
 | 9 | `test_latex_watch_api.py`（FastAPI TestClient）或 CLI 集成测试 |
-| 10 | `test_ghost_server.py`、`test_apply_edit.py`；手工 `python -m latex.ghost_cli` 浏览器行间卡 |
-| 11 | `vscode-extension` 打包；侧栏 + 编辑器幽灵（11-MVP/完整） |
+| 10 | `test_ghost_server.py`、`test_apply_edit.py`、`test_apply_compare.py`、`test_ghost_watch_policy.py`；手工 ghost_cli |
+| 10.1+ | `test_project_tree_api.py`、`test_ghost_polish_api.py`；VaLoRA 子文件 error 卡 |
+| 11 | **暂缓**；接口占位单测可选 |
 
 ---
 
@@ -1033,6 +1279,10 @@ LATEX_SLICE_CONTEXT_LINES = 10
 LATEX_WATCH_DIAGNOSE_DEBOUNCE_MS = 500
 LATEX_WATCH_IDLE_POLISH_SEC = 2
 LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按需开启
+# 阶段 10.1 Ghost 专用
+LATEX_GHOST_QUIET_SEC = 1.0           # 目录变更后静默多久再诊断
+LATEX_GHOST_AUTO_POLISH = false       # Ghost 路径禁用空闲自动润色
+LATEX_GHOST_EXPLAIN_WARNING_MAX = 20  # 警告释义条数上限
 ```
 
 ---
@@ -1069,8 +1319,9 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 
 **阶段 10 / 11（产品增强，非 8+9 MVP）**
 
-- **阶段 10**：浏览器幽灵窗口（**可先于扩展完成**）
-- **阶段 11**：VS Code 可安装扩展
+- **阶段 10.0**：浏览器幽灵 MVP（已完成）
+- **阶段 10.1+**：Web 幽灵演进（**v0.7 当前产品重心**）
+- **阶段 11**：VS Code 扩展（**暂缓**）
 - **附加阶段 A**：checklist 注入
 
 ---
@@ -1084,11 +1335,12 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 | M2 | 阶段 3 + 6（**已完成**） |
 | M3 | 阶段 4 + 6（**已完成**） |
 | M4 | 阶段 7 + 8–9（**已完成**） |
-| M5 | 阶段 10（**独立 Ghost UI**，浏览器行间建议） |
-| M6 | 阶段 11（可安装 VS Code / Cursor 扩展） |
+| M5 | 阶段 10.0（Ghost MVP，已完成） |
+| M5+ | 阶段 **10.1+**（Ghost 监视/主动润色/对比/文件树，**进行中**） |
+| M6 | 阶段 11（VS Code 扩展，**暂缓**） |
 | M6+（可选） | 附加阶段 A；`AgentBridge` 迁入通用工作流 |
 
-*说明：幽灵交互先在 **阶段 10** 落地，再迁入 **阶段 11**；不必等 Marketplace 扩展才能看到行间建议。*
+*说明：v0.7 起 **10.1+ 为唯一行间产品迭代**；11 规格保留、实现延后。*
 
 ---
 
@@ -1098,16 +1350,20 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 2. **用 `CommandRunningTool` 直接跑 latexmk**：超时 30s 不够；且 `shell=True` 不利于路径安全；单独封装。
 3. **整篇 tex 送入 LLM**：阶段 7 必须按 issue 切片 + 条数上限。
 4. **展平多文件为一棵 AST**：行号对不上；坚持 ProjectIndex + 相对路径。
-5. **跳过阶段 10 直接做阶段 11 扩展**：浏览器 Ghost UI 更易迭代行间卡；扩展 API 限制多，应先 10 后 11。
-6. **把幽灵窗口仅做进 VS Code**：阶段 10 的 `ghost_cli` 可独立演示，不装扩展也能改稿。
-7. **先改 vscode-extension**：阶段 10 契约稳定后再迁入 11，避免双份 UI 返工。
-8. **把 checklist 塞进 LaTeX watch 默认路径**：checklist 属于审稿工作流；LaTeX 仅通过附加阶段 A 预留可选注入。
-9. **为 LaTeX 辅助单独做目录批处理 CLI**：一次性诊断用 `main.py task --wf latex_diagnose_*` 即可，不作为产品阶段。
-10. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
-11. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
-12. **把 `latex_diagnose_v1` 当润色或当「必有 suggestions」**：v1 仅 error→L3；润色在阶段 8；大库全 warning 时 `suggestion_count=0` 正常。
-13. **把阶段 7 的 `latex_report` 直接给用户**：全量 JSON 过长；用阶段 9 列表或 **阶段 10 幽灵窗**。
-14. **用 `VaLoRA_TMC` 全 warning 验收 L3**：应用 `broken_braces.tex` 等含 error 样本。
+5. **在 10.1 未完成时启动阶段 11**：扩展 API 迭代成本高；须先冻结 Ghost 的 apply/compare/主动润色契约。
+6. **Ghost 路径仍开空闲自动润色**：与 10.3 冲突；`ghost_cli` 须显式关闭 `idle_polish`。
+7. **把 warning 送入 LLM fix**：污染纠错判断；warning 仅走 10.8 释义面板。
+8. **只对 main_tex 监视或出卡**：子 tex / bib 变更须触发重检并在对应文件显示卡（§10.10）。
+9. **应用不修 offset 就上线**：10.0 已知「应用变追加行+乱码」须在 10.9 修完再验收。
+10. **对比模式破坏可编译性**：`apply_compare` 须保证注释语法合法、包环境不变。
+11. **先改 vscode-extension 再做 10.1**：当前迭代只改 `ui/ghost` + `latex/ghost_*`。
+12. **把 checklist 塞进 LaTeX watch 默认路径**：checklist 属于审稿工作流；LaTeX 仅通过附加阶段 A 预留可选注入。
+13. **为 LaTeX 辅助单独做目录批处理 CLI**：一次性诊断用 `main.py task --wf latex_diagnose_*` 即可，不作为产品阶段。
+14. **用 `os.path.join` 拼项目内相对路径**：一律 `Path(root) / normalize_rel_path(rel)`。
+15. **指望单 tex 解析得到 bib 文献摘要**：必须做阶段 **2.6** 或接受仅 cite key 列表。
+16. **把 `latex_diagnose_v1` 当润色或当「必有 suggestions」**：v1 仅 error→L3；Ghost 润色仅 **主动**（10.3）；大库全 warning 时 `suggestion_count=0` 正常。
+17. **把阶段 7 的 `latex_report` 直接给用户**：全量 JSON 过长；用阶段 9 列表或 **阶段 10 幽灵窗**。
+18. **用 `VaLoRA_TMC` 全 warning 验收 L3**：应用 `broken_braces.tex` 或子 tex 人为 error 验收。
 
 ---
 
@@ -1126,8 +1382,11 @@ LATEX_WATCH_ENABLE_LATEXMK = false  # 监视模式下默认仅 ChkTeX，可按�
 | `latexmk` 报未定义引用 / 文献警告 | 4 | 已通过（log 解析） |
 | `latex_diagnose_v1`：`issue_count` 大、`suggestion_count=0`（多 warning、少 error） | 7 | 预期行为；L3 用 error 夹具另验 |
 | 人读摘要 / Top-K issues / 非 JSON 终态 | 9 | 已通过（CLI/Web） |
-| 浏览器幽灵窗：行间卡、应用 replacement | 10 | 已通过（MVP）；见 `latex.ghost_cli` |
-| Activity Bar 侧栏 + VS Code 内嵌幽灵 | 11 | 待实现 |
+| 浏览器幽灵窗 MVP：行间卡、应用 | 10.0 | 已通过 |
+| Ghost：1s 静默监视、无自动润色、主动润色对话 | 10.1–10.3 | 待实现 |
+| Ghost：应用/对比/忽略、红绿高亮、子文件 error 卡 | 10.5–10.10 | 待实现 |
+| Ghost：文件树 + bib、红点/绿点、警告释义面板 | 10.7–10.8 | 待实现 |
+| Activity Bar 侧栏 + VS Code 内嵌幽灵 | 11 | **暂缓** |
 
 ---
 

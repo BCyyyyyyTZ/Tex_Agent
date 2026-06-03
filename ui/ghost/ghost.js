@@ -10,6 +10,8 @@
   let fileLines = [];
   let dismissed = new Set();
   let cardPositions = {};
+  let activeFixLineSet = new Set();
+  let activePolishLineSet = new Set();
 
   const $ = (id) => document.getElementById(id);
 
@@ -24,6 +26,11 @@
     const r = sug.range || {};
     const start = r.start || {};
     return (start.line ?? 0) + 1;
+  }
+
+  function normalizeLineNo(lineNo) {
+    const total = fileLines.length || 1;
+    return Math.max(1, Math.min(lineNo, total));
   }
 
   function cardKey(sug) {
@@ -51,9 +58,11 @@
 
   function renderFileSelect() {
     const sel = $("file-select");
+    const polishSel = $("polish-target-file");
     const files = collectFiles();
     if (!files.length) {
       sel.innerHTML = "<option>（无 .tex）</option>";
+      if (polishSel) polishSel.innerHTML = "<option>（无可用文件）</option>";
       return;
     }
     if (!currentFile || !files.includes(currentFile)) {
@@ -65,6 +74,16 @@
           `<option value="${escapeAttr(f)}"${f === currentFile ? " selected" : ""}>${escapeHtml(f)}</option>`
       )
       .join("");
+    if (polishSel) {
+      const nowTarget = polishSel.value;
+      polishSel.innerHTML = files
+        .map(
+          (f) =>
+            `<option value="${escapeAttr(f)}"${f === nowTarget ? " selected" : ""}>${escapeHtml(f)}</option>`
+        )
+        .join("");
+      if (!polishSel.value) polishSel.value = currentFile;
+    }
   }
 
   function escapeHtml(s) {
@@ -78,10 +97,52 @@
     return escapeHtml(s).replace(/"/g, "&quot;");
   }
 
-  function issuesForLine(lineNo) {
-    return (snapshot?.issues || []).filter(
-      (i) => i.file === currentFile && i.line === lineNo
+  function findIssueForSuggestion(sug) {
+    const issueId = sug.issue_id || "";
+    if (!issueId) return null;
+    return (snapshot?.issues || []).find((i) => i.id === issueId) || null;
+  }
+
+  function buildActiveFixLineSet() {
+    const lines = new Set();
+    const fixes = (snapshot?.suggestions || []).filter(
+      (s) => s.file === currentFile
     );
+    fixes.forEach((sug) => {
+      const key = cardKey(sug);
+      if (dismissed.has(key)) return;
+      const start = (sug.range?.start?.line ?? 0) + 1;
+      const end = (sug.range?.end?.line ?? sug.range?.start?.line ?? 0) + 1;
+      const lo = normalizeLineNo(Math.min(start, end));
+      const hi = normalizeLineNo(Math.max(start, end));
+      for (let line = lo; line <= hi; line += 1) {
+        lines.add(line);
+      }
+    });
+    activeFixLineSet = lines;
+  }
+
+  function buildActivePolishLineSet() {
+    const lines = new Set();
+    if (!$("show-polish").checked) {
+      activePolishLineSet = lines;
+      return;
+    }
+    const polish = (snapshot?.polish_suggestions || []).filter(
+      (s) => s.file === currentFile
+    );
+    polish.forEach((sug) => {
+      const key = cardKey(sug);
+      if (dismissed.has(key)) return;
+      const start = (sug.range?.start?.line ?? 0) + 1;
+      const end = (sug.range?.end?.line ?? sug.range?.start?.line ?? 0) + 1;
+      const lo = normalizeLineNo(Math.min(start, end));
+      const hi = normalizeLineNo(Math.max(start, end));
+      for (let line = lo; line <= hi; line += 1) {
+        lines.add(line);
+      }
+    });
+    activePolishLineSet = lines;
   }
 
   function renderSource() {
@@ -89,13 +150,12 @@
     const html = fileLines
       .map((text, idx) => {
         const lineNo = idx + 1;
-        const issues = issuesForLine(lineNo);
         let inner = escapeHtml(text || " ");
-        issues.forEach((iss) => {
-          const cls =
-            iss.severity === "error" ? "issue-error" : "issue-warn";
-          inner = `<mark class="${cls}" title="${escapeAttr(iss.message || "")}">${inner}</mark>`;
-        });
+        if (activeFixLineSet.has(lineNo)) {
+          inner = `<mark class="suggestion-error" title="待修正范围">${inner}</mark>`;
+        } else if (activePolishLineSet.has(lineNo)) {
+          inner = `<mark class="suggestion-polish" title="待润色范围">${inner}</mark>`;
+        }
         return `<div class="line-row" data-line="${lineNo}"><span class="line-gutter">${lineNo}</span><span class="line-text">${inner}</span></div>`;
       })
       .join("");
@@ -132,7 +192,7 @@
       const key = cardKey(sug);
       if (dismissed.has(key)) return;
 
-      const lineNo = lineFromSuggestion(sug);
+      const lineNo = normalizeLineNo(lineFromSuggestion(sug));
       const top =
         12 +
         (lineNo - 1) * LINE_H -
@@ -152,17 +212,31 @@
         card.style.height = cardPositions[key].h + "px";
       }
 
-      const title =
-        item.kind === "fix" ? "修改建议" : "润色建议";
+      const title = item.kind === "fix" ? "报错修正建议" : "润色建议";
       const rep = (sug.replacement || "").trim();
+      const issue = item.kind === "fix" ? findIssueForSuggestion(sug) : null;
+      const issueMsg = issue?.message || sug.message || "（无报错信息）";
+      const cause = sug.cause_zh || sug.rationale_zh || "（无原因分析）";
+      const advice =
+        sug.advice_zh ||
+        (rep ? "将定位范围替换为建议文本，预计可消除该报错。" : "（无修改方案）");
+      const location = `${escapeHtml(sug.file || currentFile)}:${lineNo}`;
       card.innerHTML = `
         <div class="card-head"><span>${title} · 行 ${lineNo}</span><span>⠿</span></div>
         <div class="card-body">
-          <div class="rationale">${escapeHtml(sug.rationale_zh || sug.message || "（无说明）")}</div>
+          ${
+            item.kind === "fix"
+              ? `<div class="field"><span class="label">报错信息</span><div class="value">${escapeHtml(issueMsg)}</div></div>
+                 <div class="field"><span class="label">定位</span><div class="value mono">${location}</div></div>
+                 <div class="field"><span class="label">原因分析</span><div class="value">${escapeHtml(cause)}</div></div>
+                 <div class="field"><span class="label">改正方案</span><div class="value">${escapeHtml(advice)}</div></div>`
+              : `<div class="rationale">${escapeHtml(sug.rationale_zh || sug.message || "（无说明）")}</div>`
+          }
           ${rep ? `<pre class="replacement">${escapeHtml(rep)}</pre>` : ""}
         </div>
         <div class="card-actions">
           ${rep ? '<button type="button" class="primary btn-apply">应用</button>' : ""}
+          ${rep ? '<button type="button" class="btn-compare">对比</button>' : ""}
           <button type="button" class="btn-dismiss">忽略</button>
         </div>
       `;
@@ -170,11 +244,18 @@
       setupDrag(card, key);
       const applyBtn = card.querySelector(".btn-apply");
       if (applyBtn) {
-        applyBtn.addEventListener("click", () => applySuggestion(sug, key));
+        applyBtn.addEventListener("click", () =>
+          applySuggestion(sug, key, "replace")
+        );
+      }
+      const compareBtn = card.querySelector(".btn-compare");
+      if (compareBtn) {
+        compareBtn.addEventListener("click", () =>
+          applySuggestion(sug, key, "compare")
+        );
       }
       card.querySelector(".btn-dismiss").addEventListener("click", () => {
-        dismissed.add(key);
-        card.classList.add("dismissed");
+        dismissCard(key, card);
       });
 
       layer.appendChild(card);
@@ -235,14 +316,23 @@
     };
   }
 
-  function applySuggestion(sug, key) {
+  function dismissCard(key, card) {
+    dismissed.add(key);
+    if (card) card.classList.add("dismissed");
+    buildActiveFixLineSet();
+    buildActivePolishLineSet();
+    renderSource();
+    renderGhostCards();
+  }
+
+  function applySuggestion(sug, key, mode) {
     api("/api/apply", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ suggestion: sug }),
+      body: JSON.stringify({ suggestion: sug, mode: mode || "replace" }),
     })
       .then(() => {
-        dismissed.add(key);
+        dismissCard(key, null);
         refresh();
       })
       .catch((e) => alert("应用失败: " + e.message));
@@ -265,20 +355,50 @@
     return api("/api/file?path=" + encodeURIComponent(currentFile)).then(
       (data) => {
         fileLines = data.lines || [];
+        buildActiveFixLineSet();
+        buildActivePolishLineSet();
         renderSource();
         renderGhostCards();
       }
     );
   }
 
+  function submitPolish() {
+    const targetFile = $("polish-target-file").value || currentFile;
+    const query = ($("polish-query").value || "").trim();
+    if (!query) {
+      $("polish-status").textContent = "请输入润色需求";
+      return;
+    }
+    $("polish-status").textContent = "生成中…";
+    api("/api/ghost/polish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        target_file: targetFile,
+        context_file: currentFile || targetFile,
+      }),
+    })
+      .then(() => {
+        $("polish-status").textContent = "润色建议已生成";
+        refresh();
+      })
+      .catch((e) => {
+        $("polish-status").textContent = "生成失败";
+        alert("润色失败: " + e.message);
+      });
+  }
+
   function refresh() {
     return api("/api/snapshot")
       .then((snap) => {
-        const prevVer = snapshot?.project_version;
+        const prevErrorSig = snapshot?.error_signature || "";
         snapshot = snap;
         updateStats();
         renderFileSelect();
-        if (prevVer !== snap.project_version) {
+        const nextErrorSig = snap.error_signature || "";
+        if (prevErrorSig !== nextErrorSig) {
           dismissed.clear();
         }
         return loadFile();
@@ -292,9 +412,25 @@
     currentFile = e.target.value;
     loadFile();
   });
-  $("show-polish").addEventListener("change", () => renderGhostCards());
+  $("show-polish").addEventListener("change", () => {
+    buildActivePolishLineSet();
+    renderSource();
+    renderGhostCards();
+  });
   $("ghost-enabled").addEventListener("change", () => renderGhostCards());
   $("editor-wrap").addEventListener("scroll", () => renderGhostCards());
+  $("toggle-polish-panel").addEventListener("click", () => {
+    const panel = $("polish-panel");
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      $("polish-target-file").value = currentFile;
+      $("polish-query").focus();
+    }
+  });
+  $("submit-polish").addEventListener("click", submitPolish);
+  $("polish-query").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitPolish();
+  });
 
   refresh();
   setInterval(refresh, POLL_MS);

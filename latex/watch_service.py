@@ -96,6 +96,8 @@ class WatchService:
         self._active_file: Optional[Path] = None
         self._diag_running = False
         self._polish_running = False
+        self.error_signature = ""
+        self.error_changed = False
 
     def start(self):
         if self.status == "running":
@@ -197,6 +199,7 @@ class WatchService:
             merged = merge_issues(chk_res.issues, latexmk_issues)
 
             error_issues = [i for i in merged if i.severity == Severity.ERROR]
+            next_error_signature = self._build_error_signature(error_issues)
             suggestions: List[Suggestion] = []
             if error_issues:
                 slices = slice_issues(error_issues, root=self.root_path)
@@ -211,9 +214,12 @@ class WatchService:
                     )
 
             with self._lock:
+                prev_error_signature = self.error_signature
                 self.project_version += 1
                 self.issues = merged
                 self.suggestions = suggestions
+                self.error_signature = next_error_signature
+                self.error_changed = next_error_signature != prev_error_signature
                 self.last_event_at = time.time()
 
             self._emit_event(
@@ -222,6 +228,7 @@ class WatchService:
                     "issues": [i.model_dump(mode="json") for i in merged],
                     "suggestions": [s.model_dump(mode="json") for s in suggestions],
                     "chktex_warnings": list(chk_res.warnings),
+                    "error_signature": next_error_signature,
                 },
             )
         except Exception as e:
@@ -309,6 +316,23 @@ class WatchService:
                 issues=self.issues,
                 suggestions=self.suggestions,
                 polish_suggestions=self.polish_suggestions,
+                error_signature=self.error_signature,
+                error_changed=self.error_changed,
                 last_event_at=self.last_event_at,
                 error_message=self.error_message,
             )
+
+    @staticmethod
+    def _build_error_signature(issues: List[DiagnosticIssue]) -> str:
+        """
+        生成与 issue 顺序无关的 error 签名，供 Ghost UI 判断是否需要刷新卡片。
+        """
+        if not issues:
+            return ""
+        parts = []
+        for issue in issues:
+            file_path = normalize_rel_path(issue.file)
+            parts.append(
+                f"{file_path}:{issue.line}:{issue.column}:{issue.code}:{issue.message}"
+            )
+        return "|".join(sorted(parts))

@@ -17,6 +17,10 @@ class WatchSnapshot(BaseModel):
     issues: List[DiagnosticIssue] = Field(default_factory=list)
     suggestions: List[Suggestion] = Field(default_factory=list)
     polish_suggestions: List[Suggestion] = Field(default_factory=list)
+    # 当前 error 集合的稳定签名；Ghost UI 可用来判断是否需要重绘卡片。
+    error_signature: str = ""
+    # 最近一次诊断是否引入了新的 error 集合变化。
+    error_changed: bool = False
     last_event_at: float = 0.0
     error_message: str = ""
 

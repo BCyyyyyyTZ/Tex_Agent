@@ -116,6 +116,8 @@ class Suggestion(BaseModel):
     replacement: str = ""
     confidence: Optional[float] = None
     rationale_zh: str = ""
+    cause_zh: str = ""
+    advice_zh: str = ""
     issue_id: Optional[str] = None
 
 

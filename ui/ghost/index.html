@@ -21,7 +21,21 @@
     <label class="toggle">
       <input type="checkbox" id="ghost-enabled" checked /> 显示幽灵卡
     </label>
+    <button type="button" id="toggle-polish-panel" class="top-btn">主动润色</button>
   </header>
+
+  <section class="polish-panel" id="polish-panel" hidden>
+    <label>
+      目标文件
+      <select id="polish-target-file"></select>
+    </label>
+    <label class="grow">
+      润色需求
+      <input id="polish-query" type="text" placeholder="例如：将摘要段落改得更学术、避免口语化" />
+    </label>
+    <button type="button" id="submit-polish" class="top-btn primary">生成润色建议</button>
+    <span id="polish-status" class="polish-status"></span>
+  </section>
 
   <main class="editor-wrap" id="editor-wrap">
     <div class="source-panel" id="source-panel"></div>

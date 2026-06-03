@@ -82,3 +82,19 @@
 + 实现**阶段 10（独立 Ghost UI）**：新增 `latex/ghost_cli.py`、`latex/ghost_server.py`、`latex/apply_edit.py` 与 `ui/ghost/*`，支持在浏览器行间显示纠错/润色建议卡片（可拖动、可缩放、可忽略、可应用到目标 `.tex`）。
 + 阶段 10 测试补齐：新增/增强 `tests/test_latex/test_apply_edit.py`、`tests/test_latex/test_ghost_server.py`、`tests/test_latex/test_ghost_cli.py`，覆盖偏移映射、文件写回、Ghost API 关键路径与 CLI 参数透传。
 + 重新设计并更新[LaTeX 子系统分阶段路线图](../../doc/TeX_Agent%20LaTeX%20子系统分阶段实现路线图.md)：将“独立幽灵窗口”前置为阶段 10（先可用），VS Code/Cursor 扩展迁移为阶段 11（后迁入），明确 9→10→11 的演进关系。
+
+#### [2026-06-03](./2026-06-03.md)
+
++ 实现路线图 **PR-10a** 的核心代码：新增 `GhostWatchPolicy`（`latex/ghost_watch_policy.py`），用于 Ghost 场景的 1 秒静默重检策略，并默认关闭自动润色。
++ Ghost 服务切换到策略化监视：`latex/ghost_server.py` 改为默认使用 `GhostWatchPolicy`，并透出 `quiet`/`auto_polish` 运行参数；`latex/ghost_cli.py` 增加 `--quiet-sec` 与 `--enable-auto-polish` 参数。
++ 增强 Ghost 刷新稳定性：`watch snapshot` 新增 `error_signature` / `error_changed`，前端 `ui/ghost/ghost.js` 改为“仅在 error 签名变化时重置卡片忽略态”，避免无新 error 时幽灵卡被反复刷新。
++ 测试补齐并通过：新增 `tests/test_latex/test_ghost_watch_policy.py`，并更新 `test_ghost_cli.py`、`test_ghost_server.py`；验证静默窗口、防抖触发、默认禁用自动润色、同 error 不重复触发 LLM。
++ 继续实现路线图 **PR-10b**：补充 `Suggestion` 纠错字段（`cause_zh` / `advice_zh`）并在 Ghost 卡片展示“报错信息/定位/原因分析/改正方案”；warning 默认不再在源码行内高亮，保持与纠错链路分离。
++ 修复 `apply_edit` 已知风险：新增 range 越界校验（超出文件行号直接拒绝应用）及 replacement 的 BOM/空字符清理，避免异常建议导致文件末尾误插入与乱码前缀。
++ PR-10b 测试补齐并通过：新增/增强 `tests/test_latex/test_apply_edit.py`、`tests/test_latex/test_ghost_watch_policy.py`、`tests/test_latex/test_ghost_server.py`，覆盖越界拒绝、BOM 清洗、warning-only 不触发 LLM、Ghost API 越界返回 400。
++ 继续实现路线图 **PR-10c**：新增 `latex/apply_compare.py` 与 `/api/apply` 的 `mode=compare`，支持“对比”模式把原文改为注释并插入建议正文；Ghost 卡片新增“对比”按钮。
++ 完成 PR-10c 前端交互：`ui/ghost/ghost.js` 增加建议范围红高亮（基于活跃纠错卡）、`应用/对比/忽略` 操作后即时清除卡片与高亮，避免残留干扰。
++ PR-10c 测试补齐并通过：新增 `tests/test_latex/test_apply_compare.py`，并增强 `tests/test_latex/test_ghost_server.py` 覆盖 compare 模式 API；相关回归共 19 项通过。
++ 实现路线图 **PR-10d**：新增主动润色后端能力（`POST /api/ghost/polish`）与 `latex/ghost_polish_prompt.py`，支持 `query + target_file + context_file` 驱动 LLM 生成润色建议并写入 `polish_suggestions`。
++ 完成 PR-10d 前端交互：`ui/ghost/index.html` 新增“主动润色”面板（目标文件选择 + 需求输入 + 触发按钮），`ui/ghost/ghost.js` 接入调用并在当前文件行内以绿色高亮展示润色建议范围。
++ PR-10d 测试补齐并通过：增强 `tests/test_latex/test_ghost_server.py`，新增主动润色成功/文件不存在用例；Ghost 相关回归共 21 项通过。

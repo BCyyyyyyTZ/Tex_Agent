@@ -109,6 +109,8 @@ def parse_llm_suggestion_json(
 
     replacement = str(data.get("replacement", "") or "").strip()
     rationale_zh = str(data.get("rationale_zh", data.get("rationale", "")) or "").strip()
+    cause_zh = str(data.get("cause_zh", "") or "").strip()
+    advice_zh = str(data.get("advice_zh", data.get("advice", "")) or "").strip()
     if not replacement:
         return None
 
@@ -128,7 +130,9 @@ def parse_llm_suggestion_json(
         message=str(data.get("message", "") or ""),
         replacement=replacement,
         confidence=_parse_confidence(data.get("confidence")),
-        rationale_zh=str(data.get("rationale_zh", data.get("rationale", "")) or ""),
+        rationale_zh=rationale_zh,
+        cause_zh=cause_zh,
+        advice_zh=advice_zh,
         issue_id=str(issue_id) if issue_id else None,
     )
 
@@ -183,6 +187,8 @@ def parse_polish_suggestion_json(
 
     replacement = str(data.get("replacement", "") or "").strip()
     rationale_zh = str(data.get("rationale_zh", data.get("rationale", "")) or "").strip()
+    cause_zh = str(data.get("cause_zh", "") or "").strip()
+    advice_zh = str(data.get("advice_zh", data.get("advice", "")) or "").strip()
     if not replacement and not rationale_zh:
         return None
 
@@ -199,6 +205,8 @@ def parse_polish_suggestion_json(
         replacement=replacement,
         confidence=_parse_confidence(data.get("confidence")),
         rationale_zh=rationale_zh,
+        cause_zh=cause_zh,
+        advice_zh=advice_zh,
         issue_id=None,
     )
 

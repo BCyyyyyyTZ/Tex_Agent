@@ -18,10 +18,21 @@ def main() -> None:
     parser.add_argument("--root", required=True, help="LaTeX 项目根目录")
     parser.add_argument("--main-tex", dest="main_tex", help="主 tex 相对路径")
     parser.add_argument(
+        "--quiet-sec",
+        type=float,
+        default=1.0,
+        help="目录发生修改后静默多久再触发诊断（秒）",
+    )
+    parser.add_argument(
+        "--enable-auto-polish",
+        action="store_true",
+        help="启用空闲自动润色（PR-10a 默认关闭）",
+    )
+    parser.add_argument(
         "--idle-polish-sec",
         type=float,
         default=2.0,
-        help="停笔后触发润色（秒）",
+        help="启用自动润色时，停笔后触发润色（秒）",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8771)
@@ -36,6 +47,8 @@ def main() -> None:
         run_ghost_server(
             root=args.root,
             main_tex=args.main_tex,
+            quiet_sec=args.quiet_sec,
+            auto_polish=args.enable_auto_polish,
             idle_polish_sec=args.idle_polish_sec,
             host=args.host,
             port=args.port,

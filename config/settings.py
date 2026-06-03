@@ -49,6 +49,16 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    raw = os.getenv(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return default
+
+
 @dataclass
 class Settings:
     """
@@ -158,6 +168,12 @@ class Settings:
     )
     latex_watch_enable_latexmk: bool = field(
         default_factory=lambda: _env_bool("LATEX_WATCH_ENABLE_LATEXMK", False)
+    )
+    latex_ghost_quiet_sec: float = field(
+        default_factory=lambda: max(0.1, _env_float("LATEX_GHOST_QUIET_SEC", 1.0))
+    )
+    latex_ghost_auto_polish: bool = field(
+        default_factory=lambda: _env_bool("LATEX_GHOST_AUTO_POLISH", False)
     )
 
     def __repr__(self) -> str:
