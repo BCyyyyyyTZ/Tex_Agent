@@ -29,7 +29,7 @@ cp .env.example .env
 # 方式 A：模块入口（常用）
 python -m ui.web.server
 
-python overleaf.py 然后打开http://127.0.0.1:8772/
+python -m ui.overleaf.server 然后打开http://127.0.0.1:8772/
 ```
 
 默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。

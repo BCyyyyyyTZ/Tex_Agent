@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 
 
+import base64
+
+
 import os
 
 
@@ -39,7 +42,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 
 from fastapi.staticfiles import StaticFiles
@@ -187,6 +190,45 @@ def _safe_path(project_dir: Path, rel_path: str) -> Path:
 
 
 
+
+
+def _is_valid_pdf(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _resolve_compiled_pdf(project_dir: Path, main_tex: str) -> Optional[Path]:
+    """Locate the compiled PDF, skipping empty placeholder files."""
+    candidates: List[Path] = []
+    if main_tex:
+        stem = Path(main_tex).stem
+        candidates.extend([
+            project_dir / "output" / "output.pdf",
+            project_dir / "output" / f"{stem}.pdf",
+            project_dir / f"{stem}.pdf",
+        ])
+    else:
+        candidates.append(project_dir / "output" / "output.pdf")
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve()) if candidate.exists() else str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _is_valid_pdf(candidate):
+            return candidate
+
+    for folder in (project_dir / "output", project_dir):
+        if not folder.is_dir():
+            continue
+        pdfs = sorted(
+            (f for f in folder.glob("*.pdf") if _is_valid_pdf(f)),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+        if pdfs:
+            return pdfs[0]
+    return None
 
 
 def _scan_files(project_dir: Path) -> List[Dict[str, Any]]:
@@ -504,18 +546,7 @@ def create_app() -> FastAPI:
 
 
 
-    @app.get("/api/projects/{project_id}/files")
-    async def serve_pdf(project_id: str) -> FileResponse:
-        p = _project_path(project_id)
-        candidates = sorted(p.glob("*.pdf"), key=lambda x: x.stat().st_mtime, reverse=True)
-        if not candidates:
-            raise HTTPException(status_code=404, detail="PDF 尚未编译")
-        return FileResponse(str(candidates[0]), media_type="application/pdf")
-
-
     async def list_project_files(project_id: str) -> List[Dict[str, Any]]:
-
-
         return _scan_files(_project_path(project_id))
 
 
@@ -570,56 +601,89 @@ def create_app() -> FastAPI:
 
 
 
+    @app.get("/api/projects/{project_id}/pdf")
+    async def serve_project_pdf(project_id: str) -> Response:
+        p = _project_path(project_id)
+        meta = _read_project_meta(project_id)
+        pdf_path = _resolve_compiled_pdf(p, meta.get("main_tex", ""))
+        if not pdf_path:
+            raise HTTPException(status_code=404, detail="PDF \u5c1a\u672a\u7f16\u8bd1")
+        data = pdf_path.read_bytes()
+        if not data:
+            raise HTTPException(status_code=404, detail="PDF \u6587\u4ef6\u4e3a\u7a7a\uff0c\u8bf7\u91cd\u65b0\u7f16\u8bd1")
+        return Response(
+            content=data,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": 'inline; filename="output.pdf"',
+                "Content-Length": str(len(data)),
+                "Cache-Control": "no-store",
+            },
+        )
+
+
     @app.post("/api/projects/{project_id}/compile")
-
-
     async def compile_project(project_id: str, file: str = None) -> Dict[str, Any]:
         """Compile the project using pdflatex directly (latexmk needs perl which is not installed)."""
+        import subprocess
         try:
             meta = _read_project_meta(project_id)
             p = _project_path(project_id)
-            main_tex = file or meta.get("main_tex", "")
+            main_tex = meta.get("main_tex") or file or ""
             if not main_tex:
                 raise HTTPException(status_code=400, detail="\u672a\u8bbe\u7f6e\u4e3b\u6587\u4ef6")
+            main_path = p / main_tex
+            if not main_path.is_file():
+                raise HTTPException(status_code=400, detail=f"\u4e3b\u6587\u4ef6\u4e0d\u5b58\u5728: {main_tex}")
             od = p / "output"
             od.mkdir(exist_ok=True)
+            stale_output = od / "output.pdf"
+            if stale_output.is_file() and stale_output.stat().st_size == 0:
+                stale_output.unlink(missing_ok=True)
             from latex.tex_env import probe_tex_env
             tex_env = probe_tex_env()
             pdflatex = tex_env.paths.get("pdflatex")
             if not pdflatex:
                 return {"success": False, "issues": [], "warnings": ["pdflatex_not_found"], "log": "\u672a\u627e\u5230 pdflatex", "stdout": "", "stderr": "", "pdf_exists": False}
-            import subprocess
+            argv = [pdflatex, "-interaction=nonstopmode", "-output-directory", str(od.resolve()), main_tex]
             proc = subprocess.run(
-                [pdflatex, "-interaction=nonstopmode", main_tex],
+                argv,
                 cwd=str(p),
-                capture_output=True, text=True, timeout=120
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
             )
             # Run a second time for cross-refs
             subprocess.run(
-                [pdflatex, "-interaction=nonstopmode", main_tex],
+                argv,
                 cwd=str(p),
-                capture_output=True, text=True, timeout=120
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
             )
-            pdfs = list(p.glob("*.pdf"))
-            pdf_path = pdfs[0] if pdfs else None
-            if pdf_path:
-                import shutil
-                shutil.copy2(pdf_path, od / "output.pdf")
-            return {
-                "success": proc.returncode == 0,
+            stem_pdf = od / f"{Path(main_tex).stem}.pdf"
+            output_pdf = od / "output.pdf"
+            if _is_valid_pdf(stem_pdf):
+                shutil.copy2(stem_pdf, output_pdf)
+            pdf_path = _resolve_compiled_pdf(p, main_tex)
+            pdf_exists = pdf_path is not None
+            compile_ok = pdf_exists
+            pdf_size = pdf_path.stat().st_size if pdf_path else 0
+            payload: Dict[str, Any] = {
+                "success": compile_ok,
                 "issues": [],
-                "warnings": [],
-                "log": (proc.stdout or "")[-1000:] if proc.returncode != 0 else "",
+                "warnings": [] if compile_ok else ["pdf_not_generated"],
+                "log": (proc.stdout or "")[-2000:] if not compile_ok else "",
                 "stdout": (proc.stdout or "")[-2000:],
                 "stderr": (proc.stderr or "")[-2000:],
-                "pdf_exists": pdf_path is not None,
+                "pdf_exists": pdf_exists,
+                "pdf_size": pdf_size,
                 "compiled_file": main_tex,
                 "project_root": str(p),
-                "return_code": proc.returncode
+                "return_code": proc.returncode,
             }
+            if compile_ok and pdf_path and pdf_size <= 15 * 1024 * 1024:
+                payload["pdf_base64"] = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
+            return payload
         except HTTPException:
             raise
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             return {"success": False, "issues": [], "warnings": ["timeout"], "log": "pdflatex \u8d85\u65f6", "stdout": "", "stderr": "", "pdf_exists": False}
         except Exception as e:
             return {"success": False, "issues": [], "warnings": [str(e)], "log": str(e)[:500], "stdout": "", "stderr": "", "pdf_exists": False}
@@ -640,14 +704,10 @@ def create_app() -> FastAPI:
 
 
         q = (body.query or "").strip()
-
-
+        selected = (body.selected_text or "").strip()
         tr = body.target_file or ""
 
-
-        if not q:
-
-
+        if not q and not selected:
             raise HTTPException(status_code=400, detail="query \u4e0d\u80fd\u4e3a\u7a7a")
 
 
@@ -670,9 +730,15 @@ def create_app() -> FastAPI:
 
 
         tt = tp.read_text("utf-8", errors="replace")
-
-
-        prompt = build_ghost_polish_prompt(query=q, target_file=tr, target_text=tt, context_file=tr, context_text=tt)
+        polish_query = q or ("请润色以下选中文本，保持 LaTeX 语法正确，表达更学术流畅。" if selected else q)
+        target_text = selected if selected else tt
+        prompt = build_ghost_polish_prompt(
+            query=polish_query,
+            target_file=tr,
+            target_text=target_text,
+            context_file=tr,
+            context_text=tt,
+        )
 
 
         agent = SimpleAgent(name="overleaf_polish", temperature=0.4)
@@ -844,15 +910,5 @@ def main():
 
 
 if __name__ == "__main__":
-
-
     main()
 
-
-    @app.get("/api/projects/{project_id}/pdf")
-    async def serve_pdf(project_id: str) -> FileResponse:
-        p = _project_path(project_id)
-        candidates = sorted(p.glob("*.pdf"), key=lambda x: x.stat().st_mtime, reverse=True)
-        if not candidates:
-            raise HTTPException(status_code=404, detail="PDF 尚未编译")
-        return FileResponse(str(candidates[0]), media_type="application/pdf")

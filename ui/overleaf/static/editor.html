@@ -39,8 +39,10 @@
       <div class="editor-tabs" id="editorTabs">
         <span class="tab active" id="currentFileTab">main.tex</span>
       </div>
-      <textarea id="codeEditor" spellcheck="false" class="code-textarea"></textarea>
-<button class="polish-selection-btn" id="polishSelectionBtn">? ????</button>
+      <div class="editor-wrap">
+        <textarea id="codeEditor" spellcheck="false" class="code-textarea"></textarea>
+        <button type="button" class="polish-selection-btn" id="polishSelectionBtn">润色</button>
+      </div>
     </main>
 
     <!-- Divider -->
@@ -50,9 +52,18 @@
     <aside class="pdf-panel" id="pdfPanel">
       <div class="pdf-header">
         <span>PDF 预览</span>
+        <div class="pdf-zoom-controls">
+          <button type="button" id="pdfZoomOut" title="缩小">−</button>
+          <input type="range" id="pdfZoomSlider" min="50" max="200" value="100" title="缩放">
+          <span id="pdfZoomLabel">100%</span>
+          <button type="button" id="pdfZoomIn" title="放大">+</button>
+          <button type="button" id="pdfFitHeight" title="适应高度（一页）">适应高度</button>
+        </div>
         <button onclick="togglePdfPanel()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
       </div>
-      <iframe id="pdfViewer" class="pdf-iframe" src="about:blank"></iframe>
+      <div id="pdfViewer" class="pdf-viewer">
+        <div id="pdfPages"></div>
+      </div>
       <div class="pdf-placeholder" id="pdfPlaceholder">
         <p>点击「编译」生成 PDF</p>
       </div>
@@ -71,7 +82,6 @@
       <select id="polishFile" class="polish-select"></select>
       <label>润色需求</label>
       <textarea id="polishQuery" class="polish-input" placeholder="例如：让摘要更学术性、修正语法错误、改善段落衔接"></textarea>
-<button class="polish-selection-btn" id="polishSelectionBtn">? ????</button>
       <button onclick="runPolish()" id="polishBtn" class="btn-primary" style="margin-top:8px">生成润色建议</button>
       <div id="polishStatus" class="status-text"></div>
       <div id="polishResult" class="polish-result" style="display:none">
@@ -93,6 +103,7 @@
     <div id="diagnosticList"></div>
   </div>
 
+  <script src="/static/vendor/pdf.min.js"></script>
   <script src="/static/editor.js"></script>
 </body>
 </html>

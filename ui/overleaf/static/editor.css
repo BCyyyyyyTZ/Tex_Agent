@@ -11,7 +11,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e1e; colo
 .muted { color: #858585; font-size: 12px; }
 
 /* Main layout */
-.main-layout { flex: 1; display: flex; overflow: hidden; }
+.main-layout { flex: 1; display: flex; overflow: hidden; min-height: 0; }
 
 /* File tree */
 .file-tree { width: 220px; min-width: 160px; background: #252526; border-right: 1px solid #3c3c3c; display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0; }
@@ -23,7 +23,8 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e1e; colo
 .file-item .icon.tex { color: #4fc1ff; }
 
 /* Editor panel */
-.editor-panel { flex: 1; display: flex; flex-direction: column; min-width: 300px; }
+.editor-panel { flex: 1; display: flex; flex-direction: column; min-width: 300px; position: relative; }
+.editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .editor-tabs { display: flex; background: #252526; border-bottom: 1px solid #3c3c3c; padding: 0 8px; flex-shrink: 0; }
 .tab { padding: 6px 16px; font-size: 12px; color: #858585; cursor: default; border-bottom: 2px solid transparent; }
 .tab.active { color: #fff; border-bottom-color: #4fc1ff; }
@@ -31,10 +32,18 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e1e; colo
 .code-textarea:focus { box-shadow: inset 0 0 0 1px #4fc1ff; }
 
 /* PDF panel */
-.pdf-panel { width: 400px; min-width: 250px; background: #252526; border-left: 1px solid #3c3c3c; display: flex; flex-direction: column; position: relative; flex-shrink: 0; overflow: hidden; }
-.pdf-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #3c3c3c; font-size: 12px; }
-.pdf-iframe { flex: 1; width: 100%; border: none; background: #fff; }
-.pdf-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #858585; font-size: 14px; pointer-events: none; }
+.pdf-panel { width: 400px; min-width: 250px; background: #252526; border-left: 1px solid #3c3c3c; display: flex; flex-direction: column; position: relative; flex-shrink: 0; overflow: hidden; min-height: 0; }
+.pdf-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #3c3c3c; font-size: 12px; flex-shrink: 0; flex-wrap: wrap; }
+.pdf-zoom-controls { display: flex; align-items: center; gap: 6px; flex: 1; justify-content: center; min-width: 0; }
+.pdf-zoom-controls button { padding: 2px 8px; background: #3c3c3c; color: #d4d4d4; border: none; border-radius: 3px; cursor: pointer; font-size: 13px; line-height: 1.4; }
+.pdf-zoom-controls button:hover { background: #4fc1ff; color: #1e1e1e; }
+.pdf-zoom-controls input[type=range] { width: 72px; accent-color: #4fc1ff; }
+#pdfZoomLabel { min-width: 36px; text-align: center; color: #858585; font-size: 11px; }
+#pdfFitHeight { font-size: 11px; padding: 2px 6px; white-space: nowrap; }
+.pdf-viewer { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: auto; background: #525659; display: none; }
+#pdfPages { padding: 8px 0; min-height: 100%; display: flex; flex-direction: column; align-items: center; }
+.pdf-page { display: block; margin: 0 auto 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.35); background: #fff; flex-shrink: 0; }
+.pdf-placeholder { position: absolute; left: 0; right: 0; bottom: 0; top: 56px; display: flex; align-items: center; justify-content: center; color: #858585; font-size: 14px; pointer-events: none; z-index: 1; }
 
 /* Polish slide panel */
 .polish-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; display: none; }
@@ -91,13 +100,15 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e1e; colo
 .polish-selection-btn {
   position: absolute;
   z-index: 20;
-  padding: 4px 8px;
+  padding: 4px 10px;
   background: #0e639c;
   color: #fff;
   border: none;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   display: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  white-space: nowrap;
 }
 .polish-selection-btn:hover { background: #1177bb; }
