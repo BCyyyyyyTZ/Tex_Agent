@@ -11,7 +11,7 @@ from latex.constants import IssueSource, Severity
 from latex.models import DiagnosticIssue
 from latex.paths import normalize_rel_path
 
-_FILE_ENTER_RE = re.compile(r"^\(([^\(\)\s]+\.(?:tex|sty|cls|bbl|aux))")
+_FILE_ENTER_RE = re.compile(r"\(([^\(\)\s]+\.(?:tex|sty|cls|bbl|aux))")
 _LINE_RE = re.compile(r"^l\.(\d+)\s*(.*)$")
 _BANG_RE = re.compile(r"^!\s*(.+)$")
 _FILE_LINE_RE = re.compile(
@@ -118,7 +118,7 @@ def parse_latex_log(
             pending_error = None
             continue
 
-        m_enter = _FILE_ENTER_RE.match(line)
+        m_enter = _FILE_ENTER_RE.search(line)
         if m_enter:
             current_file = _normalize_log_file(m_enter.group(1), root) or current_file
             continue

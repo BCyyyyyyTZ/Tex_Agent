@@ -6,6 +6,7 @@
   const POLL_MS = 1500;
 
   let snapshot = null;
+  let projectTree = null;
   let currentFile = "";
   let fileLines = [];
   let dismissed = new Set();
@@ -43,47 +44,134 @@
     );
   }
 
+  function isSuggestionDismissed(sug) {
+    return dismissed.has(cardKey(sug));
+  }
+
+  function buildPendingIndexes() {
+    const fixByFile = {};
+    const polishByFile = {};
+    let fixCount = 0;
+    let polishCount = 0;
+
+    (snapshot?.suggestions || []).forEach((sug) => {
+      if (isSuggestionDismissed(sug)) return;
+      const file = sug.file || "";
+      if (!file) return;
+      fixByFile[file] = (fixByFile[file] || 0) + 1;
+      fixCount += 1;
+    });
+
+    (snapshot?.polish_suggestions || []).forEach((sug) => {
+      if (isSuggestionDismissed(sug)) return;
+      const file = sug.file || "";
+      if (!file) return;
+      polishByFile[file] = (polishByFile[file] || 0) + 1;
+      polishCount += 1;
+    });
+
+    return { fixByFile, polishByFile, fixCount, polishCount };
+  }
+
   function collectFiles() {
-    const set = new Set();
-    if (snapshot && snapshot.main_tex) set.add(snapshot.main_tex);
-    const all = []
+    const files = [];
+    const seen = new Set();
+    const roots = projectTree?.nodes || [];
+    const walk = (nodes, depth) => {
+      (nodes || []).forEach((node) => {
+        const path = node?.path || "";
+        if (path && !seen.has(path)) {
+          seen.add(path);
+          files.push({
+            path,
+            kind: node.kind || "tex",
+            depth: depth || 0,
+          });
+        }
+        if (node?.children?.length) {
+          walk(node.children, (depth || 0) + 1);
+        }
+      });
+    };
+    walk(roots, 0);
+
+    const fallback = []
       .concat(snapshot?.suggestions || [])
       .concat(snapshot?.polish_suggestions || [])
-      .concat(
-        (snapshot?.issues || []).map((i) => i.file).filter(Boolean)
-      );
-    all.forEach((f) => set.add(f));
-    return Array.from(set).sort();
+      .concat((snapshot?.issues || []).map((i) => i.file).filter(Boolean))
+      .concat(snapshot?.main_tex || []);
+    fallback.forEach((entry) => {
+      const f = typeof entry === "string" ? entry : entry?.file;
+      if (!f || seen.has(f)) return;
+      seen.add(f);
+      files.push({ path: f, kind: "tex", depth: 0 });
+    });
+    return files;
+  }
+
+  function statusForFile(file, pending) {
+    const err = Number(pending.fixByFile[file] || 0);
+    const polish = Number(pending.polishByFile[file] || 0);
+    return { err, polish };
+  }
+
+  function statusLabel(status) {
+    const marks = [];
+    if (status.err > 0) marks.push("●");
+    if (status.polish > 0) marks.push("●");
+    return marks.join("");
+  }
+
+  function renderGlobalStatus(pending) {
+    const holder = $("file-pick-global-status");
+    if (!holder) return;
+    const hasErr = pending.fixCount > 0;
+    const hasPolish = pending.polishCount > 0;
+    const dots = [];
+    if (hasErr) dots.push('<span class="status-dot error" title="存在待处理纠错卡"></span>');
+    if (hasPolish) dots.push('<span class="status-dot polish" title="存在待处理润色卡"></span>');
+    holder.innerHTML = dots.join("");
   }
 
   function renderFileSelect() {
     const sel = $("file-select");
     const polishSel = $("polish-target-file");
     const files = collectFiles();
+    const pending = buildPendingIndexes();
     if (!files.length) {
       sel.innerHTML = "<option>（无 .tex）</option>";
       if (polishSel) polishSel.innerHTML = "<option>（无可用文件）</option>";
+      renderGlobalStatus(pending);
       return;
     }
-    if (!currentFile || !files.includes(currentFile)) {
-      currentFile = files[0];
+    const filePaths = files.map((f) => f.path);
+    if (!currentFile || !filePaths.includes(currentFile)) {
+      currentFile = filePaths[0];
     }
     sel.innerHTML = files
       .map(
-        (f) =>
-          `<option value="${escapeAttr(f)}"${f === currentFile ? " selected" : ""}>${escapeHtml(f)}</option>`
+        (item) => {
+          const f = item.path;
+          const status = statusForFile(f, pending);
+          const labelPrefix = statusLabel(status);
+          const indent = item.depth > 0 ? "  ".repeat(item.depth) + "└ " : "";
+          const kindPrefix = item.kind === "bib" ? "[bib] " : "";
+          const title = `${labelPrefix ? labelPrefix + " " : ""}${indent}${kindPrefix}${f}`;
+          return `<option value="${escapeAttr(f)}"${f === currentFile ? " selected" : ""}>${escapeHtml(title)}</option>`;
+        }
       )
       .join("");
     if (polishSel) {
       const nowTarget = polishSel.value;
       polishSel.innerHTML = files
         .map(
-          (f) =>
-            `<option value="${escapeAttr(f)}"${f === nowTarget ? " selected" : ""}>${escapeHtml(f)}</option>`
+          (item) =>
+            `<option value="${escapeAttr(item.path)}"${item.path === nowTarget ? " selected" : ""}>${escapeHtml(item.path)}</option>`
         )
         .join("");
       if (!polishSel.value) polishSel.value = currentFile;
     }
+    renderGlobalStatus(pending);
   }
 
   function escapeHtml(s) {
@@ -255,6 +343,7 @@
         );
       }
       card.querySelector(".btn-dismiss").addEventListener("click", () => {
+        persistDismiss(sug);
         dismissCard(key, card);
       });
 
@@ -321,6 +410,8 @@
     if (card) card.classList.add("dismissed");
     buildActiveFixLineSet();
     buildActivePolishLineSet();
+    updateStats();
+    renderFileSelect();
     renderSource();
     renderGhostCards();
   }
@@ -340,14 +431,50 @@
 
   function updateStats() {
     if (!snapshot) return;
+    const pending = buildPendingIndexes();
     const issues = snapshot.issues || [];
     const err = issues.filter((i) => i.severity === "error").length;
     const warn = issues.filter((i) => i.severity === "warning").length;
     $("stats").textContent =
       `v${snapshot.project_version} · ${err} 错误 · ${warn} 警告 · ` +
-      `${(snapshot.suggestions || []).length} 修改 · ` +
-      `${(snapshot.polish_suggestions || []).length} 润色`;
+      `${pending.fixCount} 修改 · ` +
+      `${pending.polishCount} 润色`;
     $("meta-root").textContent = snapshot.root || "—";
+  }
+
+  function updateCompileIndicator() {
+    const bar = $("compile-indicator");
+    const icon = $("compile-indicator-icon");
+    const text = $("compile-indicator-text");
+    if (!bar) return;
+    const state = snapshot?.compile_state || (snapshot?.compile_running ? "running" : "idle");
+    if (state === "idle") {
+      bar.hidden = true;
+      return;
+    }
+    bar.hidden = false;
+    if (!icon || !text) return;
+    if (state === "running") {
+      icon.className = "compile-icon compile-running";
+      text.textContent = "正在进行编译检查";
+      return;
+    }
+    if (state === "done") {
+      icon.className = "compile-icon compile-done";
+      text.textContent = "编译检查完成";
+      return;
+    }
+    icon.className = "compile-icon compile-failed";
+    text.textContent = "编译检查失败";
+  }
+
+  function persistDismiss(sug) {
+    if (!sug) return;
+    api("/api/ghost/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suggestion: sug }),
+    }).catch(() => {});
   }
 
   function loadFile() {
@@ -390,17 +517,29 @@
       });
   }
 
+  function loadProjectTree() {
+    return api("/api/project-tree")
+      .then((tree) => {
+        projectTree = tree;
+      })
+      .catch(() => {
+        projectTree = null;
+      });
+  }
+
   function refresh() {
-    return api("/api/snapshot")
-      .then((snap) => {
-        const prevErrorSig = snapshot?.error_signature || "";
+    const prevVersion = snapshot?.project_version ?? -1;
+    const prevCompileRunning = !!snapshot?.compile_running;
+    return Promise.all([api("/api/snapshot"), loadProjectTree()])
+      .then(([snap]) => {
         snapshot = snap;
         updateStats();
+        updateCompileIndicator();
+        const versionChanged = prevVersion !== (snap.project_version ?? -1);
+        const compileChanged = prevCompileRunning !== !!snap.compile_running;
+        if (!versionChanged && !compileChanged) return;
         renderFileSelect();
-        const nextErrorSig = snap.error_signature || "";
-        if (prevErrorSig !== nextErrorSig) {
-          dismissed.clear();
-        }
+        // 不再因 error_signature 变化自动清空忽略态，避免已忽略卡片反复出现。
         return loadFile();
       })
       .catch((e) => {
@@ -426,6 +565,15 @@
       $("polish-target-file").value = currentFile;
       $("polish-query").focus();
     }
+  });
+  $("trigger-compile").addEventListener("click", () => {
+    api("/api/ghost/compile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    })
+      .then(() => refresh())
+      .catch((e) => alert("触发编译失败: " + e.message));
   });
   $("submit-polish").addEventListener("click", submitPolish);
   $("polish-query").addEventListener("keydown", (e) => {
