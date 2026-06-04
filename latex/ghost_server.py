@@ -20,6 +20,7 @@ from latex.apply_compare import apply_suggestion_compare_to_file
 from latex.apply_edit import apply_suggestion_to_file
 from latex.constants import IssueSource, Severity
 from latex.ghost_polish_prompt import build_ghost_polish_prompt
+from latex.project_tree import build_project_tree
 from latex.ghost_watch_policy import GhostWatchPolicy
 from latex.models import Position, Suggestion, TextRange
 from latex.paths import normalize_rel_path
@@ -41,6 +42,10 @@ class PolishBody(BaseModel):
     query: str = ""
     target_file: str = ""
     context_file: str = ""
+
+
+class DismissBody(BaseModel):
+    suggestion: Dict[str, Any] = Field(default_factory=dict)
 
 
 def get_service() -> WatchService:
@@ -87,6 +92,11 @@ def create_ghost_app() -> FastAPI:
             "line_count": len(lines),
             "lines": lines,
         }
+
+    @app.get("/api/project-tree")
+    async def project_tree() -> Dict[str, Any]:
+        svc = get_service()
+        return build_project_tree(root=str(svc.root_path), main_tex=svc.main_tex)
 
     @app.post("/api/apply")
     async def apply_suggestion(body: ApplyBody) -> Dict[str, Any]:
@@ -165,6 +175,20 @@ def create_ghost_app() -> FastAPI:
             {"polish_suggestions": [s.model_dump(mode="json") for s in svc.polish_suggestions]},
         )
         return {"ok": True, "suggestion": sug.model_dump(mode="json")}
+
+    @app.post("/api/ghost/dismiss")
+    async def dismiss_suggestion(body: DismissBody) -> Dict[str, Any]:
+        svc = get_service()
+        if not body.suggestion:
+            raise HTTPException(status_code=400, detail="缺少 suggestion")
+        svc.dismiss_suggestion(body.suggestion)
+        return {"ok": True}
+
+    @app.post("/api/ghost/compile")
+    async def run_compile_check() -> Dict[str, Any]:
+        svc = get_service()
+        accepted = svc.request_compile_check()
+        return {"ok": True, "accepted": accepted}
 
     if _GHOST_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(_GHOST_DIR)), name="ghost_static")
@@ -256,6 +280,7 @@ def run_ghost_server(
     main_tex: Optional[str] = None,
     quiet_sec: float = 1.0,
     auto_polish: bool = False,
+    enable_latexmk: bool = True,
     idle_polish_sec: float = 2.0,
     host: str = "127.0.0.1",
     port: int = 8771,
@@ -274,6 +299,7 @@ def run_ghost_server(
         main_tex=main_tex,
         quiet_sec=quiet_sec,
         auto_polish=auto_polish,
+        enable_latexmk=enable_latexmk,
         idle_polish_sec=idle_polish_sec,
     )
     _service.start()
@@ -290,7 +316,10 @@ def run_ghost_server(
     if main_tex:
         print(f"[Ghost UI] main_tex: {main_tex}")
     print(
-        f"[Ghost UI] 监视策略: quiet={quiet_sec:.2f}s, auto_polish={'on' if auto_polish else 'off'}"
+        "[Ghost UI] 监视策略: "
+        f"quiet={quiet_sec:.2f}s, "
+        f"auto_polish={'on' if auto_polish else 'off'}, "
+        f"latexmk={'on' if enable_latexmk else 'off'}"
     )
     print("[Ghost UI] 在浏览器中查看行间建议；Ctrl+C 停止。")
 

@@ -29,6 +29,11 @@ def main() -> None:
         help="启用空闲自动润色（PR-10a 默认关闭）",
     )
     parser.add_argument(
+        "--disable-latexmk",
+        action="store_true",
+        help="关闭编译检查（默认开启，与静态检查同触发条件）",
+    )
+    parser.add_argument(
         "--idle-polish-sec",
         type=float,
         default=2.0,
@@ -49,6 +54,7 @@ def main() -> None:
             main_tex=args.main_tex,
             quiet_sec=args.quiet_sec,
             auto_polish=args.enable_auto_polish,
+            enable_latexmk=not args.disable_latexmk,
             idle_polish_sec=args.idle_polish_sec,
             host=args.host,
             port=args.port,

@@ -13,7 +13,10 @@
     <div class="stats" id="stats">连接中…</div>
     <label class="file-pick">
       当前文件
-      <select id="file-select"></select>
+      <div class="file-select-wrap">
+        <select id="file-select"></select>
+        <span id="file-pick-global-status" class="global-status" aria-label="项目状态点"></span>
+      </div>
     </label>
     <label class="toggle">
       <input type="checkbox" id="show-polish" checked /> 润色建议
@@ -21,8 +24,14 @@
     <label class="toggle">
       <input type="checkbox" id="ghost-enabled" checked /> 显示幽灵卡
     </label>
+    <button type="button" id="trigger-compile" class="top-btn">编译检查</button>
     <button type="button" id="toggle-polish-panel" class="top-btn">主动润色</button>
   </header>
+
+  <div id="compile-indicator" class="compile-indicator" hidden>
+    <span id="compile-indicator-icon" class="compile-icon compile-running" aria-hidden="true"></span>
+    <span id="compile-indicator-text">正在进行编译检查</span>
+  </div>
 
   <section class="polish-panel" id="polish-panel" hidden>
     <label>

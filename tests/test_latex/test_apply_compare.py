@@ -28,3 +28,45 @@ def test_apply_compare_keeps_old_text_as_comment() -> None:
         assert "Replaced intro line" in updated
     finally:
         target.write_text(original, encoding="utf-8")
+
+
+def test_apply_compare_empty_range_does_not_emit_empty_comment(tmp_path) -> None:
+    target = tmp_path / "a.tex"
+    target.write_text("hello\n", encoding="utf-8")
+    suggestion = {
+        "file": "a.tex",
+        "range": {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 0, "character": 0},
+        },
+        "replacement": "HELLO",
+        "source": "llm_fix",
+        "message": "test",
+        "rationale_zh": "test",
+    }
+    apply_suggestion_compare_to_file(tmp_path, suggestion)
+    updated = target.read_text(encoding="utf-8")
+    assert "(empty)" not in updated
+    assert "% [TeX_Agent][compare]" not in updated
+    assert updated.startswith("HELLO")
+
+
+def test_apply_compare_empty_range_is_idempotent(tmp_path) -> None:
+    target = tmp_path / "a.tex"
+    target.write_text("hello\n", encoding="utf-8")
+    suggestion = {
+        "file": "a.tex",
+        "range": {
+            "start": {"line": 0, "character": 0},
+            "end": {"line": 0, "character": 0},
+        },
+        "replacement": "HELLO",
+        "source": "llm_fix",
+        "message": "test",
+        "rationale_zh": "test",
+    }
+    apply_suggestion_compare_to_file(tmp_path, suggestion)
+    once = target.read_text(encoding="utf-8")
+    apply_suggestion_compare_to_file(tmp_path, suggestion)
+    twice = target.read_text(encoding="utf-8")
+    assert twice == once

@@ -40,6 +40,7 @@ def test_ghost_cli_calls_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     assert called["quiet_sec"] == 1.2
     assert called["idle_polish_sec"] == 3.0
     assert called["auto_polish"] is True
+    assert called["enable_latexmk"] is True
     assert called["port"] == 8772
     assert called["open_browser"] is False
 

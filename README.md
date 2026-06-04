@@ -201,39 +201,130 @@ python -m rag.document_parse "D:\papers\my.pdf" -o "D:\output\my_parse_folder"
 
 ---
 
-## latex 论文辅助写作功能的说明
+## LaTeX 论文辅助写作功能的说明
 
-TeX_Agent 提供了一套 LaTeX 论文辅助写作子系统，支持项目扫描、语法检查、编译诊断、LLM 自动纠错以及空闲时的语言润色。
+TeX_Agent 提供了一套 LaTeX 论文辅助写作子系统，覆盖**项目扫描**、**静态检查（ChkTeX）**、**编译检查（latexmk）**、**LLM 纠错建议**与**主动润色**。
 
-### 1. 一次性全库诊断 (CLI)
+| 通道 | 入口 | 适用场景 |
+|------|------|----------|
+| **Ghost 幽灵窗口（推荐）** | `python -m latex.ghost_cli` | 边看源码边改、行间纠错卡、应用/对比/忽略、项目文件树 |
+| 一次性诊断 | `python main.py task --wf latex_diagnose_v0/v1` | CI、全库体检、无 UI |
+| 终端监视 | `python -m latex.watch_cli` | 纯终端输出、旧版 watch 行为 |
 
-如果您只需要对当前的 LaTeX 项目进行一次全面的体检，可以使用 `main.py task` 命令行入口。
+---
 
-- **基础诊断（无 LLM）**：速度快，仅执行 ChkTeX 和 latexmk 检查。
+### 1. 独立幽灵窗口 Ghost UI
+
+Ghost UI 在**独立浏览器页**中展示 LaTeX 源码与**行间浮动建议卡**，不依赖 VS Code 扩展。
+
+#### 快速启动
+
+```bash
+# 在项目根目录执行（需已配置 .env 中的 LLM API Key，纠错建议才可用）
+python -m latex.ghost_cli --root latex文件夹 --main-tex 主tex文件.tex
+```
+
+启动后会尝试打开浏览器，默认地址：
+
+**http://127.0.0.1:8771/**
+
+`--root` 为 LaTeX 项目根目录；`--main-tex` 为编译入口主文件（相对 `root` 的正斜杠路径，如 `paper.tex`）。系统会扫描 `main_tex` 的 `\input` 闭包内全部子 `.tex`，子文件上的报错也会出现在对应文件的 Ghost 视图中。
+
+#### 常用命令行参数
+
+```bash
+python -m latex.ghost_cli \
+  --root 文件夹 \
+  --main-tex paper.tex \
+  --quiet-sec 1.0 \     # 静默时间（s），当文件修改后静默多少秒再触发静态检查
+  --no-browser          # 可选：不自动打开浏览器，手动访问 http://127.0.0.1:8771/
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--root` | （必填） | LaTeX 项目根目录，支持绝对路径或相对项目根 |
+| `--main-tex` | 无 | 主 tex，用于 latexmk 编译入口；建议始终指定 |
+| `--quiet-sec` | `1.0` | 文件修改后静默多少秒再触发**静态检查** |
+| `--disable-latexmk` | 关闭 | 默认**开启** latexmk；加上此参数则不做编译检查 |
+| `--enable-auto-polish` | 关闭 | 启用后会在停笔约 2s 自动润色（Ghost 默认**关闭**自动润色，请用页面内「主动润色」） |
+| `--idle-polish-sec` | `2.0` | 仅在与 `--enable-auto-polish` 联用时生效 |
+| `--host` / `--port` | `127.0.0.1` / `8771` | 监听地址与端口 |
+| `--no-browser` | 关闭 | 不自动打开系统浏览器 |
+
+#### 页面功能说明
+
+| 功能 | 说明 |
+|------|------|
+| **项目文件树** | 顶栏下拉按 `\input` / `\bibliography` 关系树状展示；可选 `.tex`、`.bib`；节点旁圆点表示该文件有待处理纠错卡或润色卡 |
+| **源码区** | 当前选中文件的行号与内容；纠错范围红色高亮，润色范围绿色高亮 |
+| **纠错幽灵卡** | 展示报错信息、定位、原因分析、改正方案；支持**应用**（直接替换）、**对比**（原文注释 + 新文插入）、**忽略** |
+| **主动润色** | 底栏「主动润色」：输入需求 + 选择目标文件，由 LLM 生成润色卡（绿色） |
+| **编译检查** | 顶栏按钮「编译检查」：手动触发整项目 latexmk |
+
+#### 诊断与刷新策略（Ghost 专用）
+
+与通用 `watch_cli` 不同，Ghost 采用 **GhostWatchPolicy**：
+
+1. **静态检查（ChkTeX）**
+   - 仅在您对监视目录内 `.tex` / `.bib` **有修改**，且**静默 `--quiet-sec` 秒（默认 1s）无新修改**后触发。
+   - 扫描范围为 `main_tex` 可达闭包内的全部子 tex（不是只扫主文件）。
+   - 用户一直不编辑时，**不会**反复空跑静态检查。
+
+2. **编译检查（latexmk）**
+   - **启动时自动执行一次**（以 `main_tex` 为入口编译整个项目，生成/更新 `paper.log` 等；**不是**对每个子 tex 单独编译）。
+   - 之后仅在您点击 **「编译检查」** 时再次编译。
+   - 编译在后台进行；顶部状态条会显示进度，结束后变为「编译检查完成」（可能编译检查完成后还要稍后一会才能看见结果，这是由于检查之后报错会经过处理生成改正建议）。
+
+3. **纠错建议（LLM）**
+   - 仅针对 **error** 级问题生成卡片；warning 不进 LLM 纠错链。
+   - 若同一轮 error 集合未变，不重复调用 LLM，避免卡片抖动。
+   - 点击「忽略」会持久化：同一文件、同一行、同一报错再次出现时默认不再出卡、不再送 LLM。
+
+4. **行号确认**
+   - 合并诊断后、出卡前会在报错行附近 **±5 行** 内根据报错锚点校准行号，缓解子文件 log 行号偏移。
+
+5. **前端刷新**
+   - 轮询 snapshot 时，仅当诊断结果版本或编译状态变化才重绘卡片，减少长卡片阅读时滚动条被重置。
+
+#### 应用 / 对比 使用注意
+
+- **应用**：按建议的 `range` 直接替换磁盘上的对应片段。
+- **对比**：将 `range` 内原文改为 `% [TeX_Agent][compare] ...` 注释，并在其下插入建议正文，便于对照后决定是否再点「应用」。
+- 空范围或重复点击「对比」已做幂等处理，避免产生 `% [TeX_Agent][compare] (empty)` 等污染行。
+
+静态资源目录：`ui/ghost/`（`ghost.js`、`ghost.css`）。
+
+
+### 2. 一次性全库诊断（CLI）
+
+若只需对项目做一次全面体检、不需要浏览器 UI，可使用 `main.py task`：
+
+- **基础诊断（无 LLM）**：ChkTeX + latexmk，速度快。
   ```bash
-  python main.py task --wf latex_diagnose_v0 "{\"root\":\"您的项目绝对或相对路径\",\"main_tex\":\"main.tex\"}"
+  python main.py task --wf latex_diagnose_v0 "{\"root\":\"您的项目路径\",\"main_tex\":\"paper.tex\"}"
   ```
-- **智能诊断（带 LLM 修复建议）**：在基础诊断之上，针对 `error` 级别的问题，调用大模型生成具体的修改建议。
+- **智能诊断（带 LLM 修复建议）**：在 error 上调用大模型生成修改建议。
   ```bash
-  python main.py task --wf latex_diagnose_v1 "{\"root\":\"您的项目绝对或相对路径\",\"main_tex\":\"main.tex\"}"
+  python main.py task --wf latex_diagnose_v1 "{\"root\":\"您的项目路径\",\"main_tex\":\"paper.tex\"}"
   ```
 
-### 2. 实时监视与辅助 (Watch 模式)
 
-在您撰写论文的过程中，TeX_Agent 可以作为后台服务持续运行，实时为您提供反馈。
+### 3. 实时监视（终端 Watch 模式）
 
-**通过命令行启动监视：**
 ```bash
 python -m latex.watch_cli start --root 您的项目路径 --main_tex main.tex
 ```
-启动后，保持该终端窗口打开。当您在编辑器中修改并保存 `.tex` 文件时：
-1. **防抖诊断**：修改后约 500ms，终端会输出最新的语法错误和警告。
-2. **空闲润色**：当您停止输入约 2 秒后，系统会自动对您当前正在编辑的段落进行学术语言润色，并在终端打印出修改建议和中文解释。
 
-### 3. 注意事项
-- **路径格式**：`root` 参数支持 Windows 和 Linux 风格的路径（绝对路径或相对路径均可）。`main_tex` 是相对于 `root` 的主文件路径。
-- **环境依赖**：系统会自动探测本机的 TeX 环境。为了获得最佳体验，建议您在系统中安装 `chktex` 和 `latexmk`。如果未安装，系统会降级，仅使用内置的轻量级解析器。
-- **API Key**：使用带有 LLM 修复和润色功能（如 `v1` 工作流或 Watch 模式的润色）时，请确保在 `.env` 文件中正确配置了 `OPENAI_API_KEY` 或 `GEMINI_API_KEY`。
+终端内输出诊断与润色摘要；默认防抖约 500ms、空闲约 2s 自动润色。改稿交互请优先使用上一节的 **Ghost UI**。
+
+### 4. 环境与依赖说明
+
+| 项 | 说明 |
+|----|------|
+| **路径** | `root` 支持 Windows / Linux 路径；API 与 JSON 内相对路径统一为正斜杠 |
+| **TeX 工具链** | 建议安装 `chktex`、`latexmk`（及 TeX 发行版）。未安装时静态/编译能力会降级 |
+| **LLM** | 纠错卡与主动润色需配置 `.env` 中 `OPENAI_API_KEY`（或项目使用的兼容 API） |
+| **编译轮次** | 语法纠错通常**一次** latexmk + log 解析即可发现致命错误；完整引用/bib 收敛可能需 latexmk 多轮，Ghost 默认 `fast` 模式，侧重快速报错而非最终 PDF 质量 |
 
 
 
@@ -248,8 +339,17 @@ TeX_Agent/
 ├── check.py                     # 无 UI：按 config/run_config.json 批量跑 checklist_multi
 ├── files/                       # check.py 推荐目录：input / checklist / output / checked（见文首说明）
 ├── storage/pdfs/                # Web 上传的 PDF 存放目录（用户文件默认被 .gitignore 忽略）
-├── ui/web/                      # FastAPI Web UI：server.py、静态页、pdf_storage、ide_launch 等
+├── ui/web/                      # FastAPI Web UI（默认 :8765）：server.py、静态页、pdf_storage 等
 │   └── static/                  # index.html、app.js、分支/工作流/PDF 相关 JS 与样式
+├── ui/ghost/                    # Ghost 幽灵窗口前端（默认 :8771）：index.html、ghost.js、ghost.css
+├── latex/                       # LaTeX 辅助写作：监视、诊断、Ghost 服务与项目树
+│   ├── ghost_cli.py             # 启动 Ghost：`python -m latex.ghost_cli --root ... --main-tex ...`
+│   ├── ghost_server.py          # Ghost HTTP 服务与 /api/* 路由
+│   ├── ghost_watch_policy.py    # Ghost 专用触发策略（静态防抖、启动一次编译、手动再编译）
+│   ├── watch_cli.py             # 终端监视模式
+│   ├── watch_service.py         # 诊断聚合、ChkTeX / latexmk、snapshot
+│   ├── project_tree.py          # 项目文件树（\input / bib）
+│   └── apply_compare.py         # 应用 / 对比写回磁盘
 ├── Framework.md                 # 框架拓展路线图
 │
 ├── doc/                         # 相关说明文件
