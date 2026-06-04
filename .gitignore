@@ -63,6 +63,7 @@ storage/checklists/*
 !storage/checklists/.gitkeep
 storage/documents/*
 !storage/documents/.gitkeep
+storage/
 
 # ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
 output/
