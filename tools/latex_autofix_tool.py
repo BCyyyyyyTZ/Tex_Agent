@@ -34,7 +34,7 @@ class LatexAutoFixTool(BaseTool):
         self,
         *,
         model_name: str = "gemini-3.1-flash-lite",
-        api_key: str = "AIzaSyBoDnpt7BF9S_qQrwO7gsV_vU5jsdgb7Cc",
+        api_key: str = "",
         temperature: float = 0.2,
         use_llm: bool = True,
     ):
