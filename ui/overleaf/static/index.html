@@ -1,0 +1,139 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeX Agent Overleaf</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; background: #1e1e1e; color: #d4d4d4; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+    .header { text-align: center; padding: 48px 20px 24px; }
+    .header h1 { font-size: 32px; font-weight: 600; color: #fff; }
+    .header p { color: #858585; margin-top: 8px; font-size: 14px; }
+    .options { display: flex; gap: 24px; padding: 24px; max-width: 800px; width: 100%; flex-wrap: wrap; justify-content: center; }
+    .card { background: #252526; border: 1px solid #3c3c3c; border-radius: 8px; padding: 32px; flex: 1; min-width: 300px; max-width: 380px; cursor: pointer; transition: border-color 0.2s, transform 0.1s; }
+    .card:hover { border-color: #4fc1ff; transform: translateY(-2px); }
+    .card h2 { font-size: 20px; margin-bottom: 12px; color: #fff; }
+    .card p { color: #858585; font-size: 13px; line-height: 1.5; margin-bottom: 16px; }
+    .card .icon { font-size: 40px; margin-bottom: 16px; display: block; }
+    .card form input[type="file"] { width: 100%; padding: 10px; background: #1e1e1e; border: 1px dashed #3c3c3c; border-radius: 4px; color: #858585; font-size: 12px; cursor: pointer; }
+    .card form input[type="text"], .card form textarea { width: 100%; padding: 10px; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; color: #d4d4d4; font-size: 13px; margin-bottom: 12px; }
+    .card form textarea { min-height: 100px; resize: vertical; font-family: inherit; }
+    .card form select { width: 100%; padding: 10px; background: #1e1e1e; border: 1px solid #3c3c3c; border-radius: 4px; color: #d4d4d4; font-size: 13px; margin-bottom: 12px; }
+    .btn { display: inline-block; padding: 10px 24px; background: #0e639c; border: none; border-radius: 4px; color: #fff; font-size: 14px; cursor: pointer; }
+    .btn:hover { background: #1177bb; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .card .section { display: none; }
+    .card .section.active { display: block; }
+    .status { color: #858585; font-size: 12px; margin-top: 8px; }
+    .projects { max-width: 800px; width: 100%; padding: 0 24px; margin-top: 24px; }
+    .projects h3 { color: #858585; font-size: 13px; margin-bottom: 8px; }
+    .project-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; margin-bottom: 8px; cursor: pointer; }
+    .project-item:hover { border-color: #4fc1ff; }
+    .project-item .name { color: #fff; font-weight: 500; }
+    .project-item .meta { color: #858585; font-size: 12px; }
+    .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #858585; border-top-color: #4fc1ff; border-radius: 50%; animation: spin 0.6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TeX Agent Overleaf</h1>
+    <p>AI 辅助的 LaTeX 论文编辑器</p>
+  </div>
+
+  <div class="options">
+    <div class="card" id="uploadCard">
+      <span class="icon">📁</span>
+      <h2>上传现有项目</h2>
+      <p>上传一个 LaTeX 论文项目的 zip 压缩包，直接开始编辑。</p>
+      <div class="section active">
+        <form id="uploadForm" onsubmit="return false;">
+          <input type="file" id="zipFile" accept=".zip" required>
+          <button type="button" class="btn" onclick="uploadProject()" id="uploadBtn" style="margin-top:12px">上传并打开</button>
+          <div class="status" id="uploadStatus"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card" id="generateCard">
+      <span class="icon">✨</span>
+      <h2>从大纲生成论文</h2>
+      <p>提供论文大纲，选择一个模板，让 AI 生成完整的 LaTeX 论文项目。</p>
+      <div class="section active">
+        <form id="generateForm" onsubmit="return false;">
+          <select id="templateSelect"><option value="">加载模板中...</option></select>
+          <textarea id="outlineInput" placeholder="例如：第一章 绪论（研究背景、意义、现状）&#10;第二章 相关工作&#10;第三章 方法&#10;第四章 实验与分析&#10;第五章 结论"></textarea>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button type="button" class="btn" onclick="uploadTemplate()">上传模板</button>
+            <input type="file" id="templateFile" accept=".zip" style="display:none" onchange="uploadTemplateFile()">
+            <button type="button" class="btn" onclick="generateProject()" id="generateBtn">生成论文</button>
+          </div>
+          <div class="status" id="generateStatus"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="projects">
+    <h3>最近项目</h3>
+    <div id="projectList"></div>
+  </div>
+
+  <script>
+    function api(url, opts) { return fetch(url, opts).then(r => { if (!r.ok) return r.text().then(text => { try { var e = JSON.parse(text); var msg = typeof e.detail === "string" ? e.detail : (e.detail ? JSON.stringify(e.detail) : r.statusText); throw new Error(msg) } catch(pe) { throw new Error(text || r.statusText) } }); return r.json() }) }
+    function uploadProject() {
+      const file = document.getElementById("zipFile").files[0];
+      if (!file) { document.getElementById("uploadStatus").textContent = "请选择 zip 文件"; return; }
+      const btn = document.getElementById("uploadBtn"); btn.disabled = true; btn.textContent = "上传中...";
+      const fd = new FormData(); fd.append("file", file);
+      api("/api/projects/upload", { method: "POST", body: fd })
+        .then(d => { window.location.href = "/editor?project=" + d.id; })
+        .catch(e => { document.getElementById("uploadStatus").textContent = "上传失败: " + e.message; btn.disabled = false; btn.textContent = "上传并打开"; })
+    }
+    function uploadTemplate() { document.getElementById("templateFile").click() }
+    function uploadTemplateFile() {
+      const file = document.getElementById("templateFile").files[0];
+      if (!file) return;
+      const fd = new FormData(); fd.append("file", file);
+      api("/api/templates/upload", { method: "POST", body: fd })
+        .then(d => { loadTemplates(); document.getElementById("generateStatus").textContent = "模板 " + d.name + " 上传成功"; })
+        .catch(e => { document.getElementById("generateStatus").textContent = "上传失败: " + e.message; })
+    }
+    function generateProject() {
+      const outline = document.getElementById("outlineInput").value.trim();
+      if (!outline) { document.getElementById("generateStatus").textContent = "请输入论文大纲"; return; }
+      const tid = document.getElementById("templateSelect").value;
+      const btn = document.getElementById("generateBtn"); btn.disabled = true; btn.textContent = "生成中...";
+      api("/api/projects/generate", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({outline, template_id: tid}) })
+        .then(d => { window.location.href = "/editor?project=" + d.id; })
+        .catch(e => { document.getElementById("generateStatus").textContent = "生成失败: " + e.message; btn.disabled = false; btn.textContent = "生成论文"; })
+    }
+    function loadTemplates() {
+      api("/api/templates").then(templates => {
+        const sel = document.getElementById("templateSelect");
+        sel.innerHTML = '<option value="">选择模板（可选）</option>' + templates.map(t => '<option value="' + t.id + '">' + t.name + '</option>').join('');
+      }).catch(() => {})
+    }
+    function loadProjects() {
+      api("/api/projects").then(projects => {
+        const list = document.getElementById("projectList");
+        if (!projects.length) { list.innerHTML = '<div style="color:#858585;font-size:13px">暂无项目</div>'; return; }
+        list.innerHTML = projects.map(p => '<div class="project-item" onclick="window.location.href=\"/editor?project=' + p.id + '\">' +
+          '<span class="name">' + p.name + '</span>' +
+          '<span class="meta">main: ' + (p.main_tex || '-') + '</span></div>'
+        ).join('');
+      }).catch(() => {})
+    }
+    loadTemplates();
+    document.getElementById("projectList").addEventListener("click", function(e) {
+        var item = e.target.closest(".project-item");
+        if (item) {
+            var pid = item.getAttribute("data-id");
+            if (pid) window.location.href = "/editor?project=" + pid;
+        }
+    });
+    loadProjects();
+  </script>
+</body>
+</html>

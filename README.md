@@ -1,6 +1,5 @@
 # TeX_Agent —— 基于多智能体架构的 LaTeX 论文写作增强系统
 
-
 ## 项目简介
 
 TeX_Agent 是一个基于 **LangGraph + 多智能体（Multi-Agent System）** 架构的学术论文写作智能辅助系统。
@@ -29,6 +28,8 @@ cp .env.example .env
 ```bash
 # 方式 A：模块入口（常用）
 python -m ui.web.server
+
+python overleaf.py 然后打开http://127.0.0.1:8772/
 ```
 
 默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。

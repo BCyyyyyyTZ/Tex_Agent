@@ -1,0 +1,11 @@
+简单来说我希望改一下目前的WEB UI逻辑，目前主要有两个逻辑：
+一个是：python -m ui.web.server
+另一个是：python -m latex.ghost_cli --root  latex文件夹 --main-tex 主latex名.tex
+
+我希望你做什么：
+1.对于python -m ui.web.server不要动它的逻辑
+2.对于python -m latex.ghost_cli --root  latex文件夹 --main-tex 主latex名.tex，这个需要大改，现在启动也不太方便
+1）总体来说就是一个类似于Overleaf的页面，但是增加了Agent支持
+2）刚打开，有两个选项：1.上传一个现成tex论文项目（应该是一个zip）2.给一段论文大纲，选择一个论文模板（可以用户上传一些模板，也是zip文件），在这个模板基础上靠agent生成一个论文。【关于生成论文，现在可能没有现成的逻辑，你需要实现一个高效的逻辑】
+3）然后这个时候，页面左边就是latex源码还有文件目录，最右边就是编译以后的预览；目前已经实现了一些润色的工具参考python -m latex.ghost_cli --root  latex文件夹 --main-tex 主latex名.tex，你可以把它们加进来。
+当你不确定应该问我，直到置信度达到95%

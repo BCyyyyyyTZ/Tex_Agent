@@ -245,6 +245,13 @@ def main():
             traceback.print_exc()
 
 
+
+def run_overleaf():
+    """Launch the Overleaf-style LaTeX editor server."""
+    from ui.overleaf.server import main as overleaf_main
+    overleaf_main()
+
+
 def quick_run():
     """快速运行模式"""
     if len(sys.argv) > 1:
@@ -265,6 +272,9 @@ def quick_run():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        quick_run()
+        if sys.argv[1].lower() in ("overleaf", "ol"):
+            run_overleaf()
+        else:
+            quick_run()
     else:
         main()

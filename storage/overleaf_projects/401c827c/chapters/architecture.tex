@@ -1,0 +1,33 @@
+\section{网络架构设计}
+
+ResNet的整体架构延续了VGG的设计风格，即采用全卷积结构，所有卷积核尺寸为 $3\times3$，遵循简单的设计规则：
+\begin{enumerate}
+    \item 对于相同尺寸的特征图，保持相同数量的滤波器（通道数）
+    \item 当特征图尺寸减半时（通过步长为2的卷积下采样），滤波器数量加倍以保持网络复杂度
+\end{enumerate}
+
+与普通Plain Network相比，Residual Network在每个阶段（Stage）中插入残差块，其余部分完全相同。下表总结了几种经典ResNet的配置（输入经 $7\times7$ 卷积和 $3\times3$ 最大池化后进入各阶段）：
+
+\begin{table}[h]
+\centering
+\caption{ResNet系列网络配置（以输出尺寸和层数表示）}
+\label{tab:resnet-arch}
+\begin{tabular}{c|ccccc}
+\toprule
+Layer Name & Output Size & ResNet-18 & ResNet-34 & ResNet-50 & ResNet-101 & ResNet-152 \\
+\midrule
+conv1 & 112$\times$112 & \multicolumn{5}{c}{$7\times7$，64，stride 2} \\
+maxpool & 56$\times$56 & \multicolumn{5}{c}{$3\times3$，stride 2} \\
+conv2$x$ & 56$\times$56 & $[3\times3,64]\times2$ & $[3\times3,64]\times3$ & $[1\times1,64; 3\times3,64; 1\times1,256]\times3$ & $[1\times1,64; 3\times3,64; 1\times1,256]\times3$ & $[1\times1,64; 3\times3,64; 1\times1,256]\times3$ \\
+conv3$x$ & 28$\times$28 & $[3\times3,128]\times2$ & $[3\times3,128]\times4$ & $[1\times1,128; 3\times3,128; 1\times1,512]\times4$ & $[1\times1,128; 3\times3,128; 1\times1,512]\times4$ & $[1\times1,128; 3\times3,128; 1\times1,512]\times8$ \\
+conv4$x$ & 14$\times$14 & $[3\times3,256]\times2$ & $[3\times3,256]\times6$ & $[1\times1,256; 3\times3,256; 1\times1,1024]\times6$ & $[1\times1,256; 3\times3,256; 1\times1,1024]\times23$ & $[1\times1,256; 3\times3,256; 1\times1,1024]\times36$ \\
+conv5$x$ & 7$\times$7 & $[3\times3,512]\times2$ & $[3\times3,512]\times3$ & $[1\times1,512; 3\times3,512; 1\times1,2048]\times3$ & $[1\times1,512; 3\times3,512; 1\times1,2048]\times3$ & $[1\times1,512; 3\times3,512; 1\times1,2048]\times3$ \\
+average pool & 1$\times$1 & \multicolumn{5}{c}{全局平均池化} \\
+FC & 1$\times$1 & \multicolumn{5}{c}{1000-way全连接层 + Softmax} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+其中 $[a\times a, c]$ 表示卷积核尺寸 $a$ 和输出通道数 $c$，$\times n$ 表示该模块重复 $n$ 次。对于ResNet-50及以上，使用瓶颈块。每个阶段的第一个残差块通常使用时步长为2的卷积以实现下采样（同时特征图尺寸减半，通道数加倍）。
+
+这种设计使ResNet在参数量与计算量方面优于同等深度的VGG。例如，ResNet-152的计算量（11.3 GFLOPs）低于VGG-16（15.3 GFLOPs），但性能大幅提升。
