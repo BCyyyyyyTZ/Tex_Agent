@@ -134,10 +134,11 @@ class GeminiClient:
         self.files = {}
         self.files_by_id = {}
         
-    def _upload_files_parallel(self, file_paths: List[str]):
+    def _upload_files_parallel(self, file_paths: List[str], file_mime_types: Optional[dict[str, str]] = None):
         """
         内部方法：上传多个文件并确保它们都进入 ACTIVE 状态
         """
+        mime_map = dict(file_mime_types or {})
         uploaded_files = []
         for path in file_paths:
             if not os.path.exists(path):
@@ -145,7 +146,22 @@ class GeminiClient:
                 continue
             
             print(f"正在上传: {os.path.basename(path)}...")
-            file_obj = self.client.files.upload(file=path)
+            mime_type = mime_map.get(path) or mime_map.get(os.path.basename(path))
+            ext = os.path.splitext(path)[1].lower()
+            if not mime_type and ext == ".tex":
+                mime_type = "text/plain"
+            if (mime_type or "").lower() in {"application/x-tex", "text/x-tex"}:
+                mime_type = "text/plain"
+            try:
+                if mime_type:
+                    try:
+                        file_obj = self.client.files.upload(file=path, mime_type=mime_type)
+                    except TypeError:
+                        file_obj = self.client.files.upload(file=path, mimeType=mime_type)
+                else:
+                    file_obj = self.client.files.upload(file=path)
+            except TypeError:
+                file_obj = self.client.files.upload(file=path)
             uploaded_files.append(file_obj)
             self.files[path] = file_obj
             self.files_by_id[getattr(file_obj, "name", str(file_obj))] = file_obj
@@ -165,7 +181,12 @@ class GeminiClient:
 
         return uploaded_files
 
-    def response(self, prompt: str, file_paths: Union[str, List[str]] = None) -> str:
+    def response(
+        self,
+        prompt: str,
+        file_paths: Union[str, List[str]] = None,
+        file_mime_types: Union[str, List[str], dict[str, str], None] = None,
+    ) -> str:
         """
         上传文件并根据内容进行提问
         """
@@ -174,6 +195,19 @@ class GeminiClient:
         if file_paths is not None:
             if isinstance(file_paths, str):
                 file_paths = [file_paths]
+
+            mime_map: dict[str, str] = {}
+            if isinstance(file_mime_types, str) and file_mime_types.strip():
+                for p in file_paths:
+                    mime_map[p] = file_mime_types.strip()
+            elif isinstance(file_mime_types, list):
+                for p, m in zip(file_paths, file_mime_types):
+                    if isinstance(m, str) and m.strip():
+                        mime_map[p] = m.strip()
+            elif isinstance(file_mime_types, dict):
+                for k, v in file_mime_types.items():
+                    if isinstance(k, str) and isinstance(v, str) and v.strip():
+                        mime_map[k] = v.strip()
 
             file_paths_to_upload = []
             
@@ -184,7 +218,7 @@ class GeminiClient:
                     file_paths_to_upload.append(path)
             
             if file_paths_to_upload:
-                uploaded_files = self._upload_files_parallel(file_paths_to_upload)
+                uploaded_files = self._upload_files_parallel(file_paths_to_upload, file_mime_types=mime_map)
                 contents.extend(uploaded_files)
 
         contents.append(prompt)

@@ -1,0 +1,15 @@
+PWD F:\GitHub\Tex_Agent
+INPUT C:\Users\Drago\AppData\Local\MiKTeX\miktex\data\le\pdftex\pdflatex.fmt
+INPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\main.tex
+OUTPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\_build_latexmk\main.log
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\base\article.cls
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\base\size10.clo
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\base\size10.clo
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\base\size10.clo
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\l3backend\l3backend-pdftex.def
+INPUT C:\Users\Drago\AppData\Local\Programs\MiKTeX\tex\latex\l3backend\l3backend-pdftex.def
+INPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\_build_latexmk\main.aux
+INPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\_build_latexmk\main.aux
+INPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\_build_latexmk\main.aux
+OUTPUT f:\GitHub\Tex_Agent\latex_autofix_test_project\_build_latexmk\main.aux

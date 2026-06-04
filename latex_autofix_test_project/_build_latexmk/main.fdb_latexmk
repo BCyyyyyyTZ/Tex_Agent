@@ -1,0 +1,13 @@
+# Fdb version 4
+["pdflatex"] 1780459800.86152 "f:/GitHub/Tex_Agent/latex_autofix_test_project/main.tex" "f:/GitHub/Tex_Agent/latex_autofix_test_project/_build_latexmk/main.pdf" "main" 1780459801.13345 2
+  "C:/Users/Drago/AppData/Local/MiKTeX/miktex/data/le/pdftex/pdflatex.fmt" 1780455782 13333486 7a96d654ce48b3b34e2f0f1677916d59 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/base/article.cls" 1761900684 20144 b966087dda3b194755eb460d32e2ef75 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/base/size10.clo" 1761900684 8448 686612a86f0e04f41ea577f5ec7e83d8 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/l3backend/l3backend-pdftex.def" 1761202581 30662 bfd6e864f4ffc5018b0e2b6260c3181c ""
+  "f:/GitHub/Tex_Agent/latex_autofix_test_project/_build_latexmk/main.aux" 1780459801 8 a94a2480d3289e625eea47cd1b285758 "pdflatex"
+  "f:/GitHub/Tex_Agent/latex_autofix_test_project/main.tex" 1780454619 171 a0c94887ded94a30538d1502d36e6f5d ""
+  (generated)
+  "f:/GitHub/Tex_Agent/latex_autofix_test_project/_build_latexmk/main.aux"
+  "f:/GitHub/Tex_Agent/latex_autofix_test_project/_build_latexmk/main.log"
+  "f:/GitHub/Tex_Agent/latex_autofix_test_project/_build_latexmk/main.pdf"
+  (rewritten before read)
