@@ -98,3 +98,15 @@
 + 实现路线图 **PR-10d**：新增主动润色后端能力（`POST /api/ghost/polish`）与 `latex/ghost_polish_prompt.py`，支持 `query + target_file + context_file` 驱动 LLM 生成润色建议并写入 `polish_suggestions`。
 + 完成 PR-10d 前端交互：`ui/ghost/index.html` 新增“主动润色”面板（目标文件选择 + 需求输入 + 触发按钮），`ui/ghost/ghost.js` 接入调用并在当前文件行内以绿色高亮展示润色建议范围。
 + PR-10d 测试补齐并通过：增强 `tests/test_latex/test_ghost_server.py`，新增主动润色成功/文件不存在用例；Ghost 相关回归共 21 项通过。
+
+#### [2026-06-04](./2026-06-04.md)
+
++ 实现路线图 **PR-10e**：新增 `GET /api/project-tree`（`latex/project_tree.py` + `latex/ghost_server.py`），返回 `main_tex + nodes(path/kind/children)` 的树状文件结构，支持 `\input` 关系及 `.bib` 文件纳入选择范围。
++ Snapshot 契约扩展：`WatchSnapshot` 增加 `errors_by_file` / `polish_by_file`，`WatchService.get_snapshot()` 聚合纠错卡与润色卡的按文件计数，为 Ghost 文件选择器红点/绿点提供后端索引。
++ Ghost 前端文件选择器升级：`ui/ghost/ghost.js` 改为读取项目树并渲染“树状缩进 + 文件状态标记”，顶部增加全局红/绿状态点；`ui/ghost/index.html` 与 `ui/ghost/ghost.css` 同步补充状态点 UI。
++ 新增并通过 PR-10e 测试：`tests/test_latex/test_project_tree_api.py` 覆盖项目树接口与 snapshot 状态索引，配合 Ghost 相关回归测试共 23 项通过。
++ Ghost 前端小优化：点击「忽略」后，红/绿状态点与顶部「修改/润色」计数按未忽略条目即时减 1（`ui/ghost/ghost.js`）。
++ 诊断链路二次调整：Ghost 静态检查改为“仅在用户修改后静默 1 秒触发”，无修改不启动；启动时仅做一次编译检查，后续编译由前端“编译检查”按钮手动触发（`POST /api/ghost/compile`）。
++ 幽灵窗口体验优化：新增“忽略持久化”（`POST /api/ghost/dismiss`）避免相同报错反复进 LLM；轮询时仅在 `project_version` 或编译状态变化时刷新，避免无变化重绘导致卡片滚动位置被重置。
++ 编译状态可视化：snapshot 新增 `compile_running`，Ghost 顶部显示“正在进行编译检查”+ spinner，并在编译结束后自动隐藏。
++ 诊断增强测试：更新 `tests/test_latex/test_ghost_watch_policy.py`、`test_watch_service.py`、`test_ghost_server.py`、`test_ghost_cli.py`，相关 watch/ghost 回归 16 项通过。

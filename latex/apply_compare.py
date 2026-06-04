@@ -20,7 +20,7 @@ from latex.serialize import from_dict
 
 def _to_latex_comment_block(text: str) -> str:
     if text == "":
-        return "% [TeX_Agent][compare] (empty)\n"
+        return ""
     lines = text.splitlines()
     if not lines:
         lines = [text]
@@ -56,8 +56,19 @@ def apply_suggestion_compare_to_file(
 
     original = text[start_off:end_off]
     replacement = sanitize_replacement_text(sug.replacement)
+    if original == "" and replacement:
+        # 空范围常见于旧 suggestion 或定位失败，不写 "(empty)" 注释，避免重复污染。
+        if text[start_off:start_off + len(replacement)] == replacement:
+            return target
+    if original.lstrip().startswith("% [TeX_Agent][compare]") and replacement:
+        lookahead = text[start_off:start_off + len(replacement) + 256]
+        if replacement in lookahead:
+            return target
+
     comment_block = _to_latex_comment_block(original)
     inserted = comment_block + replacement
+    if not inserted:
+        return target
     if replacement and not replacement.endswith("\n"):
         inserted += "\n"
 

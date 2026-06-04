@@ -56,6 +56,18 @@ def test_parse_sample_fixture_log() -> None:
     assert len(issues) >= 1
 
 
+def test_parse_nested_file_entry_with_prefix_chars() -> None:
+    text = """
+) (./weijun/Background.tex
+! Undefined control sequence.
+l.17 \\notcommand
+"""
+    issues = parse_latex_log(text, default_file="paper.tex")
+    assert len(issues) >= 1
+    assert issues[0].file == "weijun/Background.tex"
+    assert issues[0].line == 17
+
+
 def test_tail_log_text() -> None:
     text = "\n".join(f"line{i}" for i in range(100))
     tail = tail_log_text(text, max_lines=10)

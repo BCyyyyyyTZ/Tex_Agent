@@ -31,10 +31,6 @@ def test_ghost_watch_policy_uses_quiet_window_and_disables_auto_polish(
         call_times.append(time.time())
         return SimpleNamespace(issues=[], warnings=[])
 
-    monkeypatch.setattr(
-        "latex.ghost_watch_policy.resolve_target_files",
-        lambda *_args, **_kwargs: ["main.tex"],
-    )
     monkeypatch.setattr("latex.ghost_watch_policy.run_chktex", _mock_chktex)
 
     service = GhostWatchPolicy(
@@ -49,8 +45,9 @@ def test_ghost_watch_policy_uses_quiet_window_and_disables_auto_polish(
     )
     service.start()
     try:
-        assert _wait_until(lambda: len(call_times) >= 1), "启动后应立即诊断一次"
-        prev_calls = len(call_times)
+        time.sleep(0.25)
+        assert len(call_times) == 0, "启动后不应自动触发静态检查"
+        prev_calls = 0
 
         change_t0 = time.time()
         service.on_file_changed(tex_file)
@@ -85,10 +82,6 @@ def test_ghost_watch_policy_skips_llm_when_error_signature_unchanged(
     )
 
     monkeypatch.setattr(
-        "latex.ghost_watch_policy.resolve_target_files",
-        lambda *_args, **_kwargs: ["main.tex"],
-    )
-    monkeypatch.setattr(
         "latex.ghost_watch_policy.run_chktex",
         lambda *_args, **_kwargs: SimpleNamespace(issues=[issue], warnings=[]),
     )
@@ -119,13 +112,16 @@ def test_ghost_watch_policy_skips_llm_when_error_signature_unchanged(
     )
     service.start()
     try:
-        assert _wait_until(lambda: agent_run_count["n"] == 1), "首次 error 应触发一次 LLM"
         service.on_file_changed(tex_file)
-        assert _wait_until(lambda: service.project_version >= 2), "应完成第二轮诊断"
+        assert _wait_until(lambda: agent_run_count["n"] == 1), "首次 error 应触发一次 LLM"
+        first_diag_time = service._last_diagnose_time  # noqa: SLF001
+        service.on_file_changed(tex_file)
+        assert _wait_until(
+            lambda: service._last_diagnose_time > first_diag_time  # noqa: SLF001
+        ), "应完成第二轮诊断"
         assert agent_run_count["n"] == 1, "error 未变化时不应重复调用 LLM"
         snap = service.get_snapshot()
         assert snap.error_signature
-        assert snap.error_changed is False
     finally:
         service.stop()
 
@@ -146,10 +142,6 @@ def test_ghost_watch_policy_warning_only_does_not_call_llm(tmp_path, monkeypatch
         column=1,
     )
 
-    monkeypatch.setattr(
-        "latex.ghost_watch_policy.resolve_target_files",
-        lambda *_args, **_kwargs: ["main.tex"],
-    )
     monkeypatch.setattr(
         "latex.ghost_watch_policy.run_chktex",
         lambda *_args, **_kwargs: SimpleNamespace(issues=[warning], warnings=[]),
@@ -177,7 +169,8 @@ def test_ghost_watch_policy_warning_only_does_not_call_llm(tmp_path, monkeypatch
     )
     service.start()
     try:
-        assert _wait_until(lambda: service.project_version >= 1), "应完成初始诊断"
+        service.on_file_changed(tex_file)
+        assert _wait_until(lambda: service.project_version >= 1), "应在文件修改后完成诊断"
         assert called["n"] == 0
         snap = service.get_snapshot()
         assert len(snap.suggestions) == 0
