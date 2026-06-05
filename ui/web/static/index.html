@@ -9,8 +9,9 @@
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css?v=settings-14" />
+    <link rel="stylesheet" href="styles.css?v=settings-15" />
     <link rel="stylesheet" href="conferences_calendar.css?v=8" />
+    <link rel="stylesheet" href="drawing_tools.css?v=1" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
@@ -253,36 +254,62 @@
                 class="panel-toggle is-active"
                 data-panel="rag"
                 aria-pressed="true"
-                title="显示或隐藏 RAG 栏"
+                aria-label="RAG"
+                title="RAG"
               >
-                RAG
+                <span class="panel-toggle__icon panel-toggle__icon--db" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <ellipse cx="8" cy="4" rx="6" ry="2"/>
+                    <path d="M2 4v2.5C2 7.88 4.69 9 8 9s6-1.12 6-2.5V4"/>
+                    <path d="M2 6.5v3C2 10.88 4.69 12 8 12s6-1.12 6-2.5v-3"/>
+                    <path d="M2 9.5v2C2 12.88 4.69 14 8 14s6-1.12 6-2.5v-2"/>
+                  </svg>
+                </span>
+                <span class="panel-toggle__tip">RAG</span>
               </button>
               <button
                 type="button"
                 class="panel-toggle is-active"
                 data-panel="wf"
                 aria-pressed="true"
-                title="显示或隐藏工作流栏"
+                aria-label="工作流"
+                title="工作流"
               >
-                工作流
+                <span class="panel-toggle__icon" aria-hidden="true">◫</span>
+                <span class="panel-toggle__tip">工作流</span>
               </button>
               <button
                 type="button"
                 class="panel-toggle is-active"
                 data-panel="branch"
                 aria-pressed="true"
-                title="显示或隐藏分支栏"
+                aria-label="分支"
+                title="分支"
               >
-                分支
+                <span class="panel-toggle__icon" aria-hidden="true">⑂</span>
+                <span class="panel-toggle__tip">分支</span>
               </button>
               <button
                 type="button"
                 class="panel-toggle is-active"
                 data-panel="right"
                 aria-pressed="true"
-                title="显示或隐藏资料栏"
+                aria-label="资料"
+                title="资料"
               >
-                资料
+                <span class="panel-toggle__icon" aria-hidden="true">⊞</span>
+                <span class="panel-toggle__tip">资料</span>
+              </button>
+              <button
+                type="button"
+                class="panel-toggle panel-toggle--tools"
+                id="drawing-tools-open"
+                data-drawing-tools-open
+                aria-label="工具"
+                title="工具"
+              >
+                <span class="panel-toggle__icon" aria-hidden="true">✎</span>
+                <span class="panel-toggle__tip">工具</span>
               </button>
             </div>
             <button
@@ -446,17 +473,6 @@
     </div>
     </div>
 
-    <button
-      type="button"
-      id="conf-cal-fab"
-      class="conf-cal-fab"
-      data-conf-cal-open
-      title="顶会投稿倒计时"
-      aria-label="打开顶会日历"
-    >
-      ◈ 顶会日历
-    </button>
-
     <div
       id="conf-cal-overlay"
       class="conf-cal-overlay"
@@ -540,6 +556,105 @@
       </div>
     </div>
 
+    <div
+      id="drawing-tools-overlay"
+      class="drawing-tools-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawing-tools-title"
+      aria-hidden="true"
+    >
+      <div class="drawing-tools-panel">
+        <header class="drawing-tools-head">
+          <div>
+            <h2 id="drawing-tools-title" class="drawing-tools-title">绘图工具</h2>
+            <p class="drawing-tools-sub">独立于工作流 · 统计图表与概念示意图</p>
+          </div>
+          <button type="button" id="drawing-tools-close" class="drawing-tools-close" aria-label="关闭">×</button>
+        </header>
+
+        <div class="drawing-tools-tabs" role="tablist" aria-label="工具类型">
+          <button type="button" class="drawing-tools-tab is-active" data-tab="chart" role="tab" aria-selected="true">统计图表</button>
+          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">概念示意图</button>
+        </div>
+
+        <div class="drawing-tools-body">
+          <section id="drawing-tab-chart" class="drawing-tools-pane is-active" role="tabpanel">
+            <form id="chart-plot-form" class="drawing-form" autocomplete="off">
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>图表类型</span>
+                  <select id="chart-type" class="branch-select">
+                    <option value="bar">柱状图 (bar)</option>
+                    <option value="line">折线图 (line)</option>
+                    <option value="pie">饼状图 (pie)</option>
+                  </select>
+                </label>
+                <label class="drawing-field">
+                  <span>标题</span>
+                  <input type="text" id="chart-title" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>X 轴标签</span>
+                  <input type="text" id="chart-x-label" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>Y 轴标签</span>
+                  <input type="text" id="chart-y-label" class="branch-input" placeholder="可选" />
+                </label>
+              </div>
+              <label class="drawing-field drawing-field--wide">
+                <span>数据 JSON</span>
+                <textarea id="chart-data-json" rows="6" class="wf-ta" spellcheck="false">{"x": ["A", "B", "C"], "y": [3, 5, 2]}</textarea>
+              </label>
+              <p class="drawing-hint">bar/line 支持 <code>{"x":[],"y":[]}</code> 或 <code>{"x":[],"series":[{"name":"S1","y":[]}]}</code>；pie 支持 <code>{"labels":[],"values":[]}</code></p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary" id="chart-plot-submit">生成图表</button>
+                <button type="button" class="btn-secondary" id="chart-plot-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="chart-plot-status" class="drawing-status" role="status"></p>
+            <div id="chart-plot-result" class="drawing-result" hidden>
+              <img id="chart-plot-img" alt="生成的统计图表" />
+              <a id="chart-plot-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
+
+          <section id="drawing-tab-diagram" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="concept-diagram-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>概念描述（需 Gemini Key）</span>
+                <textarea id="diagram-prompt" rows="4" class="wf-ta" placeholder="描述需要图示化的概念、流程或系统架构…"></textarea>
+              </label>
+              <label class="drawing-field">
+                <span>图标题</span>
+                <input type="text" id="diagram-title" class="branch-input" placeholder="可选" />
+              </label>
+              <label class="drawing-field drawing-field--wide">
+                <span>Mermaid 代码（调试模式，跳过 Gemini）</span>
+                <textarea id="diagram-mermaid" rows="8" class="wf-ta" spellcheck="false">flowchart TB
+  A[数据采集] --> B[预处理]
+  B --> C[索引构建]
+  C --> D[在线检索]
+  D --> E[生成回答]</textarea>
+              </label>
+              <p class="drawing-hint">未配置 Gemini Key 时，请直接在上方粘贴 Mermaid 代码并生成。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary" id="concept-diagram-submit">生成概念图</button>
+                <button type="button" class="btn-secondary" id="concept-diagram-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="concept-diagram-status" class="drawing-status" role="status"></p>
+            <pre id="concept-diagram-code" class="drawing-code-preview" hidden></pre>
+            <div id="concept-diagram-result" class="drawing-result" hidden>
+              <img id="concept-diagram-img" alt="生成的概念示意图" />
+              <a id="concept-diagram-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
@@ -551,6 +666,7 @@
     <script src="rag_assets.js?v=rag-delete-5"></script>
     <script src="conferences_calendar.js?v=4"></script>
     <script src="user_settings.js?v=settings-6"></script>
+    <script src="drawing_tools.js?v=1"></script>
     <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>

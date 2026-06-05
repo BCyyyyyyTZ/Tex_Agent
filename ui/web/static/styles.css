@@ -915,6 +915,45 @@ h1 {
   white-space: nowrap;
 }
 
+.panel-toggle__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.panel-toggle__tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text);
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 10;
+}
+
+.panel-toggle {
+  position: relative;
+  padding: 6px 8px;
+}
+
+.panel-toggle:hover .panel-toggle__tip,
+.panel-toggle:focus-visible .panel-toggle__tip {
+  opacity: 1;
+}
+
 .panel-toggle:hover {
   color: var(--text);
   background: #3c3c3c;
