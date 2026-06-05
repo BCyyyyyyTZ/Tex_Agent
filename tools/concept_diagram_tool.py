@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import time
-import uuid
 import zlib
 from pathlib import Path
 from typing import Optional
@@ -17,6 +16,7 @@ if __package__ in {None, ""}:
 from agents.base_agent import GeminiClient
 from core.message import ToolResult
 from tools.base_tool import BaseTool
+from tools.web_tool_utils import unique_output_path, web_tool_output_dir
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -169,14 +169,4 @@ class ConceptDiagramTool(BaseTool):
             return ToolResult(success=False, output="", error=f"ConceptDiagramTool 失败: {e}")
 
 
-def web_tool_output_dir() -> Path:
-    root = Path(__file__).resolve().parents[1]
-    d = root / "outputs" / "web_tool_outputs"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def unique_output_path(prefix: str, ext: str = ".png") -> Path:
-    safe_ext = ext if ext.startswith(".") else f".{ext}"
-    name = f"{prefix}_{uuid.uuid4().hex[:12]}{safe_ext}"
-    return web_tool_output_dir() / name
+__all__ = ["ConceptDiagramTool", "unique_output_path", "web_tool_output_dir"]

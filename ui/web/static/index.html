@@ -11,7 +11,7 @@
     />
     <link rel="stylesheet" href="styles.css?v=settings-15" />
     <link rel="stylesheet" href="conferences_calendar.css?v=8" />
-    <link rel="stylesheet" href="drawing_tools.css?v=1" />
+    <link rel="stylesheet" href="drawing_tools.css?v=4" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
@@ -567,15 +567,19 @@
       <div class="drawing-tools-panel">
         <header class="drawing-tools-head">
           <div>
-            <h2 id="drawing-tools-title" class="drawing-tools-title">绘图工具</h2>
-            <p class="drawing-tools-sub">独立于工作流 · 统计图表与概念示意图</p>
+            <h2 id="drawing-tools-title" class="drawing-tools-title">工具箱</h2>
           </div>
           <button type="button" id="drawing-tools-close" class="drawing-tools-close" aria-label="关闭">×</button>
         </header>
 
         <div class="drawing-tools-tabs" role="tablist" aria-label="工具类型">
           <button type="button" class="drawing-tools-tab is-active" data-tab="chart" role="tab" aria-selected="true">统计图表</button>
-          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">概念示意图</button>
+          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">概念图</button>
+          <button type="button" class="drawing-tools-tab" data-tab="latex" role="tab" aria-selected="false">LaTeX 表格</button>
+          <button type="button" class="drawing-tools-tab" data-tab="palette" role="tab" aria-selected="false">配色</button>
+          <button type="button" class="drawing-tools-tab" data-tab="text" role="tab" aria-selected="false">文本统计</button>
+          <button type="button" class="drawing-tools-tab" data-tab="title" role="tab" aria-selected="false">标题生成</button>
+          <button type="button" class="drawing-tools-tab" data-tab="qrcode" role="tab" aria-selected="false">QR 码</button>
         </div>
 
         <div class="drawing-tools-body">
@@ -631,7 +635,7 @@
                 <input type="text" id="diagram-title" class="branch-input" placeholder="可选" />
               </label>
               <label class="drawing-field drawing-field--wide">
-                <span>Mermaid 代码（调试模式，跳过 Gemini）</span>
+                <span>手动输入 Mermaid 代码（跳过 Gemini，直接渲染）</span>
                 <textarea id="diagram-mermaid" rows="8" class="wf-ta" spellcheck="false">flowchart TB
   A[数据采集] --> B[预处理]
   B --> C[索引构建]
@@ -651,6 +655,140 @@
               <a id="concept-diagram-download" class="btn-secondary drawing-download" download>下载 PNG</a>
             </div>
           </section>
+
+          <section id="drawing-tab-latex" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="latex-table-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>表头（逗号分隔）</span>
+                <input type="text" id="latex-headers" class="branch-input" value="Method, Accuracy, F1" />
+              </label>
+              <label class="drawing-field drawing-field--wide">
+                <span>数据行（JSON 或 Tab/逗号分隔）</span>
+                <textarea id="latex-rows" rows="6" class="wf-ta" spellcheck="false">[["BERT", "0.91", "0.88"], ["GPT", "0.93", "0.90"], ["Ours", "0.95", "0.92"]]</textarea>
+              </label>
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>表标题</span>
+                  <input type="text" id="latex-caption" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>label</span>
+                  <input type="text" id="latex-label" class="branch-input" placeholder="如 main_results" />
+                </label>
+              </div>
+              <p class="drawing-hint">模板生成，无需 LLM。需导言区 <code>\usepackage{booktabs}</code>。数值列可自动居中，可选高亮每列最优值。</p>
+              <label class="drawing-field drawing-field--inline">
+                <input type="checkbox" id="latex-highlight-best" />
+                <span>高亮每列最优数值（粗体）</span>
+              </label>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成 LaTeX</button>
+                <button type="button" class="btn-secondary" id="latex-table-reset">清空重置</button>
+                <button type="button" class="btn-secondary" id="latex-table-copy">复制代码</button>
+              </div>
+            </form>
+            <p id="latex-table-status" class="drawing-status" role="status"></p>
+            <pre id="latex-table-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-palette" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="palette-form" class="drawing-form" autocomplete="off">
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>主题</span>
+                  <select id="palette-theme" class="branch-select">
+                    <option value="academic">学术稳重</option>
+                    <option value="ieee">IEEE 风</option>
+                    <option value="nature">自然大地</option>
+                    <option value="ocean">海洋蓝调</option>
+                    <option value="sunset">日落暖色</option>
+                    <option value="pastel">柔和粉彩</option>
+                    <option value="grayscale">印刷灰阶</option>
+                    <option value="colorblind">色盲友好</option>
+                    <option value="random">随机主题</option>
+                  </select>
+                </label>
+                <label class="drawing-field">
+                  <span>颜色数量</span>
+                  <input type="number" id="palette-count" class="branch-input" min="3" max="8" value="6" />
+                </label>
+              </div>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成配色</button>
+                <button type="button" class="btn-secondary" id="palette-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="palette-desc" class="drawing-hint palette-desc" hidden></p>
+            <p id="palette-status" class="drawing-status" role="status"></p>
+            <div id="palette-swatches" class="palette-swatches" hidden></div>
+            <div id="palette-result" class="drawing-result" hidden>
+              <img id="palette-img" alt="配色预览条" />
+            </div>
+          </section>
+
+          <section id="drawing-tab-text" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="text-stats-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>待分析文本</span>
+                <textarea id="text-stats-input" rows="8" class="wf-ta" placeholder="粘贴摘要、段落或整段文稿…"></textarea>
+              </label>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">开始统计</button>
+                <button type="button" class="btn-secondary" id="text-stats-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="text-stats-status" class="drawing-status" role="status"></p>
+            <pre id="text-stats-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-title" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="paper-title-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>主题关键词</span>
+                <input type="text" id="paper-title-keywords" class="branch-input" placeholder="如 retrieval augmented generation" />
+              </label>
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>风格</span>
+                  <select id="paper-title-style" class="branch-select">
+                    <option value="serious">正经学术风</option>
+                    <option value="funny">趣味脑洞风</option>
+                  </select>
+                </label>
+                <label class="drawing-field drawing-field--inline">
+                  <input type="checkbox" id="paper-title-use-llm" checked />
+                  <span>启用 OpenAI 生成 2 条</span>
+                </label>
+              </div>
+              <p class="drawing-hint">3 条本地模板（即时，无需 API）+ 2 条 OpenAI 风格各异（正经学术 / 脑洞趣味）。API 读取 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code>，未配置时自动退化为纯本地。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成标题</button>
+                <button type="button" class="btn-secondary" id="paper-title-reset">清空重置</button>
+                <button type="button" class="btn-secondary" id="paper-title-copy">复制结果</button>
+              </div>
+            </form>
+            <p id="paper-title-status" class="drawing-status" role="status"></p>
+            <pre id="paper-title-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-qrcode" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="qrcode-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>内容（URL 或文本）</span>
+                <input type="text" id="qrcode-content" class="branch-input" placeholder="https://arxiv.org/abs/..." />
+              </label>
+              <p class="drawing-hint">适合论文链接、个人主页、数据集 DOI 等（依赖见 requirements.txt）。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成 QR 码</button>
+                <button type="button" class="btn-secondary" id="qrcode-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="qrcode-status" class="drawing-status" role="status"></p>
+            <div id="qrcode-result" class="drawing-result drawing-result--qrcode" hidden>
+              <img id="qrcode-img" alt="生成的 QR 码" />
+              <a id="qrcode-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -666,7 +804,7 @@
     <script src="rag_assets.js?v=rag-delete-5"></script>
     <script src="conferences_calendar.js?v=4"></script>
     <script src="user_settings.js?v=settings-6"></script>
-    <script src="drawing_tools.js?v=1"></script>
+    <script src="drawing_tools.js?v=4"></script>
     <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>
