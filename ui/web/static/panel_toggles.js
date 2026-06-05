@@ -86,6 +86,7 @@
     if (!group) return;
     group.addEventListener("click", function (ev) {
       if (ev.target.closest("[data-conf-cal-open], #conf-cal-trigger, .conf-cal-brand-btn")) return;
+      if (ev.target.closest("[data-drawing-tools-open], #drawing-tools-open")) return;
       var btn = ev.target.closest(".panel-toggle[data-panel]");
       if (!btn) return;
       toggle(btn.getAttribute("data-panel"));

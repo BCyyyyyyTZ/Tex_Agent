@@ -62,37 +62,9 @@
   border-color: rgba(167, 139, 250, 0.7);
 }
 
-/* 右下角悬浮入口（顶栏被挤掉时仍可见） */
+/* 右下角悬浮入口已移除，仅保留顶栏入口 */
 .conf-cal-fab {
-  position: fixed;
-  right: 20px;
-  bottom: 88px;
-  z-index: 8000;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 14px;
-  font-size: 12px;
-  font-family: inherit;
-  font-weight: 600;
-  color: #ecfeff;
-  letter-spacing: 0.04em;
-  background: linear-gradient(135deg, #22d3ee, #818cf8);
-  border: 1px solid rgba(34, 211, 238, 0.65);
-  border-radius: 999px;
-  cursor: pointer;
-  box-shadow: 0 0 24px rgba(34, 211, 238, 0.45);
-  transition: transform 0.15s, box-shadow 0.2s;
-}
-
-.conf-cal-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 32px rgba(129, 140, 248, 0.55);
-}
-
-.conf-cal-fab:focus-visible {
-  outline: 2px solid #f0f9ff;
-  outline-offset: 2px;
+  display: none !important;
 }
 
 .conf-cal-overlay {

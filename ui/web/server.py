@@ -455,6 +455,32 @@ class ToolsListOut(BaseModel):
     tools: List[ToolItemOut]
 
 
+class ChartPlotBody(BaseModel):
+    chart_type: str = Field(..., description="bar | line | pie")
+    data: Dict[str, Any] = Field(default_factory=dict)
+    title: str = ""
+    x_label: str = ""
+    y_label: str = ""
+    width: float = 8.0
+    height: float = 5.0
+    dpi: int = 200
+    legend: bool = True
+
+
+class ConceptDiagramBody(BaseModel):
+    prompt: str = ""
+    title: str = ""
+    mermaid_code: str = Field("", description="直接提供 Mermaid 代码时跳过 Gemini")
+
+
+class DrawingToolResponse(BaseModel):
+    success: bool
+    output_url: Optional[str] = None
+    output_path: Optional[str] = None
+    mermaid_code: Optional[str] = None
+    error: Optional[str] = None
+
+
 class PdfFileItem(BaseModel):
     name: str
     size: int
@@ -1196,6 +1222,79 @@ def create_app() -> FastAPI:
             )
 
         return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/chart-plot", response_model=DrawingToolResponse)
+    async def drawing_chart_plot(body: ChartPlotBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.chart_plot_tool import ChartPlotTool
+            from tools.concept_diagram_tool import unique_output_path
+
+            out = unique_output_path("chart")
+            tool = ChartPlotTool()
+            result = tool.run(
+                chart_type=body.chart_type,
+                data=body.data,
+                output_path=str(out),
+                title=body.title,
+                x_label=body.x_label,
+                y_label=body.y_label,
+                width=body.width,
+                height=body.height,
+                dpi=body.dpi,
+                legend=body.legend,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "图表生成失败")
+            fname = out.name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(out),
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/concept-diagram", response_model=DrawingToolResponse)
+    async def drawing_concept_diagram(body: ConceptDiagramBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.concept_diagram_tool import ConceptDiagramTool, unique_output_path
+
+            out = unique_output_path("diagram")
+            tool = ConceptDiagramTool()
+            result = tool.run(
+                prompt=body.prompt,
+                output_path=str(out),
+                title=body.title,
+                mermaid_code=body.mermaid_code,
+            )
+            meta = result.metadata or {}
+            if not result.success:
+                return DrawingToolResponse(
+                    success=False,
+                    error=result.error or "概念图生成失败",
+                    mermaid_code=str(meta.get("mermaid_code") or "") or None,
+                )
+            fname = out.name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(out),
+                mermaid_code=str(meta.get("mermaid_code") or "") or None,
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.get("/api/drawing/output/{filename}")
+    async def drawing_output_file(filename: str) -> FileResponse:
+        from tools.concept_diagram_tool import web_tool_output_dir
+
+        safe = Path(filename).name
+        if safe != filename or not safe.endswith(".png"):
+            raise HTTPException(status_code=400, detail="无效文件名")
+        p = web_tool_output_dir() / safe
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(p, media_type="image/png", filename=p.name)
 
     @app.get("/api/storage/pdfs", response_model=PdfListResponse)
     async def list_pdfs_ep() -> PdfListResponse:
