@@ -40,9 +40,11 @@ class LatexAutoFixTool(BaseTool):
     ):
         super().__init__(
             name="latex_autofix",
-            description="传入 LaTeX 主文件路径，自动编译并根据报错迭代修复副本，直到不再报错，返回修改历史与副本路径。",
+            description="传入 LaTeX 项目目录与入口 tex 文件（或直接传主文件路径），自动编译并根据报错迭代修复副本，直到不再报错，返回修改历史与副本路径。",
             input_schema={
-                "latex_path": "必填，LaTeX 主文件路径，例如 'paper/main.tex'",
+                "project_dir": "可选，LaTeX 项目目录，例如 'paper'（与 tex_file 配套使用）",
+                "tex_file": "可选，需要编译的入口 tex 文件（相对 project_dir），例如 'main.tex' 或 'src/main.tex'",
+                "latex_path": "可选，LaTeX 主文件路径，例如 'paper/main.tex'（兼容旧用法；传了它可不传 project_dir/tex_file）",
                 "output_dir": "可选，输出工作目录，例如 'outputs/latex_autofix'",
                 "max_iters": "可选，最大修复轮次，默认 8",
                 "engine": "可选，编译引擎：auto|pdflatex|xelatex|lualatex，默认 auto",
@@ -158,7 +160,10 @@ class LatexAutoFixTool(BaseTool):
         build_dir = work_dir / "_build"
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        main_name = main_tex.name
+        try:
+            main_name = str(main_tex.resolve().relative_to(work_dir.resolve()))
+        except Exception:
+            main_name = main_tex.name
         latexmk = self._which("latexmk")
         cmd: list[str]
 
@@ -403,11 +408,12 @@ class LatexAutoFixTool(BaseTool):
         if re.search(r"Undefined control sequence", msg, flags=re.IGNORECASE) or re.search(
             r"Undefined control sequence", raw, flags=re.IGNORECASE
         ):
+            target_for_probe = self._find_target_file(work_dir, err.file, main_tex)
             cmd = ""
             probe = err.context or ""
             if not probe and err.line > 0:
                 try:
-                    lines = self._read_lines(main_tex)
+                    lines = self._read_lines(target_for_probe)
                     probe = lines[err.line - 1] if 0 < err.line <= len(lines) else ""
                 except Exception:
                     probe = ""
@@ -434,7 +440,7 @@ class LatexAutoFixTool(BaseTool):
             }
             pkg = pkg_map.get(cmd)
             if pkg:
-                target = self._find_target_file(work_dir, err.file, main_tex)
+                target = main_tex
                 lines = self._read_lines(target)
                 changed, new_lines = self._insert_package(lines, pkg)
                 if not changed:
@@ -537,7 +543,7 @@ class LatexAutoFixTool(BaseTool):
         self._write_lines(target, new_lines)
         return {
             "type": "edit",
-            "path": target.name,
+            "path": str(target),
             "action": "llm_edits",
             "edits": applied,
             "llm_raw": raw[:4000],
@@ -548,43 +554,50 @@ class LatexAutoFixTool(BaseTool):
         *,
         err: LatexError,
         main_tex: Path,
+        work_dir: Path,
     ) -> Optional[dict[str, Any]]:
-        if not self.api_key:
+        resolved_api_key = self._resolve_api_key("")
+        if not resolved_api_key:
             return {"type": "llm_stop", "reason": "未配置 GEMINI_API_KEY 或 GOOGLE_API_KEY，无法进行 LLM 修复", "llm_raw": ""}
-        target = main_tex
+        target = self._find_target_file(work_dir, err.file, main_tex)
+        if target.suffix.lower() != ".tex":
+            return {"type": "llm_stop", "reason": "LLM 修复仅支持修改 .tex 文件", "llm_raw": ""}
+
         lines = self._read_lines(target)
         ln = err.line if err.line > 0 else 1
         start = max(1, ln - 8)
         end = min(len(lines), ln + 8)
         snippet = "".join([f"{i:>4}: {lines[i-1]}" for i in range(start, end + 1)])
+        target_display = self._safe_relpath(target, work_dir)
 
         prompt = (
             "你是 LaTeX 编译报错修复助手。\n"
             "目标：用最小改动修复编译错误，尽量不改变语义。\n"
-            "只允许修改主文件 main.tex。\n"
+            f"只允许修改文件：{target_display}。\n"
             "输出必须是严格 JSON，禁止任何解释文字。\n\n"
-            "你会收到 main.tex 作为上传文件（LaTeX 源文件）。\n"
+            f"你会收到 {Path(target_display).name} 作为上传文件（LaTeX 源文件）。\n"
             "请按以下 JSON 结构返回多个修改建议（可 1 个或多个），或返回停止原因：\n"
             'A) {"action":"edits","edits":[{"start_line":修改起始行(1-based),"end_line":修改结束行(1-based),"replacement":"替换内容(可含\\n)","reason":"原因"}]}\n'
             'B) {"action":"stop","reason":"无法安全自动修复的原因"}\n\n'
-            f"主文件: {main_tex.name}\n"
+            f"入口文件: {self._safe_relpath(main_tex, work_dir)}\n"
+            f"当前待修复文件: {target_display}\n"
             f"当前错误摘要: {err.message}\n"
-            f"错误定位: {main_tex.name}:{err.line}\n"
+            f"错误定位: {target_display}:{err.line}\n"
             "错误原始片段:\n"
             f"{err.raw}\n\n"
-            f"主文件片段（带行号）:\n{snippet}\n"
+            f"待修复文件片段（带行号）:\n{snippet}\n"
         )
 
         GeminiClient = self._load_gemini_client_class()
-        llm = GeminiClient(model_name=self.model_name, api_key=self.api_key, temperature=self.temperature)
-        upload_path = main_tex
+        llm = GeminiClient(model_name=self.model_name, api_key=resolved_api_key, temperature=self.temperature)
+        upload_path = target
         if upload_path.suffix.lower() == ".tex":
             try:
                 alt = upload_path.with_suffix(upload_path.suffix + ".txt")
                 alt.write_text(upload_path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
                 upload_path = alt
             except Exception:
-                upload_path = main_tex
+                upload_path = target
         try:
             raw = llm.response(prompt, file_paths=str(upload_path), file_mime_types="text/plain")
         except TypeError:
@@ -614,34 +627,71 @@ class LatexAutoFixTool(BaseTool):
             return {"type": "llm_stop", "reason": stop_reason, "llm_raw": raw[:4000]}
         if not edits:
             return None
-        return self._apply_llm_edits_to_file(target, edits, raw)
+        action = self._apply_llm_edits_to_file(target, edits, raw)
+        if isinstance(action, dict):
+            action["path"] = self._safe_relpath(target, work_dir)
+        return action
 
     def run(
         self,
-        latex_path: str,
+        latex_path: str = "",
+        project_dir: str = "",
+        tex_file: str = "",
         output_dir: str = "",
         max_iters: int = 8,
         engine: str = "auto",
         use_llm: Optional[bool] = None,
     ) -> ToolResult:
         try:
-            if not latex_path:
-                return ToolResult(success=False, output="", error="latex_path 不能为空")
+            src_project = None
+            src_main = None
 
-            src_main = Path(latex_path).expanduser()
-            if not src_main.is_absolute():
-                src_main = (Path.cwd() / src_main).resolve()
-            if not src_main.exists():
-                return ToolResult(success=False, output="", error=f"文件不存在: {src_main}")
-            if src_main.suffix.lower() != ".tex":
-                return ToolResult(success=False, output="", error="latex_path 必须指向 .tex 文件")
+            if latex_path:
+                src_main = Path(latex_path).expanduser()
+                if not src_main.is_absolute():
+                    src_main = (Path.cwd() / src_main).resolve()
+                if not src_main.exists():
+                    return ToolResult(success=False, output="", error=f"文件不存在: {src_main}")
+                if src_main.suffix.lower() != ".tex":
+                    return ToolResult(success=False, output="", error="latex_path 必须指向 .tex 文件")
+                src_project = src_main.parent
+            else:
+                if not project_dir:
+                    return ToolResult(success=False, output="", error="project_dir 不能为空（或改用 latex_path）")
+                if not tex_file:
+                    return ToolResult(success=False, output="", error="tex_file 不能为空（或改用 latex_path）")
+                src_project = Path(project_dir).expanduser()
+                if not src_project.is_absolute():
+                    src_project = (Path.cwd() / src_project).resolve()
+                if not src_project.exists() or not src_project.is_dir():
+                    return ToolResult(success=False, output="", error=f"项目目录不存在: {src_project}")
+                src_main = (src_project / tex_file).resolve()
+                try:
+                    src_main.relative_to(src_project.resolve())
+                except Exception:
+                    return ToolResult(success=False, output="", error="tex_file 必须位于 project_dir 目录内")
+                if not src_main.exists():
+                    return ToolResult(success=False, output="", error=f"入口 tex 不存在: {src_main}")
+                if src_main.suffix.lower() != ".tex":
+                    return ToolResult(success=False, output="", error="tex_file 必须指向 .tex 文件")
+
+            assert src_project is not None and src_main is not None
+
+            src_project = src_project.resolve()
+            src_main = src_main.resolve()
+
+            rel_main = None
+            try:
+                rel_main = src_main.relative_to(src_project)
+            except Exception:
+                rel_main = Path(src_main.name)
 
             max_iters = int(max_iters or 0)
             if max_iters <= 0:
                 max_iters = 8
 
+
             use_llm_eff = self.use_llm if use_llm is None else bool(use_llm)
-            api_key = self._resolve_api_key("")
 
             base_out = Path(output_dir) if output_dir else (Path(__file__).resolve().parents[1] / "outputs" / "latex_autofix")
             base_out.mkdir(parents=True, exist_ok=True)
@@ -653,13 +703,13 @@ class LatexAutoFixTool(BaseTool):
 
             extra_ignore: set[str] = set()
             try:
-                rel = base_out.resolve().relative_to(src_main.parent.resolve())
+                rel = base_out.resolve().relative_to(src_project.resolve())
                 if rel.parts:
                     extra_ignore.add(rel.parts[0])
             except Exception:
                 pass
-            self._project_copy(src_main.parent, work_dir, extra_ignore_top=extra_ignore)
-            main_tex = (work_dir / src_main.name).resolve()
+            self._project_copy(src_project, work_dir, extra_ignore_top=extra_ignore)
+            main_tex = (work_dir / rel_main).resolve()
             if not main_tex.exists():
                 return ToolResult(success=False, output="", error="复制副本失败：未找到主文件副本")
 
@@ -726,7 +776,7 @@ class LatexAutoFixTool(BaseTool):
 
                 action = self._deterministic_fix(err=err, work_dir=work_dir, main_tex=main_tex, state=state)
                 if action is None and use_llm_eff:
-                    action = self._llm_fix(err=err, main_tex=main_tex)
+                    action = self._llm_fix(err=err, main_tex=main_tex, work_dir=work_dir)
                 step["action"] = action
                 history.append(step)
 
@@ -790,7 +840,8 @@ def _assert_file_ok(path: str) -> None:
 
 def _run_self_test(output_dir: Optional[str] = None) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    test_project_llm = repo_root / "latex_autofix_llm_test_project" / "main.tex"
+    test_project_dir = repo_root / "latex_autofix_llm_test_project"
+    test_project_llm = test_project_dir / "main.tex"
     if not test_project_llm.exists():
         raise AssertionError(f"测试工程不存在: {test_project_llm}")
 
@@ -803,9 +854,10 @@ def _run_self_test(output_dir: Optional[str] = None) -> None:
     base.mkdir(parents=True, exist_ok=True)
 
     r = tool.run(
-        latex_path=str(test_project_llm),
+        project_dir=str(test_project_dir),
+        tex_file="main.tex",
         output_dir=str(base),
-        max_iters=8,
+        max_iters=20,
         engine="auto",
         use_llm=True,
     )

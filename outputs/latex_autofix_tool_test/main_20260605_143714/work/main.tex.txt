@@ -1,4 +1,7 @@
 \documentclass{article}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{url}
 
 \begin{document}
 
@@ -6,9 +9,9 @@
 
 \input{sections/body}
 
-Hello_world
+Hello\_world
 
-Unicode_test: 🙂
+Unicode\_test: 🙂
 
 \textcolor{red}{Main requires xcolor}
 
