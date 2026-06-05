@@ -477,8 +477,41 @@ class DrawingToolResponse(BaseModel):
     success: bool
     output_url: Optional[str] = None
     output_path: Optional[str] = None
+    output_text: Optional[str] = None
     mermaid_code: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+
+class LatexTableBody(BaseModel):
+    headers: str = ""
+    rows: str = ""
+    caption: str = ""
+    label: str = ""
+    alignment: str = ""
+    highlight_best: bool = False
+
+
+class PaletteBody(BaseModel):
+    theme: str = "academic"
+    count: int = 6
+    seed: Optional[int] = None
+
+
+class TextStatsBody(BaseModel):
+    text: str = ""
+
+
+class PaperTitleBody(BaseModel):
+    keywords: str = ""
+    style: str = "serious"
+    count: int = 5
+    seed: Optional[int] = None
+    use_llm: bool = True
+
+
+class QrcodeBody(BaseModel):
+    content: str = ""
 
 
 class PdfFileItem(BaseModel):
@@ -1284,9 +1317,109 @@ def create_app() -> FastAPI:
 
         return await anyio.to_thread.run_sync(_work)
 
+    @app.post("/api/drawing/latex-table", response_model=DrawingToolResponse)
+    async def drawing_latex_table(body: LatexTableBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.latex_table_tool import LatexTableTool
+
+            tool = LatexTableTool()
+            result = tool.run(
+                headers=body.headers,
+                rows=body.rows,
+                caption=body.caption,
+                label=body.label,
+                alignment=body.alignment,
+                highlight_best=body.highlight_best,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "LaTeX 表格生成失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/palette", response_model=DrawingToolResponse)
+    async def drawing_palette(body: PaletteBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.palette_tool import PaletteTool
+
+            tool = PaletteTool()
+            result = tool.run(theme=body.theme, count=body.count, seed=body.seed)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "配色生成失败")
+            meta = result.metadata or {}
+            fname = Path(str(meta.get("output_path") or result.output)).name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(result.output),
+                metadata=meta,
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/text-stats", response_model=DrawingToolResponse)
+    async def drawing_text_stats(body: TextStatsBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.text_stats_tool import TextStatsTool
+
+            result = TextStatsTool().run(text=body.text)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "文本统计失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/paper-title", response_model=DrawingToolResponse)
+    async def drawing_paper_title(body: PaperTitleBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.paper_title_tool import PaperTitleTool
+
+            result = PaperTitleTool().run(
+                keywords=body.keywords,
+                style=body.style,
+                count=body.count,
+                seed=body.seed,
+                use_llm=body.use_llm,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "标题生成失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/qrcode", response_model=DrawingToolResponse)
+    async def drawing_qrcode(body: QrcodeBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.qrcode_tool import QrcodeTool
+
+            result = QrcodeTool().run(content=body.content)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "QR 码生成失败")
+            fname = Path(str(result.output)).name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(result.output),
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
     @app.get("/api/drawing/output/{filename}")
     async def drawing_output_file(filename: str) -> FileResponse:
-        from tools.concept_diagram_tool import web_tool_output_dir
+        from tools.web_tool_utils import web_tool_output_dir
 
         safe = Path(filename).name
         if safe != filename or not safe.endswith(".png"):
