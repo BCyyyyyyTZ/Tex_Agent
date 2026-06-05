@@ -95,20 +95,3 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1e1e1e; colo
 }
 .save-indicator.saving { color: #cca700; }
 .save-indicator.saved { color: #4caf50; }
-
-/* Polish selection button */
-.polish-selection-btn {
-  position: absolute;
-  z-index: 20;
-  padding: 4px 10px;
-  background: #0e639c;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 12px;
-  display: none;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
-  white-space: nowrap;
-}
-.polish-selection-btn:hover { background: #1177bb; }

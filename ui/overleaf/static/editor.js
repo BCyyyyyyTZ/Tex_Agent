@@ -17,6 +17,7 @@
   let pdfZoomPercent = 100;
   let pdfFitMode = "height";
   let selectionRange = null;
+  let selectionSnapshot = null;
 
   const $ = id => document.getElementById(id);
 
@@ -63,6 +64,7 @@
   };
 
   function loadFile(path) {
+    closePolishFloatCard();
     currentFile = path;
     document.getElementById("currentFileTab").textContent = path.split("/").pop();
     api("/api/projects/" + projectId + "/file?path=" + encodeURIComponent(path)).then(function(data) {
@@ -89,6 +91,14 @@
     }).then(function() {
       originalContent = content;
     });
+  }
+
+  function showSaveStatus(msg) {
+    var el = document.getElementById("saveIndicator");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = "save-indicator saved";
+    setTimeout(function() { el.textContent = ""; el.className = "save-indicator"; }, 2000);
   }
 
   function debounce(fn, ms) {
@@ -337,17 +347,248 @@
   };
 
 
-  // --- Text selection polish ---
+  // --- Text selection polish (floating card) ---
   var editor = document.getElementById("codeEditor");
   var selBtn = document.getElementById("polishSelectionBtn");
+  var polishFloatCard = null;
 
+  function copyTextareaStyle(ta, el) {
+    var computed = window.getComputedStyle(ta);
+    var props = [
+      "direction", "boxSizing", "overflowX", "overflowY",
+      "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+      "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+      "fontStyle", "fontVariant", "fontWeight", "fontStretch", "fontSize",
+      "lineHeight", "fontFamily", "textAlign", "textTransform",
+      "textIndent", "textDecoration", "letterSpacing", "wordSpacing", "tabSize"
+    ];
+    el.style.whiteSpace = "pre-wrap";
+    el.style.wordWrap = "break-word";
+    el.style.position = "absolute";
+    el.style.visibility = "hidden";
+    el.style.overflow = "hidden";
+    el.style.width = ta.clientWidth + "px";
+    props.forEach(function(p) { el.style[p] = computed[p]; });
+  }
+
+  function getSelectionMirrorBox(ta, start, end) {
+    var div = document.createElement("div");
+    document.body.appendChild(div);
+    copyTextareaStyle(ta, div);
+    div.textContent = ta.value.substring(0, start);
+    var mark = document.createElement("span");
+    mark.textContent = ta.value.substring(start, end) || " ";
+    div.appendChild(mark);
+
+    var computed = window.getComputedStyle(ta);
+    var borderTop = parseFloat(computed.borderTopWidth) || 0;
+    var borderLeft = parseFloat(computed.borderLeftWidth) || 0;
+    var padTop = parseFloat(computed.paddingTop) || 0;
+    var padLeft = parseFloat(computed.paddingLeft) || 0;
+
+    var top = mark.offsetTop + borderTop + padTop - ta.scrollTop;
+    var left = mark.offsetLeft + borderLeft + padLeft - ta.scrollLeft;
+    var width = mark.offsetWidth;
+    var height = mark.offsetHeight;
+
+    document.body.removeChild(div);
+
+    var wrap = document.querySelector(".editor-wrap");
+    var taRect = ta.getBoundingClientRect();
+    return {
+      wrapTop: ta.offsetTop + top,
+      wrapLeft: ta.offsetLeft + left,
+      wrapRight: ta.offsetLeft + left + width,
+      wrapBottom: ta.offsetTop + top + height,
+      width: width,
+      height: height,
+      viewportTop: taRect.top + top,
+      viewportLeft: taRect.left + left,
+      viewportRight: taRect.left + left + width,
+      viewportBottom: taRect.top + top + height
+    };
+  }
   function hideSelectionButton() {
     selBtn.style.display = "none";
   }
 
   function clearSelectionRange() {
     selectionRange = null;
-    document.getElementById("polishBtn").dataset.selectedText = "";
+  }
+
+  function closePolishFloatCard() {
+    if (polishFloatCard) {
+      polishFloatCard.remove();
+      polishFloatCard = null;
+    }
+    selectionSnapshot = null;
+  }
+
+  function activeSelection() {
+    return selectionSnapshot || selectionRange;
+  }
+
+  function setupPolishCardDrag(card, head) {
+    head.addEventListener("mousedown", function(e) {
+      if (e.button !== 0 || e.target.closest(".card-close")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      card.classList.add("is-dragging");
+      var rect = card.getBoundingClientRect();
+      var offsetX = e.clientX - rect.left;
+      var offsetY = e.clientY - rect.top;
+
+      function onMove(ev) {
+        var x = ev.clientX - offsetX;
+        var y = ev.clientY - offsetY;
+        x = Math.max(8, Math.min(x, window.innerWidth - card.offsetWidth - 8));
+        y = Math.max(8, Math.min(y, window.innerHeight - card.offsetHeight - 8));
+        card.style.left = x + "px";
+        card.style.top = y + "px";
+        card.style.transform = "none";
+      }
+
+      function onUp() {
+        card.classList.remove("is-dragging");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+
+  function openPolishFloatCard(rect) {
+    var sel = activeSelection();
+    if (!sel || !rect) return;
+
+    closePolishFloatCard();
+    hideSelectionButton();
+    selectionSnapshot = { start: sel.start, end: sel.end, text: sel.text };
+
+    var cardW = 360;
+    var cardH = 320;
+    var top = rect.bottom + 8;
+    var left = rect.left;
+    if (left + cardW > window.innerWidth - 12) left = window.innerWidth - cardW - 12;
+    if (left < 12) left = 12;
+    if (top + cardH > window.innerHeight - 12) top = rect.top - cardH - 8;
+    if (top < 12) top = 12;
+
+    var card = document.createElement("div");
+    card.className = "polish-float-card";
+    card.style.top = top + "px";
+    card.style.left = left + "px";
+    card.innerHTML =
+      "<div class=\"card-head\">" +
+        "<span class=\"card-drag\" title=\"拖动\">⠿</span>" +
+        "<span class=\"card-title\">润色</span>" +
+        "<button type=\"button\" class=\"card-close\" title=\"关闭\">✕</button>" +
+      "</div>" +
+      "<div class=\"card-body\">" +
+        "<div class=\"field\"><span class=\"field-label\">选中内容</span>" +
+          "<div class=\"selected-preview polish-card-preview\"></div></div>" +
+        "<div class=\"field\"><span class=\"field-label\">润色要求</span>" +
+          "<input type=\"text\" class=\"query-input polish-card-query\" placeholder=\"留空则默认：润色下面这段文字\" /></div>" +
+        "<button type=\"button\" class=\"btn-generate polish-card-generate\">生成建议</button>" +
+        "<div class=\"card-status polish-card-status\"></div>" +
+        "<div class=\"result-block polish-card-result\">" +
+          "<div class=\"field\"><span class=\"field-label\">意见</span>" +
+            "<div class=\"advice-text polish-card-advice\"></div></div>" +
+          "<div class=\"field\"><span class=\"field-label\">建议润色结果（可编辑）</span>" +
+            "<textarea class=\"result-textarea polish-card-edited\"></textarea></div>" +
+        "</div>" +
+      "</div>" +
+      "<div class=\"card-actions\">" +
+        "<button type=\"button\" class=\"primary polish-card-apply\" disabled>一键应用</button>" +
+        "<button type=\"button\" class=\"polish-card-cancel\">关闭</button>" +
+      "</div>";
+
+    document.body.appendChild(card);
+    polishFloatCard = card;
+
+    card.querySelector(".polish-card-preview").textContent = selectionSnapshot.text;
+
+    setupPolishCardDrag(card, card.querySelector(".card-head"));
+
+    card.querySelector(".card-close").addEventListener("click", closePolishFloatCard);
+    card.querySelector(".polish-card-cancel").addEventListener("click", closePolishFloatCard);
+    card.querySelector(".polish-card-generate").addEventListener("click", submitPolishFloatCard);
+    card.querySelector(".polish-card-apply").addEventListener("click", applyPolishFloatCard);
+
+    var queryInput = card.querySelector(".polish-card-query");
+    queryInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter") { e.preventDefault(); submitPolishFloatCard(); }
+    });
+    card.querySelector(".polish-card-edited").addEventListener("input", function() {
+      card.querySelector(".polish-card-apply").disabled = !(this.value.trim());
+    });
+
+    queryInput.focus();
+    card.addEventListener("mousedown", function(e) { e.stopPropagation(); });
+  }
+
+  function submitPolishFloatCard() {
+    var sel = activeSelection();
+    if (!polishFloatCard || !sel) return;
+    var queryInput = polishFloatCard.querySelector(".polish-card-query");
+    var statusEl = polishFloatCard.querySelector(".polish-card-status");
+    var resultBlock = polishFloatCard.querySelector(".polish-card-result");
+    var adviceEl = polishFloatCard.querySelector(".polish-card-advice");
+    var editedEl = polishFloatCard.querySelector(".polish-card-edited");
+    var applyBtn = polishFloatCard.querySelector(".polish-card-apply");
+    var genBtn = polishFloatCard.querySelector(".polish-card-generate");
+    var query = (queryInput.value || "").trim();
+
+    genBtn.disabled = true;
+    applyBtn.disabled = true;
+    resultBlock.classList.remove("visible");
+    statusEl.textContent = "正在请求 AI 润色…";
+
+    api("/api/projects/" + projectId + "/polish", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        target_file: currentFile,
+        query: query,
+        selected_text: sel.text
+      })
+    }).then(function(result) {
+      polishResult = result;
+      var advice = [];
+      if (result.problem_zh) advice.push(result.problem_zh);
+      if (result.advice_zh) advice.push(result.advice_zh);
+      adviceEl.textContent = advice.length ? advice.join("\n\n") : "（无说明）";
+      editedEl.value = result.polished_text || "";
+      resultBlock.classList.add("visible");
+      applyBtn.disabled = !(editedEl.value.trim());
+      statusEl.textContent = "润色建议已生成，可编辑后一键应用";
+      genBtn.disabled = false;
+    }).catch(function(e) {
+      statusEl.textContent = "润色失败: " + e.message;
+      genBtn.disabled = false;
+    });
+  }
+
+  function applyPolishFloatCard() {
+    var sel = activeSelection();
+    if (!polishFloatCard || !sel) return;
+    var editedEl = polishFloatCard.querySelector(".polish-card-edited");
+    var polished = (editedEl.value || "").trim();
+    if (!polished) return;
+
+    var ed = document.getElementById("codeEditor");
+    ed.value = ed.value.substring(0, sel.start) + polished + ed.value.substring(sel.end);
+    currentContent = ed.value;
+    saveFile(currentFile, currentContent).then(function() {
+      polishFloatCard.querySelector(".polish-card-status").textContent = "已应用润色";
+      showSaveStatus("已保存");
+      setTimeout(closePolishFloatCard, 600);
+      clearSelectionRange();
+    }).catch(function() {
+      polishFloatCard.querySelector(".polish-card-status").textContent = "已替换文本，但自动保存失败，请 Ctrl+S";
+    });
   }
 
   function positionSelectionButton() {
@@ -355,32 +596,32 @@
     var end = editor.selectionEnd;
     if (start === end) {
       hideSelectionButton();
-      clearSelectionRange();
+      if (!polishFloatCard) clearSelectionRange();
       return;
     }
     var selText = editor.value.substring(start, end).trim();
     if (!selText) {
       hideSelectionButton();
-      clearSelectionRange();
+      if (!polishFloatCard) clearSelectionRange();
       return;
     }
 
     selectionRange = { start: start, end: end, text: selText };
     selBtn.dataset.selectedText = selText;
 
-    var textBefore = editor.value.substring(0, end);
-    var lineNo = textBefore.split("\n").length - 1;
-    var style = window.getComputedStyle(editor);
-    var lineHeight = parseFloat(style.lineHeight) || 20;
-    var paddingTop = parseFloat(style.paddingTop) || 12;
-    var charInLine = textBefore.split("\n").pop().length;
-    var charWidth = 7.2;
+    var box = getSelectionMirrorBox(editor, start, end);
+    if (!box) return;
 
-    var top = paddingTop + lineNo * lineHeight - editor.scrollTop + 4;
-    var left = parseFloat(style.paddingLeft) + charInLine * charWidth;
+    var wrap = document.querySelector(".editor-wrap");
+    var btnW = 72;
+    var btnH = 28;
+    var top = box.wrapBottom + 6;
+    var left = box.wrapLeft;
 
-    top = Math.max(8, Math.min(top, editor.clientHeight - 36));
-    left = Math.max(8, Math.min(left, editor.clientWidth - 64));
+    if (left + btnW > wrap.clientWidth - 8) left = box.wrapRight - btnW;
+    if (top + btnH > wrap.clientHeight - 8) top = box.wrapTop - btnH - 6;
+    top = Math.max(4, top);
+    left = Math.max(4, Math.min(left, wrap.clientWidth - btnW - 4));
 
     selBtn.style.top = top + "px";
     selBtn.style.left = left + "px";
@@ -389,7 +630,11 @@
 
   editor.addEventListener("mouseup", positionSelectionButton);
   editor.addEventListener("keyup", function(e) {
-    if (e.key === "Escape") { hideSelectionButton(); clearSelectionRange(); }
+    if (e.key === "Escape") {
+      hideSelectionButton();
+      if (polishFloatCard) closePolishFloatCard();
+      else clearSelectionRange();
+    }
     else if (e.shiftKey || e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
       positionSelectionButton();
     }
@@ -398,26 +643,29 @@
     if (selBtn.style.display === "block") positionSelectionButton();
   });
   document.addEventListener("mousedown", function(e) {
-    if (e.target !== selBtn && !editor.contains(e.target)) {
-      hideSelectionButton();
-      clearSelectionRange();
-    }
+    if (editor.contains(e.target) || selBtn.contains(e.target)) return;
+    if (polishFloatCard && polishFloatCard.contains(e.target)) return;
+    hideSelectionButton();
+    if (!polishFloatCard) clearSelectionRange();
+  });
+
+  selBtn.addEventListener("mousedown", function(e) {
+    e.preventDefault();
+    e.stopPropagation();
   });
 
   selBtn.addEventListener("click", function(e) {
     e.preventDefault();
     e.stopPropagation();
-    var selText = selBtn.dataset.selectedText || "";
-    if (!selText || !selectionRange) return;
-
-    showPolishPanel();
-    document.getElementById("polishFile").value = currentFile;
-    document.getElementById("polishQuery").value = "";
-    document.getElementById("polishBtn").dataset.selectedText = selText;
-    document.getElementById("polishResult").style.display = "none";
-    document.getElementById("polishStatus").textContent = "正在润色选中文本...";
-    hideSelectionButton();
-    runPolish();
+    if (!selectionRange) return;
+    var box = getSelectionMirrorBox(editor, selectionRange.start, selectionRange.end);
+    if (!box) return;
+    openPolishFloatCard({
+      top: box.viewportTop,
+      left: box.viewportLeft,
+      right: box.viewportRight,
+      bottom: box.viewportBottom
+    });
   });
 
   window.hidePolishPanel = function() {
@@ -428,9 +676,8 @@
   window.runPolish = function() {
     var file = document.getElementById("polishFile").value || currentFile;
     var query = document.getElementById("polishQuery").value.trim();
-    var selectedText = document.getElementById("polishBtn").dataset.selectedText || "";
-    if (!query && !selectedText) {
-      document.getElementById("polishStatus").textContent = "请输入润色需求或选中文本";
+    if (!query) {
+      document.getElementById("polishStatus").textContent = "请输入润色需求";
       return;
     }
     var btn = document.getElementById("polishBtn"); btn.disabled = true; btn.textContent = "生成中...";
@@ -439,11 +686,14 @@
     api("/api/projects/" + projectId + "/polish", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({target_file: file, query: query, selected_text: selectedText})
+      body: JSON.stringify({target_file: file, query: query, selected_text: ""})
     }).then(function(result) {
       document.getElementById("polishStatus").textContent = "润色建议已生成";
       polishResult = result;
-      document.getElementById("polishProblem").textContent = result.problem_zh || "（无说明）";
+      var advice = [];
+      if (result.problem_zh) advice.push(result.problem_zh);
+      if (result.advice_zh) advice.push(result.advice_zh);
+      document.getElementById("polishProblem").textContent = advice.length ? advice.join("\n\n") : "（无说明）";
       document.getElementById("polishOriginal").textContent = result.original_text || "（无原文）";
       document.getElementById("polishPolished").textContent = result.polished_text || "（无修改文本）";
       document.getElementById("polishResult").style.display = "block";
@@ -459,21 +709,11 @@
     var ed = document.getElementById("codeEditor");
     var orig = polishResult.original_text || "";
     var polished = polishResult.polished_text || "";
-    var applied = false;
-
-    if (selectionRange && ed.value.substring(selectionRange.start, selectionRange.end).trim() === orig.trim()) {
-      ed.value = ed.value.substring(0, selectionRange.start) + polished + ed.value.substring(selectionRange.end);
-      applied = true;
-    } else if (orig && ed.value.includes(orig)) {
+    if (orig && ed.value.includes(orig)) {
       ed.value = ed.value.replace(orig, polished);
-      applied = true;
-    }
-
-    if (applied) {
       currentContent = ed.value;
       saveFile(currentFile, currentContent);
       document.getElementById("polishStatus").textContent = "已应用润色";
-      clearSelectionRange();
     } else {
       document.getElementById("polishStatus").textContent = "找不到匹配的原文版本，请手动复制";
     }
@@ -545,10 +785,9 @@
 
   // --- Full document polish ---
   window.fullDocumentPolish = function() {
+    closePolishFloatCard();
     showPolishPanel();
-    // Clear any selected text
-    document.getElementById("polishBtn").dataset.selectedText = "";
-    document.getElementById("polishQuery").value = "Improve the overall academic quality, clarity, and flow of this document. Fix any grammar issues and enhance the writing style.";
+    document.getElementById("polishQuery").value = "";
     document.getElementById("polishQuery").focus();
   };
 

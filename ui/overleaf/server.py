@@ -730,7 +730,7 @@ def create_app() -> FastAPI:
 
 
         tt = tp.read_text("utf-8", errors="replace")
-        polish_query = q or ("请润色以下选中文本，保持 LaTeX 语法正确，表达更学术流畅。" if selected else q)
+        polish_query = q or ("润色下面这段文字" if selected else q)
         target_text = selected if selected else tt
         prompt = build_ghost_polish_prompt(
             query=polish_query,

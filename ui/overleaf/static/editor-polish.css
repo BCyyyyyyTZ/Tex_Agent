@@ -1,0 +1,208 @@
+/* Selection polish UI */
+
+.polish-selection-btn {
+  position: absolute;
+  z-index: 25;
+  padding: 3px 10px;
+  background: linear-gradient(180deg, #1177bb 0%, #0e639c 100%);
+  color: #fff;
+  border: 1px solid #094771;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+  display: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  transform: translateY(-2px);
+}
+.polish-selection-btn:hover {
+  background: linear-gradient(180deg, #1a8fd4 0%, #1177bb 100%);
+}
+
+.polish-float-card {
+  position: fixed;
+  width: 360px;
+  min-width: 300px;
+  max-width: min(440px, 92vw);
+  max-height: min(72vh, 540px);
+  background: #2d2d30;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10000;
+  color: #cccccc;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.polish-float-card.is-dragging {
+  opacity: 0.96;
+  cursor: grabbing;
+}
+
+.polish-float-card .card-head {
+  cursor: grab;
+  padding: 10px 12px;
+  background: #333337;
+  border-bottom: 1px solid #454545;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+.polish-float-card .card-head:active { cursor: grabbing; }
+.polish-float-card .card-head .card-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+.polish-float-card .card-head .card-drag {
+  color: #858585;
+  font-size: 14px;
+  letter-spacing: -2px;
+}
+.polish-float-card .card-close {
+  background: transparent;
+  border: none;
+  color: #858585;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.polish-float-card .card-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.polish-float-card .card-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  flex: 1;
+  background: #2d2d30;
+  font-size: 12px;
+}
+.polish-float-card .field { margin-bottom: 12px; }
+.polish-float-card .field-label {
+  display: block;
+  color: #9d9d9d;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.polish-float-card .selected-preview {
+  padding: 8px 10px;
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 80px;
+  overflow: auto;
+  color: #b5cea8;
+}
+.polish-float-card .query-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  color: #d4d4d4;
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.polish-float-card .query-input:focus {
+  outline: none;
+  border-color: #4fc1ff;
+  box-shadow: 0 0 0 2px rgba(79, 193, 255, 0.2);
+}
+.polish-float-card .btn-generate {
+  width: 100%;
+  margin-top: 2px;
+  padding: 8px 12px;
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+.polish-float-card .btn-generate:hover { background: #1177bb; }
+.polish-float-card .btn-generate:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.polish-float-card .card-status {
+  color: #858585;
+  font-size: 11px;
+  margin-top: 8px;
+  min-height: 16px;
+}
+.polish-float-card .result-block { display: none; margin-top: 4px; }
+.polish-float-card .result-block.visible { display: block; }
+.polish-float-card .advice-text {
+  padding: 8px 10px;
+  background: #3a3a1e;
+  border: 1px solid #5a5a2a;
+  border-radius: 6px;
+  color: #e6d27a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 12px;
+}
+.polish-float-card .result-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: 8px 10px;
+  background: #1a2f1a;
+  border: 1px solid #3c5c3c;
+  border-radius: 6px;
+  color: #d4d4d4;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.polish-float-card .result-textarea:focus {
+  outline: none;
+  border-color: #4caf50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.polish-float-card .card-actions {
+  padding: 10px 14px;
+  background: #333337;
+  border-top: 1px solid #454545;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.polish-float-card .card-actions button {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #454545;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  cursor: pointer;
+}
+.polish-float-card .card-actions button.primary {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #fff;
+  font-weight: 500;
+}
+.polish-float-card .card-actions button:hover { filter: brightness(1.1); }
+.polish-float-card .card-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
