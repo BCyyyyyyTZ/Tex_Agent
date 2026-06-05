@@ -46,13 +46,41 @@
     var img = qs(imgId);
     var dl = dlId ? qs(dlId) : null;
     if (!wrap || !img) return;
-    var bust = url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
-    img.src = bust;
-    if (dl) {
-      dl.href = bust;
-      dl.download = filename || "output.png";
-    }
+
+    // 先把结果区显示出来，但图片本身先隐藏，避免残缺占位符
     wrap.hidden = false;
+    img.style.opacity = "0";
+    img.style.transition = "opacity 0.25s ease";
+
+    // 加载指示条（skeleton）
+    var skeleton = wrap.querySelector(".img-loading-skeleton");
+    if (!skeleton) {
+      skeleton = document.createElement("div");
+      skeleton.className = "img-loading-skeleton";
+      wrap.insertBefore(skeleton, img);
+    }
+    skeleton.style.display = "";
+
+    var bust = url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+
+    img.onload = function () {
+      skeleton.style.display = "none";
+      img.style.opacity = "1";
+      if (dl) {
+        dl.href = bust;
+        dl.download = filename || "output.png";
+      }
+    };
+    img.onerror = function () {
+      skeleton.style.display = "none";
+      img.style.opacity = "0";
+      // 将 skeleton 变为错误提示
+      skeleton.style.display = "";
+      skeleton.textContent = "⚠ 图片加载失败，请重试";
+      skeleton.classList.add("img-loading-error");
+    };
+
+    img.src = bust;
   }
 
   function showTextOutput(preId, text) {

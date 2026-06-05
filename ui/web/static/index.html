@@ -11,20 +11,19 @@
     />
     <link rel="stylesheet" href="styles.css?v=settings-15" />
     <link rel="stylesheet" href="conferences_calendar.css?v=8" />
-    <link rel="stylesheet" href="drawing_tools.css?v=4" />
+    <link rel="stylesheet" href="drawing_tools.css?v=5" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
     <div class="app-layout" id="app-layout">
       <div class="layout-col layout-col--rag" id="col-rag">
-      <aside class="sidebar-rag" aria-label="RAG 管理">
-        <h2 class="sidebar-rag-title">RAG 管理</h2>
+      <aside class="sidebar-rag" aria-label="RAG 绠＄悊">
+        <h2 class="sidebar-rag-title">RAG 绠＄悊</h2>
         <p class="sidebar-rag-desc">
-          RAG库相关录入、查询、删除
-        </p>
+          RAG搴撶浉鍏冲綍鍏ャ€佹煡璇€佸垹闄?        </p>
 
         <section class="rag-block" id="rag-upload-block">
-          <h3 class="rag-block-title">录入</h3>
+          <h3 class="rag-block-title">褰曞叆</h3>
           <form id="rag-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
             <div class="right-upload-group">
               <input
@@ -32,48 +31,48 @@
                 id="rag-file"
                 name="file"
                 class="composer-file-input-native"
-                aria-label="选择要上传到 RAG 的文件"
+                aria-label="閫夋嫨瑕佷笂浼犲埌 RAG 鐨勬枃浠?
               />
               <label class="composer-file-btn composer-file-btn--compact" for="rag-file">
-                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
-                <span class="composer-file-btn__text">选择文件</span>
+                <span class="composer-file-btn__icon" aria-hidden="true">馃搸</span>
+                <span class="composer-file-btn__text">閫夋嫨鏂囦欢</span>
               </label>
-              <button type="submit" class="btn-secondary btn-upload-tight">上传并入库</button>
+              <button type="submit" class="btn-secondary btn-upload-tight">涓婁紶骞跺叆搴?/button>
             </div>
             <label class="rag-inline-label">
-              Source（可选）
-              <input type="text" id="rag-source" class="branch-input" placeholder="默认使用文件名" />
+              Source锛堝彲閫夛級
+              <input type="text" id="rag-source" class="branch-input" placeholder="榛樿浣跨敤鏂囦欢鍚? />
             </label>
             <label class="rag-inline-label">
-              metadata JSON（可选）
-              <textarea id="rag-metadata-json" rows="1" class="wf-ta wf-ta--compact-json" placeholder='例如: {"tag":"intro","author":"alice"}'></textarea>
+              metadata JSON锛堝彲閫夛級
+              <textarea id="rag-metadata-json" rows="1" class="wf-ta wf-ta--compact-json" placeholder='渚嬪: {"tag":"intro","author":"alice"}'></textarea>
             </label>
           </form>
           <div class="rag-pending-row">
             <p id="rag-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
-            <button type="button" id="rag-clear-file-btn" class="btn-tiny rag-clear-file-btn" title="取消当前已选文件" aria-label="取消当前已选文件">-</button>
+            <button type="button" id="rag-clear-file-btn" class="btn-tiny rag-clear-file-btn" title="鍙栨秷褰撳墠宸查€夋枃浠? aria-label="鍙栨秷褰撳墠宸查€夋枃浠?>-</button>
           </div>
           <p id="rag-upload-status" class="asset-panel-status" role="status"></p>
         </section>
 
         <section class="rag-block" id="rag-delete-block">
-          <h3 class="rag-block-title">删除</h3>
+          <h3 class="rag-block-title">鍒犻櫎</h3>
           <form id="rag-delete-id-form" class="rag-query-form" autocomplete="off">
             <div class="rag-query-row">
               <label class="rag-inline-label rag-inline-label--small">
-                按记录 ID 删除
-                <input type="text" id="rag-delete-id-input" class="branch-input" placeholder="输入完整记录 id" />
+                鎸夎褰?ID 鍒犻櫎
+                <input type="text" id="rag-delete-id-input" class="branch-input" placeholder="杈撳叆瀹屾暣璁板綍 id" />
               </label>
-              <button type="submit" class="btn-secondary btn-rag-del">按 ID 删除</button>
+              <button type="submit" class="btn-secondary btn-rag-del">鎸?ID 鍒犻櫎</button>
             </div>
           </form>
           <form id="rag-delete-source-form" class="rag-query-form" autocomplete="off">
             <div class="rag-query-row">
               <label class="rag-inline-label rag-inline-label--small">
-                按 source 删除全部
-                <input type="text" id="rag-delete-source-input" class="branch-input" placeholder="输入 source 值" />
+                鎸?source 鍒犻櫎鍏ㄩ儴
+                <input type="text" id="rag-delete-source-input" class="branch-input" placeholder="杈撳叆 source 鍊? />
               </label>
-              <button type="submit" class="btn-secondary btn-rag-del">按 source 删除</button>
+              <button type="submit" class="btn-secondary btn-rag-del">鎸?source 鍒犻櫎</button>
             </div>
           </form>
           <p id="rag-delete-status" class="asset-panel-status" role="status"></p>
@@ -81,38 +80,36 @@
 
         <section class="rag-block rag-block--query" id="rag-query-block">
           <div class="rag-block-head">
-            <h3 class="rag-block-title">查询</h3>
-            <button type="submit" form="rag-query-form" class="btn-secondary btn-rag-run">执行查询</button>
+            <h3 class="rag-block-title">鏌ヨ</h3>
+            <button type="submit" form="rag-query-form" class="btn-secondary btn-rag-run">鎵ц鏌ヨ</button>
           </div>
           <form id="rag-query-form" class="rag-query-form" autocomplete="off">
             <div class="rag-query-row">
               <label class="rag-inline-label rag-inline-label--small">
-                查询方式
+                鏌ヨ鏂瑰紡
                 <select id="rag-query-mode" class="branch-select">
-                  <option value="semantic" selected>语义查询（Top-K）</option>
-                  <option value="metadata">按 Metadata 查询</option>
+                  <option value="semantic" selected>璇箟鏌ヨ锛圱op-K锛?/option>
+                  <option value="metadata">鎸?Metadata 鏌ヨ</option>
                 </select>
               </label>
             </div>
             <div class="rag-query-row rag-query-row--main">
               <label class="rag-inline-label rag-inline-label--query" id="rag-query-text-wrap">
-                查询文本
-                <textarea id="rag-query-input" rows="1" class="wf-ta wf-ta--query-one-line" placeholder="输入检索问题..."></textarea>
+                鏌ヨ鏂囨湰
+                <textarea id="rag-query-input" rows="1" class="wf-ta wf-ta--query-one-line" placeholder="杈撳叆妫€绱㈤棶棰?.."></textarea>
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-top-k-wrap">
                 Top-K
                 <input type="number" id="rag-top-k" class="branch-input" min="1" max="20" value="5" />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-meta-key-wrap">
-                字段名
-                <input type="text" id="rag-meta-key" class="branch-input" placeholder="如 source / tag" />
+                瀛楁鍚?                <input type="text" id="rag-meta-key" class="branch-input" placeholder="濡?source / tag" />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-meta-value-wrap">
-                字段值（可空）
-                <input type="text" id="rag-meta-value" class="branch-input" placeholder="可留空仅按字段筛选" />
+                瀛楁鍊硷紙鍙┖锛?                <input type="text" id="rag-meta-value" class="branch-input" placeholder="鍙暀绌轰粎鎸夊瓧娈电瓫閫? />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-record-limit-wrap">
-                条数
+                鏉℃暟
                 <input type="number" id="rag-record-limit" class="branch-input" min="1" max="50" value="20" />
               </label>
             </div>
@@ -123,90 +120,89 @@
       </aside>
       </div>
 
-      <div class="layout-gutter" id="gutter-right-rag" title="拖动调整列宽" role="separator" aria-label="调整 RAG 与工作流列之间宽度"></div>
+      <div class="layout-gutter" id="gutter-right-rag" title="鎷栧姩璋冩暣鍒楀" role="separator" aria-label="璋冩暣 RAG 涓庡伐浣滄祦鍒椾箣闂村搴?></div>
 
       <div class="layout-col layout-col--wf" id="col-wf">
-      <aside class="sidebar-wf" aria-label="工作流编排">
-        <h2 class="sidebar-wf-title">工作流</h2>
+      <aside class="sidebar-wf" aria-label="宸ヤ綔娴佺紪鎺?>
+        <h2 class="sidebar-wf-title">宸ヤ綔娴?/h2>
         <p class="sidebar-wf-desc">
-          节点<strong>上绿点</strong>输入、<strong>下蓝点</strong>输出：从下点拖线到另一节点上点松开成边。<strong>拖动矩形</strong>调整位置（会随保存写入草稿）。单击矩形编辑；悬停显示删除。
-        </p>
+          鑺傜偣<strong>涓婄豢鐐?/strong>杈撳叆銆?strong>涓嬭摑鐐?/strong>杈撳嚭锛氫粠涓嬬偣鎷栫嚎鍒板彟涓€鑺傜偣涓婄偣鏉惧紑鎴愯竟銆?strong>鎷栧姩鐭╁舰</strong>璋冩暣浣嶇疆锛堜細闅忎繚瀛樺啓鍏ヨ崏绋匡級銆傚崟鍑荤煩褰㈢紪杈戯紱鎮仠鏄剧ず鍒犻櫎銆?        </p>
         <div class="wf-body">
-          <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
+          <div id="wf-preview" class="wf-preview" role="img" aria-label="宸ヤ綔娴佺缉鐣ュ浘"></div>
 
-          <!-- Agent 添加板块 -->
+          <!-- Agent 娣诲姞鏉垮潡 -->
           <div class="wf-add-panel">
-            <div class="wf-panel-title">添加 Agent 节点</div>
+            <div class="wf-panel-title">娣诲姞 Agent 鑺傜偣</div>
             <div class="wf-panel-form">
-              <label>节点 ID <input type="text" id="agent-id" class="branch-input" value="analyze_abstract" placeholder="analyze_abstract"></label>
+              <label>鑺傜偣 ID <input type="text" id="agent-id" class="branch-input" value="analyze_abstract" placeholder="analyze_abstract"></label>
               <label>System Prompt
-                <textarea id="agent-prompt" rows="3" class="wf-ta" placeholder="你是论文摘要检查专家..."></textarea>
+                <textarea id="agent-prompt" rows="3" class="wf-ta" placeholder="浣犳槸璁烘枃鎽樿妫€鏌ヤ笓瀹?.."></textarea>
               </label>
-              <button type="button" class="btn-primary" id="add-agent-btn">添加 Agent 节点</button>
+              <button type="button" class="btn-primary" id="add-agent-btn">娣诲姞 Agent 鑺傜偣</button>
             </div>
           </div>
 
-          <!-- Tool 添加板块：仅选已注册工具 -->
+          <!-- Tool 娣诲姞鏉垮潡锛氫粎閫夊凡娉ㄥ唽宸ュ叿 -->
           <div class="wf-add-panel">
-            <div class="wf-panel-title">添加 Tool 节点</div>
+            <div class="wf-panel-title">娣诲姞 Tool 鑺傜偣</div>
             <div class="wf-panel-form">
-              <label>节点 ID（可留空，默认与工具名相同）
-                <input type="text" id="tool-node-id" class="branch-input" placeholder="留空则用工具名" />
+              <label>鑺傜偣 ID锛堝彲鐣欑┖锛岄粯璁や笌宸ュ叿鍚嶇浉鍚岋級
+                <input type="text" id="tool-node-id" class="branch-input" placeholder="鐣欑┖鍒欑敤宸ュ叿鍚? />
               </label>
-              <label>选择工具
-                <select id="tool-select" class="branch-input wf-tool-select" title="来自服务端已注册工具"></select>
+              <label>閫夋嫨宸ュ叿
+                <select id="tool-select" class="branch-input wf-tool-select" title="鏉ヨ嚜鏈嶅姟绔凡娉ㄥ唽宸ュ叿"></select>
               </label>
-              <button type="button" class="btn-primary" id="add-tool-btn">添加 Tool 节点</button>
+              <button type="button" class="btn-primary" id="add-tool-btn">娣诲姞 Tool 鑺傜偣</button>
             </div>
           </div>
         </div>
         <div class="wf-footer">
           <form id="wf-form-save" class="wf-form-save">
-            <button type="submit" class="btn-primary wf-save">保存到服务器</button>
+            <button type="submit" class="btn-primary wf-save">淇濆瓨鍒版湇鍔″櫒</button>
           </form>
           <p id="wf-status" class="wf-status" role="status"></p>
         </div>
       </aside>
       </div>
 
-      <div class="layout-gutter" id="gutter-wf-branch" title="拖动调整列宽" role="separator" aria-label="调整工作流与分支列之间宽度"></div>
+      <div class="layout-gutter" id="gutter-wf-branch" title="鎷栧姩璋冩暣鍒楀" role="separator" aria-label="璋冩暣宸ヤ綔娴佷笌鍒嗘敮鍒椾箣闂村搴?></div>
 
       <div class="layout-col layout-col--branch" id="col-branch">
-      <aside class="sidebar-branch" aria-label="对话分支树">
+      <aside class="sidebar-branch" aria-label="瀵硅瘽鍒嗘敮鏍?>
         <section class="branch-panel" id="branch-panel">
           <div class="branch-panel-head">
-            <h2 class="branch-panel-title">分支</h2>
-            <span class="branch-current" id="branch-current-lbl">当前分支: main</span>
+            <h2 class="branch-panel-title">鍒嗘敮</h2>
+            <span class="branch-current" id="branch-current-lbl">褰撳墠鍒嗘敮: main</span>
           </div>
-          <p class="branch-panel-hint">节点由上到下为自父到子；连线表示从父分支切出。点击节点可切换；新建子分支会复制父分支记忆与历史。</p>
-          <div id="branch-graph" class="branch-graph" role="img" aria-label="分支继承图"></div>
+          <p class="branch-panel-hint">鑺傜偣鐢变笂鍒颁笅涓鸿嚜鐖跺埌瀛愶紱杩炵嚎琛ㄧず浠庣埗鍒嗘敮鍒囧嚭銆傜偣鍑昏妭鐐瑰彲鍒囨崲锛涙柊寤哄瓙鍒嗘敮浼氬鍒剁埗鍒嗘敮璁板繂涓庡巻鍙层€?/p>
+          <div id="branch-graph" class="branch-graph" role="img" aria-label="鍒嗘敮缁ф壙鍥?></div>
           <p id="branch-panel-status" class="branch-panel-status" role="status"></p>
           <form id="branch-new-form" class="branch-new-form" autocomplete="off">
             <label class="branch-new-name-wrap">
-              <span class="label">新分支</span>
+              <span class="label">鏂板垎鏀?/span>
               <input
                 type="text"
                 id="branch-new-name"
                 class="branch-input"
                 pattern="[a-zA-Z0-9_-]+"
-                placeholder="如 experiment-1"
+                placeholder="濡?experiment-1"
                 maxlength="64"
-                title="字母、数字、下划线、连字符"
+                title="瀛楁瘝銆佹暟瀛椼€佷笅鍒掔嚎銆佽繛瀛楃"
               />
             </label>
             <label class="branch-new-from-wrap">
-              <span class="label">从</span>
-              <select id="branch-new-from" class="branch-select" title="作为父节点">
+              <span class="label">浠?/span>
+              <select id="branch-new-from" class="branch-select" title="浣滀负鐖惰妭鐐?>
                 <option value="main">main</option>
               </select>
             </label>
-            <button type="submit" class="btn-secondary">新建子分支</button>
+            <button type="submit" class="btn-secondary">鏂板缓瀛愬垎鏀?/button>
           </form>
         </section>
       </aside>
       </div>
 
-      <div class="layout-gutter" id="gutter-branch-main" title="拖动调整列宽" role="separator" aria-label="调整分支与聊天区之间宽度"></div>
+      <div class="layout-gutter" id="gutter-branch-main" title="鎷栧姩璋冩暣鍒楀" role="separator" aria-label="璋冩暣鍒嗘敮涓庤亰澶╁尯涔嬮棿瀹藉害"></div>
 
       <div class="layout-col layout-col--main" id="col-main">
       <div class="app main-col">
@@ -215,39 +211,39 @@
             <span class="logo" aria-hidden="true">T</span>
             <div>
               <h1>TeX Agent</h1>
-              <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
+              <p class="tagline">璁烘枃鍐欎綔鏅鸿兘浣?路 涓?CLI 鍏变韩浼氳瘽涓庡伐浣滄祦</p>
             </div>
             <button
               type="button"
               class="conf-cal-brand-btn"
               data-conf-cal-open
-              title="顶会投稿倒计时（未来一年，静态数据）"
+              title="椤朵細鎶曠鍊掕鏃讹紙鏈潵涓€骞达紝闈欐€佹暟鎹級"
               aria-haspopup="dialog"
             >
-              ◈ 顶会日历
+              鈼?椤朵細鏃ュ巻
             </button>
           </div>
-          <div class="header-actions" role="toolbar" aria-label="工作流与布局">
+          <div class="header-actions" role="toolbar" aria-label="宸ヤ綔娴佷笌甯冨眬">
             <label class="select-wrap select-wrap--header" id="workflow-select-wrap">
-              <span class="label">工作流</span>
-              <select id="workflow-select" title="已注册或左侧自定义">
-                <option value="__web__" selected>自定义（左侧编排）</option>
-                <option value="default">default（模板）</option>
+              <span class="label">宸ヤ綔娴?/span>
+              <select id="workflow-select" title="宸叉敞鍐屾垨宸︿晶鑷畾涔?>
+                <option value="__web__" selected>鑷畾涔夛紙宸︿晶缂栨帓锛?/option>
+                <option value="default">default锛堟ā鏉匡級</option>
               </select>
             </label>
             <label class="select-wrap select-wrap--header">
-              <span class="label">模式</span>
-              <select id="mode" title="执行模式">
-                <option value="auto" selected>auto（单节点直连，默认）</option>
-                <option value="task">task（注册表工作流）</option>
-                <option value="plan">plan（动态规划，较慢）</option>
+              <span class="label">妯″紡</span>
+              <select id="mode" title="鎵ц妯″紡">
+                <option value="auto" selected>auto锛堝崟鑺傜偣鐩磋繛锛岄粯璁わ級</option>
+                <option value="task">task锛堟敞鍐岃〃宸ヤ綔娴侊級</option>
+                <option value="plan">plan锛堝姩鎬佽鍒掞紝杈冩參锛?/option>
               </select>
             </label>
             <div
               class="panel-toggles"
               id="panel-toggles"
               role="group"
-              aria-label="侧栏开关"
+              aria-label="渚ф爮寮€鍏?
             >
               <button
                 type="button"
@@ -272,44 +268,44 @@
                 class="panel-toggle is-active"
                 data-panel="wf"
                 aria-pressed="true"
-                aria-label="工作流"
-                title="工作流"
+                aria-label="宸ヤ綔娴?
+                title="宸ヤ綔娴?
               >
-                <span class="panel-toggle__icon" aria-hidden="true">◫</span>
-                <span class="panel-toggle__tip">工作流</span>
+                <span class="panel-toggle__icon" aria-hidden="true">鈼?/span>
+                <span class="panel-toggle__tip">宸ヤ綔娴?/span>
               </button>
               <button
                 type="button"
                 class="panel-toggle is-active"
                 data-panel="branch"
                 aria-pressed="true"
-                aria-label="分支"
-                title="分支"
+                aria-label="鍒嗘敮"
+                title="鍒嗘敮"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">⑂</span>
-                <span class="panel-toggle__tip">分支</span>
+                <span class="panel-toggle__icon" aria-hidden="true">鈶?/span>
+                <span class="panel-toggle__tip">鍒嗘敮</span>
               </button>
               <button
                 type="button"
                 class="panel-toggle is-active"
                 data-panel="right"
                 aria-pressed="true"
-                aria-label="资料"
-                title="资料"
+                aria-label="璧勬枡"
+                title="璧勬枡"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">⊞</span>
-                <span class="panel-toggle__tip">资料</span>
+                <span class="panel-toggle__icon" aria-hidden="true">鈯?/span>
+                <span class="panel-toggle__tip">璧勬枡</span>
               </button>
               <button
                 type="button"
                 class="panel-toggle panel-toggle--tools"
                 id="drawing-tools-open"
                 data-drawing-tools-open
-                aria-label="工具"
-                title="工具"
+                aria-label="宸ュ叿"
+                title="宸ュ叿"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">✎</span>
-                <span class="panel-toggle__tip">工具</span>
+                <span class="panel-toggle__icon" aria-hidden="true">鉁?/span>
+                <span class="panel-toggle__tip">宸ュ叿</span>
               </button>
             </div>
             <button
@@ -317,47 +313,47 @@
               id="user-settings-trigger"
               class="header-settings-btn"
               data-user-settings-open
-              title="用户设置"
+              title="鐢ㄦ埛璁剧疆"
               aria-haspopup="dialog"
               onclick="window.TexAgentSettings && window.TexAgentSettings.open && window.TexAgentSettings.open()"
             >
               <span class="header-settings-btn__orb" aria-hidden="true"></span>
-              <span>设置</span>
+              <span>璁剧疆</span>
             </button>
           </div>
         </header>
 
         <main class="chat" id="chat" role="presentation">
-          <!-- 滚动只发生在内层，避免滚动条让本列与顶/底栏产生宽度差 -->
+          <!-- 婊氬姩鍙彂鐢熷湪鍐呭眰锛岄伩鍏嶆粴鍔ㄦ潯璁╂湰鍒椾笌椤?搴曟爮浜х敓瀹藉害宸?-->
           <div class="chat-scroll" id="chat-scroll" aria-live="polite">
             <div id="chat-empty" class="chat-empty" role="status">
-              <p class="chat-empty-title">开始与 TeX Agent 对话</p>
-              <p class="chat-empty-desc">回复为工作流<strong>最终节点</strong>文本，按 Markdown 渲染；代码块需指定语言以高亮。</p>
+              <p class="chat-empty-title">寮€濮嬩笌 TeX Agent 瀵硅瘽</p>
+              <p class="chat-empty-desc">鍥炲涓哄伐浣滄祦<strong>鏈€缁堣妭鐐?/strong>鏂囨湰锛屾寜 Markdown 娓叉煋锛涗唬鐮佸潡闇€鎸囧畾璇█浠ラ珮浜€?/p>
             </div>
           </div>
         </main>
 
         <footer class="composer">
           <form id="form" class="form">
-            <div class="composer-upload-row" aria-label="本地上传">
+            <div class="composer-upload-row" aria-label="鏈湴涓婁紶">
               <div class="composer-upload-group">
                 <input
                   type="file"
                   id="composer-file"
                   class="composer-file-input-native"
-                  aria-label="选择要上传的文件"
+                  aria-label="閫夋嫨瑕佷笂浼犵殑鏂囦欢"
                 />
                 <label class="composer-file-btn" for="composer-file">
-                  <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
-                  <span class="composer-file-btn__text">选择文件</span>
+                  <span class="composer-file-btn__icon" aria-hidden="true">馃搸</span>
+                  <span class="composer-file-btn__text">閫夋嫨鏂囦欢</span>
                 </label>
-                <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
+                <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">涓婁紶</button>
                 <button
                   type="button"
                   id="composer-clear-file-btn"
                   class="btn-tiny file-clear-btn"
-                  title="取消当前已选文件"
-                  aria-label="取消当前已选文件"
+                  title="鍙栨秷褰撳墠宸查€夋枃浠?
+                  aria-label="鍙栨秷褰撳墠宸查€夋枃浠?
                 >
                   -
                 </button>
@@ -368,31 +364,30 @@
             <textarea
               id="input"
               rows="5"
-              placeholder="输入需求...（支持 Markdown 回复渲染）"
+              placeholder="杈撳叆闇€姹?..锛堟敮鎸?Markdown 鍥炲娓叉煋锛?
               spellcheck="false"
             ></textarea>
             <div class="form-footer">
-              <ul class="composer-hints" aria-label="操作提示">
-                <li><kbd>Enter</kbd> 发送，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</li>
-                <li>PDF / 文档：在上方选择文件并上传；右侧资料可勾选后附带路径</li>
-                <li>工作流：顶栏选择；改左侧编排后请点击「保存到服务器」</li>
-                <li>顶栏可显隐侧栏；拖动列间竖线调节宽度</li>
+              <ul class="composer-hints" aria-label="鎿嶄綔鎻愮ず">
+                <li><kbd>Enter</kbd> 鍙戦€侊紝<kbd>Shift</kbd>+<kbd>Enter</kbd> 鎹㈣</li>
+                <li>PDF / 鏂囨。锛氬湪涓婃柟閫夋嫨鏂囦欢骞朵笂浼狅紱鍙充晶璧勬枡鍙嬀閫夊悗闄勫甫璺緞</li>
+                <li>宸ヤ綔娴侊細椤舵爮閫夋嫨锛涙敼宸︿晶缂栨帓鍚庤鐐瑰嚮銆屼繚瀛樺埌鏈嶅姟鍣ㄣ€?/li>
+                <li>椤舵爮鍙樉闅愪晶鏍忥紱鎷栧姩鍒楅棿绔栫嚎璋冭妭瀹藉害</li>
               </ul>
-              <button type="submit" id="send" class="btn-primary">发送</button>
+              <button type="submit" id="send" class="btn-primary">鍙戦€?/button>
             </div>
           </form>
         </footer>
       </div>
       </div>
 
-      <div class="layout-gutter" id="gutter-main-right" title="拖动调整列宽" role="separator" aria-label="调整聊天与右侧资料列之间宽度"></div>
+      <div class="layout-gutter" id="gutter-main-right" title="鎷栧姩璋冩暣鍒楀" role="separator" aria-label="璋冩暣鑱婂ぉ涓庡彸渚ц祫鏂欏垪涔嬮棿瀹藉害"></div>
 
       <div class="layout-col layout-col--right" id="col-right">
-      <aside class="sidebar-right" aria-label="选用资料与已上传列表">
-        <h2 class="sidebar-right-title">选用资料</h2>
+      <aside class="sidebar-right" aria-label="閫夌敤璧勬枡涓庡凡涓婁紶鍒楄〃">
+        <h2 class="sidebar-right-title">閫夌敤璧勬枡</h2>
         <p class="sidebar-right-desc">
-          勾选仅表示<strong>当前对话</strong>要把对应路径注在消息前。Skill / Checklist 可在此区上传多份，按需勾选。
-        </p>
+          鍕鹃€変粎琛ㄧず<strong>褰撳墠瀵硅瘽</strong>瑕佹妸瀵瑰簲璺緞娉ㄥ湪娑堟伅鍓嶃€係kill / Checklist 鍙湪姝ゅ尯涓婁紶澶氫唤锛屾寜闇€鍕鹃€夈€?        </p>
         <div class="right-asset-block" id="skill-block">
           <h3 class="right-asset-title">Skills</h3>
           <form id="skill-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
@@ -402,13 +397,13 @@
                 id="skill-file"
                 name="file"
                 class="composer-file-input-native"
-                aria-label="选择要上传的 Skill 文件"
+                aria-label="閫夋嫨瑕佷笂浼犵殑 Skill 鏂囦欢"
               />
               <label class="composer-file-btn composer-file-btn--compact" for="skill-file">
-                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
-                <span class="composer-file-btn__text">选择文件</span>
+                <span class="composer-file-btn__icon" aria-hidden="true">馃搸</span>
+                <span class="composer-file-btn__text">閫夋嫨鏂囦欢</span>
               </label>
-              <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
+              <button type="submit" class="btn-secondary btn-upload-tight">涓婁紶</button>
             </div>
           </form>
           <div class="file-pending-row file-pending-row--right">
@@ -417,8 +412,8 @@
               type="button"
               id="skill-clear-file-btn"
               class="btn-tiny file-clear-btn"
-              title="取消当前已选文件"
-              aria-label="取消当前已选文件"
+              title="鍙栨秷褰撳墠宸查€夋枃浠?
+              aria-label="鍙栨秷褰撳墠宸查€夋枃浠?
             >
               -
             </button>
@@ -435,13 +430,13 @@
                 id="checklist-file"
                 name="file"
                 class="composer-file-input-native"
-                aria-label="选择要上传的 Checklist 文件"
+                aria-label="閫夋嫨瑕佷笂浼犵殑 Checklist 鏂囦欢"
               />
               <label class="composer-file-btn composer-file-btn--compact" for="checklist-file">
-                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
-                <span class="composer-file-btn__text">选择文件</span>
+                <span class="composer-file-btn__icon" aria-hidden="true">馃搸</span>
+                <span class="composer-file-btn__text">閫夋嫨鏂囦欢</span>
               </label>
-              <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
+              <button type="submit" class="btn-secondary btn-upload-tight">涓婁紶</button>
             </div>
           </form>
           <div class="file-pending-row file-pending-row--right">
@@ -450,8 +445,8 @@
               type="button"
               id="checklist-clear-file-btn"
               class="btn-tiny file-clear-btn"
-              title="取消当前已选文件"
-              aria-label="取消当前已选文件"
+              title="鍙栨秷褰撳墠宸查€夋枃浠?
+              aria-label="鍙栨秷褰撳墠宸查€夋枃浠?
             >
               -
             </button>
@@ -460,11 +455,10 @@
           <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
         </div>
 
-        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="服务器已存储的全部上传文件">
-          <h3 class="uploaded-files-title">已上传文件（汇总）</h3>
+        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="鏈嶅姟鍣ㄥ凡瀛樺偍鐨勫叏閮ㄤ笂浼犳枃浠?>
+          <h3 class="uploaded-files-title">宸蹭笂浼犳枃浠讹紙姹囨€伙級</h3>
           <p class="uploaded-files-desc">
-            含底部上传的 PDF/文档与右侧 Skill、Checklist；勾选后发送时会附带路径。
-          </p>
+            鍚簳閮ㄤ笂浼犵殑 PDF/鏂囨。涓庡彸渚?Skill銆丆hecklist锛涘嬀閫夊悗鍙戦€佹椂浼氶檮甯﹁矾寰勩€?          </p>
           <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
         </div>
@@ -486,11 +480,11 @@
         <header class="conf-cal-head">
           <div>
             <h2 id="conf-cal-title" class="conf-cal-title">CONFERENCE DEADLINE RADAR</h2>
-            <p class="conf-cal-sub">2026–2027 · 静态参考 · 请以官网为准</p>
+            <p class="conf-cal-sub">2026鈥?027 路 闈欐€佸弬鑰?路 璇蜂互瀹樼綉涓哄噯</p>
           </div>
-          <button type="button" id="conf-cal-close" class="conf-cal-close" aria-label="关闭日历">×</button>
+          <button type="button" id="conf-cal-close" class="conf-cal-close" aria-label="鍏抽棴鏃ュ巻">脳</button>
         </header>
-        <div id="conf-cal-filters" class="conf-cal-filters" role="group" aria-label="研究领域筛选"></div>
+        <div id="conf-cal-filters" class="conf-cal-filters" role="group" aria-label="鐮旂┒棰嗗煙绛涢€?></div>
         <p id="conf-cal-status" class="conf-cal-status" role="status"></p>
         <div id="conf-cal-list" class="conf-cal-body" aria-live="polite"></div>
       </div>
@@ -507,51 +501,51 @@
       <div class="settings-panel">
         <header class="settings-head">
           <div>
-            <h2 id="user-settings-title" class="settings-title">用户设置</h2>
-            <p class="settings-sub">本地保存，仅影响当前浏览器</p>
+            <h2 id="user-settings-title" class="settings-title">鐢ㄦ埛璁剧疆</h2>
+            <p class="settings-sub">鏈湴淇濆瓨锛屼粎褰卞搷褰撳墠娴忚鍣?/p>
           </div>
-          <button type="button" id="user-settings-close" class="settings-close" aria-label="关闭设置">×</button>
+          <button type="button" id="user-settings-close" class="settings-close" aria-label="鍏抽棴璁剧疆">脳</button>
         </header>
 
         <section class="settings-section">
-          <h3 class="settings-section-title">主题色</h3>
-          <div id="settings-theme-list" class="settings-theme-list" aria-label="选择主题色"></div>
+          <h3 class="settings-section-title">涓婚鑹?/h3>
+          <div id="settings-theme-list" class="settings-theme-list" aria-label="閫夋嫨涓婚鑹?></div>
         </section>
 
         <section class="settings-section">
-          <h3 class="settings-section-title">界面图案</h3>
-          <div id="settings-pattern-list" class="settings-theme-list" aria-label="选择界面图案"></div>
+          <h3 class="settings-section-title">鐣岄潰鍥炬</h3>
+          <div id="settings-pattern-list" class="settings-theme-list" aria-label="閫夋嫨鐣岄潰鍥炬"></div>
         </section>
 
         <section class="settings-section">
-          <h3 class="settings-section-title">用户资料</h3>
+          <h3 class="settings-section-title">鐢ㄦ埛璧勬枡</h3>
           <div class="settings-grid">
             <label class="settings-field">
-              <span>昵称</span>
-              <input id="settings-display-name" type="text" placeholder="例如 yulin" />
+              <span>鏄电О</span>
+              <input id="settings-display-name" type="text" placeholder="渚嬪 yulin" />
             </label>
             <label class="settings-field">
-              <span>机构 / 团队</span>
-              <input id="settings-affiliation" type="text" placeholder="例如 Lab / University" />
+              <span>鏈烘瀯 / 鍥㈤槦</span>
+              <input id="settings-affiliation" type="text" placeholder="渚嬪 Lab / University" />
             </label>
             <label class="settings-field">
-              <span>研究方向</span>
-              <input id="settings-research-fields" type="text" placeholder="例如 NLP, Systems, Networking" />
+              <span>鐮旂┒鏂瑰悜</span>
+              <input id="settings-research-fields" type="text" placeholder="渚嬪 NLP, Systems, Networking" />
             </label>
             <label class="settings-field">
-              <span>个人主页</span>
+              <span>涓汉涓婚〉</span>
               <input id="settings-homepage" type="url" placeholder="https://..." />
             </label>
             <label class="settings-field settings-field--wide">
-              <span>备注</span>
-              <textarea id="settings-note" rows="3" placeholder="只保存在本地，可记录偏好或常用背景"></textarea>
+              <span>澶囨敞</span>
+              <textarea id="settings-note" rows="3" placeholder="鍙繚瀛樺湪鏈湴锛屽彲璁板綍鍋忓ソ鎴栧父鐢ㄨ儗鏅?></textarea>
             </label>
           </div>
         </section>
 
         <footer class="settings-actions">
-          <button type="button" id="user-settings-reset" class="btn-secondary">恢复默认</button>
-          <button type="button" id="user-settings-save" class="btn-primary">保存设置</button>
+          <button type="button" id="user-settings-reset" class="btn-secondary">鎭㈠榛樿</button>
+          <button type="button" id="user-settings-save" class="btn-primary">淇濆瓨璁剧疆</button>
         </footer>
       </div>
     </div>
@@ -567,19 +561,19 @@
       <div class="drawing-tools-panel">
         <header class="drawing-tools-head">
           <div>
-            <h2 id="drawing-tools-title" class="drawing-tools-title">工具箱</h2>
+            <h2 id="drawing-tools-title" class="drawing-tools-title">宸ュ叿绠?/h2>
           </div>
-          <button type="button" id="drawing-tools-close" class="drawing-tools-close" aria-label="关闭">×</button>
+          <button type="button" id="drawing-tools-close" class="drawing-tools-close" aria-label="鍏抽棴">脳</button>
         </header>
 
-        <div class="drawing-tools-tabs" role="tablist" aria-label="工具类型">
-          <button type="button" class="drawing-tools-tab is-active" data-tab="chart" role="tab" aria-selected="true">统计图表</button>
-          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">概念图</button>
-          <button type="button" class="drawing-tools-tab" data-tab="latex" role="tab" aria-selected="false">LaTeX 表格</button>
-          <button type="button" class="drawing-tools-tab" data-tab="palette" role="tab" aria-selected="false">配色</button>
-          <button type="button" class="drawing-tools-tab" data-tab="text" role="tab" aria-selected="false">文本统计</button>
-          <button type="button" class="drawing-tools-tab" data-tab="title" role="tab" aria-selected="false">标题生成</button>
-          <button type="button" class="drawing-tools-tab" data-tab="qrcode" role="tab" aria-selected="false">QR 码</button>
+        <div class="drawing-tools-tabs" role="tablist" aria-label="宸ュ叿绫诲瀷">
+          <button type="button" class="drawing-tools-tab is-active" data-tab="chart" role="tab" aria-selected="true">缁熻鍥捐〃</button>
+          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">姒傚康鍥?/button>
+          <button type="button" class="drawing-tools-tab" data-tab="latex" role="tab" aria-selected="false">LaTeX 琛ㄦ牸</button>
+          <button type="button" class="drawing-tools-tab" data-tab="palette" role="tab" aria-selected="false">閰嶈壊</button>
+          <button type="button" class="drawing-tools-tab" data-tab="text" role="tab" aria-selected="false">鏂囨湰缁熻</button>
+          <button type="button" class="drawing-tools-tab" data-tab="title" role="tab" aria-selected="false">鏍囬鐢熸垚</button>
+          <button type="button" class="drawing-tools-tab" data-tab="qrcode" role="tab" aria-selected="false">QR 鐮?/button>
         </div>
 
         <div class="drawing-tools-body">
@@ -587,104 +581,104 @@
             <form id="chart-plot-form" class="drawing-form" autocomplete="off">
               <div class="drawing-form-grid">
                 <label class="drawing-field">
-                  <span>图表类型</span>
+                  <span>鍥捐〃绫诲瀷</span>
                   <select id="chart-type" class="branch-select">
-                    <option value="bar">柱状图 (bar)</option>
-                    <option value="line">折线图 (line)</option>
-                    <option value="pie">饼状图 (pie)</option>
+                    <option value="bar">鏌辩姸鍥?(bar)</option>
+                    <option value="line">鎶樼嚎鍥?(line)</option>
+                    <option value="pie">楗肩姸鍥?(pie)</option>
                   </select>
                 </label>
                 <label class="drawing-field">
-                  <span>标题</span>
-                  <input type="text" id="chart-title" class="branch-input" placeholder="可选" />
+                  <span>鏍囬</span>
+                  <input type="text" id="chart-title" class="branch-input" placeholder="鍙€? />
                 </label>
                 <label class="drawing-field">
-                  <span>X 轴标签</span>
-                  <input type="text" id="chart-x-label" class="branch-input" placeholder="可选" />
+                  <span>X 杞存爣绛?/span>
+                  <input type="text" id="chart-x-label" class="branch-input" placeholder="鍙€? />
                 </label>
                 <label class="drawing-field">
-                  <span>Y 轴标签</span>
-                  <input type="text" id="chart-y-label" class="branch-input" placeholder="可选" />
+                  <span>Y 杞存爣绛?/span>
+                  <input type="text" id="chart-y-label" class="branch-input" placeholder="鍙€? />
                 </label>
               </div>
               <label class="drawing-field drawing-field--wide">
-                <span>数据 JSON</span>
+                <span>鏁版嵁 JSON</span>
                 <textarea id="chart-data-json" rows="6" class="wf-ta" spellcheck="false">{"x": ["A", "B", "C"], "y": [3, 5, 2]}</textarea>
               </label>
-              <p class="drawing-hint">bar/line 支持 <code>{"x":[],"y":[]}</code> 或 <code>{"x":[],"series":[{"name":"S1","y":[]}]}</code>；pie 支持 <code>{"labels":[],"values":[]}</code></p>
+              <p class="drawing-hint">bar/line 鏀寔 <code>{"x":[],"y":[]}</code> 鎴?<code>{"x":[],"series":[{"name":"S1","y":[]}]}</code>锛沺ie 鏀寔 <code>{"labels":[],"values":[]}</code></p>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary" id="chart-plot-submit">生成图表</button>
-                <button type="button" class="btn-secondary" id="chart-plot-reset">清空重置</button>
+                <button type="submit" class="btn-primary" id="chart-plot-submit">鐢熸垚鍥捐〃</button>
+                <button type="button" class="btn-secondary" id="chart-plot-reset">娓呯┖閲嶇疆</button>
               </div>
             </form>
             <p id="chart-plot-status" class="drawing-status" role="status"></p>
             <div id="chart-plot-result" class="drawing-result" hidden>
-              <img id="chart-plot-img" alt="生成的统计图表" />
-              <a id="chart-plot-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+              <img id="chart-plot-img" alt="鐢熸垚鐨勭粺璁″浘琛? style="opacity:0" />
+              <a id="chart-plot-download" class="btn-secondary drawing-download" download>涓嬭浇 PNG</a>
             </div>
           </section>
 
           <section id="drawing-tab-diagram" class="drawing-tools-pane" role="tabpanel" hidden>
             <form id="concept-diagram-form" class="drawing-form" autocomplete="off">
               <label class="drawing-field drawing-field--wide">
-                <span>概念描述（需 Gemini Key）</span>
-                <textarea id="diagram-prompt" rows="4" class="wf-ta" placeholder="描述需要图示化的概念、流程或系统架构…"></textarea>
+                <span>姒傚康鎻忚堪锛堥渶 Gemini Key锛?/span>
+                <textarea id="diagram-prompt" rows="4" class="wf-ta" placeholder="鎻忚堪闇€瑕佸浘绀哄寲鐨勬蹇点€佹祦绋嬫垨绯荤粺鏋舵瀯鈥?></textarea>
               </label>
               <label class="drawing-field">
-                <span>图标题</span>
-                <input type="text" id="diagram-title" class="branch-input" placeholder="可选" />
+                <span>鍥炬爣棰?/span>
+                <input type="text" id="diagram-title" class="branch-input" placeholder="鍙€? />
               </label>
               <label class="drawing-field drawing-field--wide">
-                <span>手动输入 Mermaid 代码（跳过 Gemini，直接渲染）</span>
+                <span>鎵嬪姩杈撳叆 Mermaid 浠ｇ爜锛堣烦杩?Gemini锛岀洿鎺ユ覆鏌擄級</span>
                 <textarea id="diagram-mermaid" rows="8" class="wf-ta" spellcheck="false">flowchart TB
-  A[数据采集] --> B[预处理]
-  B --> C[索引构建]
-  C --> D[在线检索]
-  D --> E[生成回答]</textarea>
+  A[鏁版嵁閲囬泦] --> B[棰勫鐞哴
+  B --> C[绱㈠紩鏋勫缓]
+  C --> D[鍦ㄧ嚎妫€绱
+  D --> E[鐢熸垚鍥炵瓟]</textarea>
               </label>
-              <p class="drawing-hint">未配置 Gemini Key 时，请直接在上方粘贴 Mermaid 代码并生成。</p>
+              <p class="drawing-hint">鏈厤缃?Gemini Key 鏃讹紝璇风洿鎺ュ湪涓婃柟绮樿创 Mermaid 浠ｇ爜骞剁敓鎴愩€?/p>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary" id="concept-diagram-submit">生成概念图</button>
-                <button type="button" class="btn-secondary" id="concept-diagram-reset">清空重置</button>
+                <button type="submit" class="btn-primary" id="concept-diagram-submit">鐢熸垚姒傚康鍥?/button>
+                <button type="button" class="btn-secondary" id="concept-diagram-reset">娓呯┖閲嶇疆</button>
               </div>
             </form>
             <p id="concept-diagram-status" class="drawing-status" role="status"></p>
             <pre id="concept-diagram-code" class="drawing-code-preview" hidden></pre>
             <div id="concept-diagram-result" class="drawing-result" hidden>
-              <img id="concept-diagram-img" alt="生成的概念示意图" />
-              <a id="concept-diagram-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+              <img id="concept-diagram-img" alt="鐢熸垚鐨勬蹇电ず鎰忓浘" style="opacity:0" />
+              <a id="concept-diagram-download" class="btn-secondary drawing-download" download>涓嬭浇 PNG</a>
             </div>
           </section>
 
           <section id="drawing-tab-latex" class="drawing-tools-pane" role="tabpanel" hidden>
             <form id="latex-table-form" class="drawing-form" autocomplete="off">
               <label class="drawing-field drawing-field--wide">
-                <span>表头（逗号分隔）</span>
+                <span>琛ㄥご锛堥€楀彿鍒嗛殧锛?/span>
                 <input type="text" id="latex-headers" class="branch-input" value="Method, Accuracy, F1" />
               </label>
               <label class="drawing-field drawing-field--wide">
-                <span>数据行（JSON 或 Tab/逗号分隔）</span>
+                <span>鏁版嵁琛岋紙JSON 鎴?Tab/閫楀彿鍒嗛殧锛?/span>
                 <textarea id="latex-rows" rows="6" class="wf-ta" spellcheck="false">[["BERT", "0.91", "0.88"], ["GPT", "0.93", "0.90"], ["Ours", "0.95", "0.92"]]</textarea>
               </label>
               <div class="drawing-form-grid">
                 <label class="drawing-field">
-                  <span>表标题</span>
-                  <input type="text" id="latex-caption" class="branch-input" placeholder="可选" />
+                  <span>琛ㄦ爣棰?/span>
+                  <input type="text" id="latex-caption" class="branch-input" placeholder="鍙€? />
                 </label>
                 <label class="drawing-field">
                   <span>label</span>
-                  <input type="text" id="latex-label" class="branch-input" placeholder="如 main_results" />
+                  <input type="text" id="latex-label" class="branch-input" placeholder="濡?main_results" />
                 </label>
               </div>
-              <p class="drawing-hint">模板生成，无需 LLM。需导言区 <code>\usepackage{booktabs}</code>。数值列可自动居中，可选高亮每列最优值。</p>
+              <p class="drawing-hint">妯℃澘鐢熸垚锛屾棤闇€ LLM銆傞渶瀵艰█鍖?<code>\usepackage{booktabs}</code>銆傛暟鍊煎垪鍙嚜鍔ㄥ眳涓紝鍙€夐珮浜瘡鍒楁渶浼樺€笺€?/p>
               <label class="drawing-field drawing-field--inline">
                 <input type="checkbox" id="latex-highlight-best" />
-                <span>高亮每列最优数值（粗体）</span>
+                <span>楂樹寒姣忓垪鏈€浼樻暟鍊硷紙绮椾綋锛?/span>
               </label>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary">生成 LaTeX</button>
-                <button type="button" class="btn-secondary" id="latex-table-reset">清空重置</button>
-                <button type="button" class="btn-secondary" id="latex-table-copy">复制代码</button>
+                <button type="submit" class="btn-primary">鐢熸垚 LaTeX</button>
+                <button type="button" class="btn-secondary" id="latex-table-reset">娓呯┖閲嶇疆</button>
+                <button type="button" class="btn-secondary" id="latex-table-copy">澶嶅埗浠ｇ爜</button>
               </div>
             </form>
             <p id="latex-table-status" class="drawing-status" role="status"></p>
@@ -695,46 +689,46 @@
             <form id="palette-form" class="drawing-form" autocomplete="off">
               <div class="drawing-form-grid">
                 <label class="drawing-field">
-                  <span>主题</span>
+                  <span>涓婚</span>
                   <select id="palette-theme" class="branch-select">
-                    <option value="academic">学术稳重</option>
-                    <option value="ieee">IEEE 风</option>
-                    <option value="nature">自然大地</option>
-                    <option value="ocean">海洋蓝调</option>
-                    <option value="sunset">日落暖色</option>
-                    <option value="pastel">柔和粉彩</option>
-                    <option value="grayscale">印刷灰阶</option>
-                    <option value="colorblind">色盲友好</option>
-                    <option value="random">随机主题</option>
+                    <option value="academic">瀛︽湳绋抽噸</option>
+                    <option value="ieee">IEEE 椋?/option>
+                    <option value="nature">鑷劧澶у湴</option>
+                    <option value="ocean">娴锋磱钃濊皟</option>
+                    <option value="sunset">鏃ヨ惤鏆栬壊</option>
+                    <option value="pastel">鏌斿拰绮夊僵</option>
+                    <option value="grayscale">鍗板埛鐏伴樁</option>
+                    <option value="colorblind">鑹茬洸鍙嬪ソ</option>
+                    <option value="random">闅忔満涓婚</option>
                   </select>
                 </label>
                 <label class="drawing-field">
-                  <span>颜色数量</span>
+                  <span>棰滆壊鏁伴噺</span>
                   <input type="number" id="palette-count" class="branch-input" min="3" max="8" value="6" />
                 </label>
               </div>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary">生成配色</button>
-                <button type="button" class="btn-secondary" id="palette-reset">清空重置</button>
+                <button type="submit" class="btn-primary">鐢熸垚閰嶈壊</button>
+                <button type="button" class="btn-secondary" id="palette-reset">娓呯┖閲嶇疆</button>
               </div>
             </form>
             <p id="palette-desc" class="drawing-hint palette-desc" hidden></p>
             <p id="palette-status" class="drawing-status" role="status"></p>
             <div id="palette-swatches" class="palette-swatches" hidden></div>
             <div id="palette-result" class="drawing-result" hidden>
-              <img id="palette-img" alt="配色预览条" />
+              <img id="palette-img" alt="閰嶈壊棰勮鏉? style="opacity:0" />
             </div>
           </section>
 
           <section id="drawing-tab-text" class="drawing-tools-pane" role="tabpanel" hidden>
             <form id="text-stats-form" class="drawing-form" autocomplete="off">
               <label class="drawing-field drawing-field--wide">
-                <span>待分析文本</span>
-                <textarea id="text-stats-input" rows="8" class="wf-ta" placeholder="粘贴摘要、段落或整段文稿…"></textarea>
+                <span>寰呭垎鏋愭枃鏈?/span>
+                <textarea id="text-stats-input" rows="8" class="wf-ta" placeholder="绮樿创鎽樿銆佹钀芥垨鏁存鏂囩鈥?></textarea>
               </label>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary">开始统计</button>
-                <button type="button" class="btn-secondary" id="text-stats-reset">清空重置</button>
+                <button type="submit" class="btn-primary">寮€濮嬬粺璁?/button>
+                <button type="button" class="btn-secondary" id="text-stats-reset">娓呯┖閲嶇疆</button>
               </div>
             </form>
             <p id="text-stats-status" class="drawing-status" role="status"></p>
@@ -744,27 +738,27 @@
           <section id="drawing-tab-title" class="drawing-tools-pane" role="tabpanel" hidden>
             <form id="paper-title-form" class="drawing-form" autocomplete="off">
               <label class="drawing-field drawing-field--wide">
-                <span>主题关键词</span>
-                <input type="text" id="paper-title-keywords" class="branch-input" placeholder="如 retrieval augmented generation" />
+                <span>涓婚鍏抽敭璇?/span>
+                <input type="text" id="paper-title-keywords" class="branch-input" placeholder="濡?retrieval augmented generation" />
               </label>
               <div class="drawing-form-grid">
                 <label class="drawing-field">
-                  <span>风格</span>
+                  <span>椋庢牸</span>
                   <select id="paper-title-style" class="branch-select">
-                    <option value="serious">正经学术风</option>
-                    <option value="funny">趣味脑洞风</option>
+                    <option value="serious">姝ｇ粡瀛︽湳椋?/option>
+                    <option value="funny">瓒ｅ懗鑴戞礊椋?/option>
                   </select>
                 </label>
                 <label class="drawing-field drawing-field--inline">
                   <input type="checkbox" id="paper-title-use-llm" checked />
-                  <span>启用 OpenAI 生成 2 条</span>
+                  <span>鍚敤 OpenAI 鐢熸垚 2 鏉?/span>
                 </label>
               </div>
-              <p class="drawing-hint">3 条本地模板（即时，无需 API）+ 2 条 OpenAI 风格各异（正经学术 / 脑洞趣味）。API 读取 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code>，未配置时自动退化为纯本地。</p>
+              <p class="drawing-hint">3 鏉℃湰鍦版ā鏉匡紙鍗虫椂锛屾棤闇€ API锛? 2 鏉?OpenAI 椋庢牸鍚勫紓锛堟缁忓鏈?/ 鑴戞礊瓒ｅ懗锛夈€侫PI 璇诲彇 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code>锛屾湭閰嶇疆鏃惰嚜鍔ㄩ€€鍖栦负绾湰鍦般€?/p>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary">生成标题</button>
-                <button type="button" class="btn-secondary" id="paper-title-reset">清空重置</button>
-                <button type="button" class="btn-secondary" id="paper-title-copy">复制结果</button>
+                <button type="submit" class="btn-primary">鐢熸垚鏍囬</button>
+                <button type="button" class="btn-secondary" id="paper-title-reset">娓呯┖閲嶇疆</button>
+                <button type="button" class="btn-secondary" id="paper-title-copy">澶嶅埗缁撴灉</button>
               </div>
             </form>
             <p id="paper-title-status" class="drawing-status" role="status"></p>
@@ -774,19 +768,19 @@
           <section id="drawing-tab-qrcode" class="drawing-tools-pane" role="tabpanel" hidden>
             <form id="qrcode-form" class="drawing-form" autocomplete="off">
               <label class="drawing-field drawing-field--wide">
-                <span>内容（URL 或文本）</span>
+                <span>鍐呭锛圲RL 鎴栨枃鏈級</span>
                 <input type="text" id="qrcode-content" class="branch-input" placeholder="https://arxiv.org/abs/..." />
               </label>
-              <p class="drawing-hint">适合论文链接、个人主页、数据集 DOI 等（依赖见 requirements.txt）。</p>
+              <p class="drawing-hint">閫傚悎璁烘枃閾炬帴銆佷釜浜轰富椤点€佹暟鎹泦 DOI 绛夛紙渚濊禆瑙?requirements.txt锛夈€?/p>
               <div class="drawing-actions">
-                <button type="submit" class="btn-primary">生成 QR 码</button>
-                <button type="button" class="btn-secondary" id="qrcode-reset">清空重置</button>
+                <button type="submit" class="btn-primary">鐢熸垚 QR 鐮?/button>
+                <button type="button" class="btn-secondary" id="qrcode-reset">娓呯┖閲嶇疆</button>
               </div>
             </form>
             <p id="qrcode-status" class="drawing-status" role="status"></p>
             <div id="qrcode-result" class="drawing-result drawing-result--qrcode" hidden>
-              <img id="qrcode-img" alt="生成的 QR 码" />
-              <a id="qrcode-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+              <img id="qrcode-img" alt="鐢熸垚鐨?QR 鐮? style="opacity:0" />
+              <a id="qrcode-download" class="btn-secondary drawing-download" download>涓嬭浇 PNG</a>
             </div>
           </section>
         </div>
@@ -804,7 +798,8 @@
     <script src="rag_assets.js?v=rag-delete-5"></script>
     <script src="conferences_calendar.js?v=4"></script>
     <script src="user_settings.js?v=settings-6"></script>
-    <script src="drawing_tools.js?v=4"></script>
+    <script src="drawing_tools.js?v=5"></script>
     <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>
+
