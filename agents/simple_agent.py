@@ -85,6 +85,7 @@ class SimpleAgent(BaseAgent):
         temperature: float = TEMPERATURE,
         max_history: int = 100,
     ):
+        """初始化基础对话 Agent，并完成默认系统提示词与 LLM 后端的配置。"""
         if tools is None:
             tools = tool_list
         if system_prompt is None:

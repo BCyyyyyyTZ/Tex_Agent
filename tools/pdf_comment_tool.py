@@ -1,3 +1,15 @@
+"""
+PDF 批注工具（PdfCommentTool）。
+
+该工具基于 PyMuPDF（fitz）实现对 PDF 的高亮与便签注释：
+- run_single: 对单个 (page_idx, text, comment) 执行高亮/注释
+- run: 批量处理 question_list，并返回统计信息
+
+实现重点：
+- 优先在指定页 search_for 精确定位文本；找不到时可退化到 fuzzy_search 或全文扫描
+- 支持 output_path 与 pdf_path 相同的场景：通过临时文件写入，最后 replace 原文件
+"""
+
 import fitz
 from datetime import datetime
 
@@ -22,6 +34,7 @@ class PdfCommentTool(BaseTool):
     """
 
     def __init__(self):
+        """初始化 PDF 批注工具，并声明所需输入字段（page_idx/text/comment）。"""
         super().__init__(
             name="pdf_comment",
             description="在 pdf 的指定位置添加高亮和注释。",
@@ -60,6 +73,19 @@ class PdfCommentTool(BaseTool):
         return results
 
     def find_in_document(self, doc, target_text: str, skip_page_idx: Optional[int] = None):
+        """
+        在全文范围查找目标文本。
+
+        Args:
+            doc: fitz.Document 对象
+            target_text: 需要查找的文本（应与 PDF 原文在字符串层面匹配）
+            skip_page_idx: 可选跳过页（例如已在该页尝试失败）
+
+        Returns:
+            (page_idx, rects)：
+            - page_idx: 命中的页索引（从 0 开始），未命中则为 None
+            - rects: 命中的矩形区域列表（fitz.Rect），未命中则为 None
+        """
         for idx in range(len(doc)):
             if skip_page_idx is not None and idx == skip_page_idx:
                 continue

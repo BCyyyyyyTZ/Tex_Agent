@@ -1,3 +1,14 @@
+"""
+统计图表生成工具（ChartPlotTool）。
+
+输入结构化数据，生成常见科研图表并导出为图片文件：
+- bar: 柱状图
+- line: 折线图
+- pie: 饼图
+
+该工具主要用于把实验结果/消融数据快速可视化，便于论文写作与报告展示。
+"""
+
 import json
 from pathlib import Path
 import sys
@@ -14,7 +25,15 @@ logger = get_logger(__name__)
 
 
 class ChartPlotTool(BaseTool):
+    """
+    以统一 schema 接收图表参数，并将图表写入 output_path。
+
+    数据格式约定见 input_schema 中的 data 描述：
+    - bar/line: 支持单序列 {x:[], y:[]} 或多序列 {x:[], series:[{name,y},...]}
+    - pie: {labels:[], values:[]}
+    """
     def __init__(self):
+        """初始化图表生成工具，并声明可用图表类型与输入参数 schema。"""
         super().__init__(
             name="chart_plot",
             description="根据给定数据生成统计图表，支持柱状图(bar)、折线图(line)、饼状图(pie)，输出为图片文件路径。",
@@ -33,6 +52,11 @@ class ChartPlotTool(BaseTool):
         )
 
     def _ensure_dict(self, data: Any) -> dict[str, Any]:
+        """
+        将输入 data 归一化为 dict。
+
+        允许 data 以 JSON 字符串形式传入，便于从 LLM/CLI 直接调用。
+        """
         if data is None:
             return {}
         if isinstance(data, dict):
@@ -47,6 +71,7 @@ class ChartPlotTool(BaseTool):
         return {}
 
     def _as_bool(self, v: Any, default: bool) -> bool:
+        """将输入归一化为 bool（支持常见字符串形式），失败则返回 default。"""
         if isinstance(v, bool):
             return v
         if isinstance(v, str):
@@ -58,6 +83,7 @@ class ChartPlotTool(BaseTool):
         return default
 
     def _as_int(self, v: Any, default: int) -> int:
+        """将输入归一化为 int，失败则返回 default。"""
         try:
             if v is None:
                 return default
@@ -66,6 +92,9 @@ class ChartPlotTool(BaseTool):
             return default
 
     def _as_float(self, v: Any, default: float) -> float:
+        """
+        将输入转换为 float，失败则返回默认值。
+        """
         try:
             if v is None:
                 return default
@@ -86,6 +115,20 @@ class ChartPlotTool(BaseTool):
         dpi: int = 200,
         legend: bool = True,
     ) -> ToolResult:
+        """
+        生成并导出图表。
+
+        Args:
+            chart_type: bar | line | pie
+            data: 图表数据（dict 或 JSON 字符串）
+            output_path: 输出图片路径（png 等）
+            title/x_label/y_label: 图表标题与坐标轴标题（可选）
+            width/height/dpi: 导出尺寸与分辨率
+            legend: 是否显示图例（多序列时常用）
+
+        Returns:
+            ToolResult.output 为图片路径；metadata 中包含解析后的数据与实际参数。
+        """
         try:
             try:
                 import matplotlib
@@ -185,6 +228,7 @@ class ChartPlotTool(BaseTool):
 
 
 def _assert_file_ok(path: str) -> None:
+    """断言指定路径文件存在且非空（用于自测验证输出）。"""
     p = Path(path)
     if not p.exists():
         raise AssertionError(f"文件未生成: {p}")
@@ -193,6 +237,7 @@ def _assert_file_ok(path: str) -> None:
 
 
 def _run_self_test(output_dir: str | None = None) -> None:
+    """运行本工具的最小自测：生成多种图表并校验输出文件可用。"""
     tool = ChartPlotTool()
     base = Path(output_dir) if output_dir else (Path(__file__).resolve().parents[1] / "outputs" / "chart_plot_tool_test")
     base.mkdir(parents=True, exist_ok=True)

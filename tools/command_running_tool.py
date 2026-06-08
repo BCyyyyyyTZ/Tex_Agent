@@ -25,6 +25,7 @@ class CommandRunningTool(BaseTool):
     """
 
     def __init__(self):
+        """初始化命令执行工具，并声明输入 schema（单条 command）。"""
         super().__init__(
             name="command_running",
             description="执行指定的命令行命令并返回执行结果。输入要执行的命令，返回命令的执行输出。",
@@ -34,6 +35,7 @@ class CommandRunningTool(BaseTool):
         )
 
     def _execute_command_with_auto_encoding(self, command):
+        """执行命令并尝试自动处理控制台输出编码（优先 gbk，失败回退 utf-8）。"""
         try:
             # 1. 关键：不设置 encoding 和 text=True，以二进制模式读取
             # 这样后台读取线程就不会因为编码问题抛出 UnicodeDecodeError

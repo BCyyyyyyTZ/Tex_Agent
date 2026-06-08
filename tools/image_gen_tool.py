@@ -24,15 +24,17 @@ class ImageGenTool(BaseTool):
     TODO: 开发者 C 实现建议：
           - DALL-E 3：通过 openai 库的 client.images.generate() 调用
           - SD：通过 stability-sdk 或 Replicate API 调用
-          - 生成的图像可直接嵌入 LaTeX 文档（\includegraphics）
+          - 生成的图像可直接嵌入 LaTeX 文档（\\includegraphics）
     """
 
     @property
     def name(self) -> str:
+        """返回工具唯一标识符（用于路由与注册）。"""
         return "image_generation"
 
     @property
     def description(self) -> str:
+        """返回工具用途说明（用于向模型/用户展示能力与输入输出）。"""
         return (
             "根据文字描述（prompt）生成图像，适用于论文配图、流程图、示意图等场景。"
             "支持 DALL-E / Stable Diffusion 等主流图像生成模型。"

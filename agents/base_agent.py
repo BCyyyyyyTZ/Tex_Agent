@@ -23,6 +23,11 @@ class AgentMemoryItem:
     """
 
     def __init__(self, data: any, data_type: str):
+        """
+        Args:
+            data: 要存储的原始数据（可为消息、结构化对象或任意运行期信息）
+            data_type: 数据类型标签，用于检索与分类（由调用方自定义）
+        """
         self.data = data
         self.type = data_type  
 
@@ -33,19 +38,55 @@ class AgentMemory:
     """
 
     def __init__(self):
+        """
+        初始化空内存容器。
+
+        memory 以时间顺序追加；若需要做“最近 N 条”或“按类型汇总”，可在此基础上扩展索引结构。
+        """
         self.memory: List[AgentMemoryItem] = []
 
     def add(self, item: AgentMemoryItem):
+        """
+        追加一条内存记录。
+
+        Args:
+            item: AgentMemoryItem 实例
+        """
         self.memory.append(item)
 
     def clear(self):
+        """
+        清空全部内存记录。
+        """
         self.memory.clear()
 
     def get(self, item_type: str) -> List[AgentMemoryItem]:
+        """
+        按类型过滤内存记录。
+
+        Args:
+            item_type: 目标类型标签
+
+        Returns:
+            匹配类型的 AgentMemoryItem 列表（保持原有插入顺序）。
+        """
         return [item for item in self.memory if item.type == item_type]
 
 class LlmClient:
 	def __init__(self, model_name: str, api_key: str, base_url: str, temperature: float):
+		"""
+		OpenAI 兼容接口的 LLM 客户端封装。
+
+		该客户端通过 openai.OpenAI(base_url=...) 连接到兼容 OpenAI Chat Completions 的服务：
+		- 可用于 Groq、DashScope compatible-mode 等
+		- 支持通过 FileLoadingTool 抽取本地文件文本并注入到 prompt（用于不支持原生文件上传的 API）
+
+		Args:
+		    model_name: 模型名
+		    api_key: API Key
+		    base_url: OpenAI 兼容服务的 base_url
+		    temperature: 采样温度
+		"""
 		self.model_name = model_name
 		self.api_key = api_key
 		self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
@@ -136,7 +177,14 @@ class GeminiClient:
         
     def _upload_files_parallel(self, file_paths: List[str], file_mime_types: Optional[dict[str, str]] = None):
         """
-        内部方法：上传多个文件并确保它们都进入 ACTIVE 状态
+        内部方法：上传多个文件并确保它们都进入 ACTIVE 状态。
+
+        Gemini 的文件上传是异步处理的：upload 后文件可能处于 PROCESSING 状态。
+        这里会轮询直到全部文件 ACTIVE 才返回，以保证后续 generate_content 可引用文件内容。
+
+        Args:
+            file_paths: 要上传的本地文件路径列表
+            file_mime_types: 可选 MIME 映射（key 可为完整路径或 basename）
         """
         mime_map = dict(file_mime_types or {})
         uploaded_files = []
@@ -188,7 +236,22 @@ class GeminiClient:
         file_mime_types: Union[str, List[str], dict[str, str], None] = None,
     ) -> str:
         """
-        上传文件并根据内容进行提问
+        上传文件并根据内容进行提问。
+
+        Args:
+            prompt: 文本提示词
+            file_paths: 可选文件路径（单个路径或列表）；传入后会先上传文件再调用模型
+            file_mime_types:
+                - str: 所有 file_paths 统一使用该 MIME
+                - list[str]: 与 file_paths 一一对应
+                - dict[str,str]: key 为 path 或 basename，value 为 MIME
+
+        Returns:
+            模型输出文本（response.text）
+
+        说明：
+        - 由于 Gemini 官方未把 .tex 列为独立大类，但它本质是文本，本实现会把 .tex 默认按 text/plain 上传，
+          同时把 application/x-tex 与 text/x-tex 映射到 text/plain，以避免不被支持的 MIME 类型导致上传失败。
         """
         contents = []
 
@@ -253,6 +316,22 @@ class QwenClient:
         max_file_chars: int = 200000,
         upload_wait_seconds: int = 99999999,
     ):
+        """
+        DashScope OpenAI 兼容通道的 Qwen 客户端封装。
+
+        特点：
+        - 使用 OpenAI compatible-mode 的 files.create 上传文件
+        - 通过 system message 注入 fileid://... 让模型在对话中引用文件内容
+
+        Args:
+            model_name: 模型名
+            api_key: API Key
+            temperature: 采样温度
+            base_url: OpenAI 兼容服务地址
+            file_purpose: 上传文件用途字段
+            max_file_chars: 作为纯文本注入时的最大字符数（保留参数，便于扩展）
+            upload_wait_seconds: 轮询等待文件可用的最大秒数（<=0 表示不等待）
+        """
         self.model_name = model_name
         self.api_key = api_key
         self.base_url = base_url
@@ -265,6 +344,15 @@ class QwenClient:
         self._file_loader = FileLoadingTool()
 
     def _upload_files(self, file_paths: List[str]) -> List[Any]:
+        """
+        上传文件并缓存结果。
+
+        Args:
+            file_paths: 本地文件路径列表
+
+        Returns:
+            已上传的文件对象列表（与输入顺序一致；不存在的文件会被跳过）。
+        """
         uploaded: List[Any] = []
         for path in file_paths:
             if not os.path.exists(path):
@@ -280,6 +368,13 @@ class QwenClient:
         return uploaded
 
     def _wait_files_ready(self, uploaded: List[Any]) -> None:
+        """
+        轮询等待上传文件进入可用状态。
+
+        说明：
+        - 不同平台的状态字段可能不同，因此这里做了尽量兼容的 status/state 读取。
+        - 遇到 FAILED/ERROR 会停止等待并返回（调用方可选择继续或报错）。
+        """
         if self.upload_wait_seconds <= 0 or not uploaded:
             return
         deadline = time.time() + self.upload_wait_seconds
@@ -311,6 +406,16 @@ class QwenClient:
                 time.sleep(2)
 
     def response(self, prompt: str, file_paths: Union[str, List[str], None] = None, **_: Any) -> str:
+        """
+        生成模型回复，并可选上传文件供模型引用。
+
+        Args:
+            prompt: 用户提示词
+            file_paths: 可选文件路径（单个或列表）
+
+        Returns:
+            模型输出文本。
+        """
         if file_paths is not None and isinstance(file_paths, str):
             file_paths = [file_paths]
 
@@ -358,6 +463,14 @@ class BaseAgent(ABC):
         system_prompt: str, 
         tools: Optional[List[BaseTool]]
     ):
+        """
+        初始化 Agent 基类属性。
+
+        Args:
+            name: Agent 名称/标识
+            system_prompt: system 级提示词
+            tools: 可调用的工具实例列表
+        """
         self.name = name
         self.system_prompt = system_prompt
         self.tools: List[BaseTool] = tools
@@ -366,12 +479,21 @@ class BaseAgent(ABC):
         self.llms = {}
   
     def set_llm(self, llm_name: str, model_name: str, api_key: str, base_url: str, temperature: float) -> None:
+        """
+        注册一个 OpenAI 兼容通道的 LlmClient。
+        """
         self.llms[llm_name] = LlmClient(model_name, api_key, base_url, temperature) 
 
     def set_gemini(self, llm_name: str, model_name: str, api_key: str, temperature: float) -> None:
+        """
+        注册一个 GeminiClient。
+        """
         self.llms[llm_name] = GeminiClient(model_name, api_key, temperature)    
 
     def set_qwen(self, llm_name: str, model_name: str, api_key: str, temperature: float, base_url: str = "") -> None:
+        """
+        注册一个 QwenClient（OpenAI compatible-mode）。
+        """
         self.llms[llm_name] = QwenClient(
             model_name=model_name,
             api_key=api_key,
@@ -380,6 +502,11 @@ class BaseAgent(ABC):
         )
 
     def set_tool_args(self, args: dict) -> None:
+        """
+        设置工具默认参数（按工具名组织）。
+
+        该默认参数会在 call_tool 时与调用方传入的参数合并，用于统一注入路径、API key 等配置。
+        """
         for tool_name, tool_args in args.items():
             for arg_name, arg_value in tool_args.items():
                 set_nested_value(self.tool_args, [tool_name, arg_name], arg_value)

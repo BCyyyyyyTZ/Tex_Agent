@@ -31,6 +31,7 @@ class ArxivSearchTool(BaseTool):
     """
 
     def __init__(self, max_results: Optional[int] = None):
+        """初始化 arXiv 检索工具，并配置最大返回条数与 SDK Client。"""
         super().__init__(
             name="arxiv_search",
             description="在 arXiv 平台检索论文。输入关键词或论文主题（建议使用英文以获得最佳结果），返回相关论文的标题、作者、摘要和链接。",

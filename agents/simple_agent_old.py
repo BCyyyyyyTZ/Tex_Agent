@@ -40,6 +40,7 @@ class SimpleAgent(BaseAgent):
         temperature: Optional[float] = None,
         max_history: int = 100,
     ):
+        """初始化纯推理 Agent，并根据配置选择 Gemini/OpenAI 兼容后端。"""
         if tools is None:
             tools = tool_list
         super().__init__(name, system_prompt or DEFAULT_SYSTEM_PROMPT, tools)
@@ -64,6 +65,14 @@ class SimpleAgent(BaseAgent):
         self.max_history = max_history
 
     def _init_backend(self) -> str:
+        """
+        根据模型名与可用 API Key 选择 LLM 后端并完成初始化。
+
+        规则：
+        - model_name 包含 "gemini" 且配置了 GEMINI_API_KEY/GOOGLE_API_KEY -> 使用 GeminiClient
+        - 否则若配置了 OpenAI 兼容通道 key -> 使用 LlmClient（OpenAI ChatCompletions 兼容）
+        - 若两者均不可用 -> 抛 AgentError
+        """
         model_lower = (self.model_name or "").lower()
         wants_gemini = "gemini" in model_lower
 
@@ -94,6 +103,15 @@ class SimpleAgent(BaseAgent):
         )
 
     def _build_history_messages(self) -> List[str]:
+        """
+        将 self.history 序列化为“可拼接的文本对话历史”。
+
+        输出格式为：
+        - SYSTEM\n...
+        - USER\n...
+        - ASSISTANT\n...
+        - TOOL:<tool_name>\n...
+        """
         messages = [f"SYSTEM\n{self.system_prompt}"]
         for hist in self.history:
             if hist.role == "user":
@@ -105,6 +123,9 @@ class SimpleAgent(BaseAgent):
         return messages
 
     def _trim_history(self) -> None:
+        """
+        将历史裁剪到 max_history 上限，并尽量保持 user/assistant 的轮次边界。
+        """
         if self.max_history is None:
             return
         if len(self.history) > self.max_history:
@@ -113,6 +134,14 @@ class SimpleAgent(BaseAgent):
             self.history = self.history[excess:]
 
     def _append_llm_trace(self, history_messages: List[str], response_text: str) -> None:
+        """
+        将本次 LLM 输入与输出追加写入 trace 文件，便于离线排查与复现实验。
+
+        该日志包含：
+        - agent 基本信息（backend/model）
+        - 序列化的输入消息列表
+        - 模型输出文本
+        """
         try:
             _LLM_TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().isoformat(timespec="seconds")
@@ -133,6 +162,12 @@ class SimpleAgent(BaseAgent):
             logger.error(f"[{self.name}] 写入 LLM 交互日志失败: {e}")
 
     def _normalize_attachment(self, attachment: Any) -> Any:
+        """
+        规范化附件传递策略。
+
+        - Gemini 通道：允许直接传入本地文件路径（由 GeminiClient 负责上传）
+        - OpenAI 兼容通道：当前实现不支持本地附件，会忽略并给出 warning
+        """
         # Gemini 通道支持文件路径；OpenAI 兼容通道忽略本地附件
         if self.backend == "gemini":
             return attachment
@@ -141,6 +176,13 @@ class SimpleAgent(BaseAgent):
         return None
 
     def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+        """
+        同步执行一次推理并返回 assistant 消息。
+
+        说明：
+        - 本实现不执行工具调用（工具调用建议交给 workflow_engine.ToolNode）
+        - 仍保留 set_tool_args 的兼容入口，便于与上层系统对齐，但不会在此处真正调用工具
+        """
         self.reset()
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)
@@ -172,11 +214,18 @@ class SimpleAgent(BaseAgent):
             raise AgentError(f"{self.name} 执行失败: {e}") from e
 
     async def ainvoke(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+        """
+        异步调用入口（线程池包装同步 run）。
+        """
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.run, message)
 
     def reset(self) -> None:
+        """
+        清空对话历史，将 Agent 恢复到初始状态。
+        """
         self.history.clear()
 
     def get_history(self) -> List[AgentMessage]:
+        """返回当前对话历史的浅拷贝（避免外部直接修改内部列表）。"""
         return list(self.history)

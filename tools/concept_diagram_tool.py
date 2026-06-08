@@ -1,3 +1,16 @@
+"""
+概念示意图生成工具（ConceptDiagramTool）。
+
+输入一段概念描述，工具会：
+1) 调用 LLM（GeminiClient）生成 Mermaid flowchart 代码
+2) 将 Mermaid 代码通过 mermaid.ink 渲染为 PNG
+3) 输出图片路径，并在 metadata 中返回 Mermaid 代码等信息，便于复现与调试
+
+适用场景：
+- 论文方法/系统架构/流程的概念图快速生成
+- 把较长的结构化描述“压缩”为图形化概览
+"""
+
 import base64
 import json
 import os
@@ -22,6 +35,13 @@ logger = get_logger(__name__)
 
 
 class ConceptDiagramTool(BaseTool):
+    """
+    将概念描述转换为 Mermaid 并渲染为图片的工具封装。
+
+    说明：
+    - 本工具不直接使用本地 Mermaid 渲染，而是调用 mermaid.ink 在线渲染服务生成 PNG。
+    - LLM 输出会做基本清洗（去除 ```mermaid 代码块等），并校验必须以 flowchart/graph 开头。
+    """
     def __init__(
         self,
         *,
@@ -29,6 +49,7 @@ class ConceptDiagramTool(BaseTool):
         api_key: str = "",
         temperature: float = 0.2,
     ):
+        """初始化概念图工具，并配置模型参数（model_name/api_key/temperature）。"""
         super().__init__(
             name="concept_diagram",
             description="输入概念描述，调用 Gemini 生成 Mermaid 结构化代码并渲染为学术风格概念示意图，输出图片路径。",
@@ -43,6 +64,7 @@ class ConceptDiagramTool(BaseTool):
         self.temperature = float(temperature)
 
     def _resolve_api_key(self, api_key: str) -> str:
+        """解析实际可用的 Gemini API Key（优先入参，其次实例字段与环境变量）。"""
         return (
             api_key
             or self.api_key
@@ -52,6 +74,7 @@ class ConceptDiagramTool(BaseTool):
         )
 
     def _build_prompt(self, user_prompt: str, title: str) -> str:
+        """构造用于生成 Mermaid 的提示词（约束输出为 flowchart 代码本体）。"""
         t = (title or "").strip()
         title_line = f"标题：{t}\n" if t else ""
         return (
@@ -68,6 +91,7 @@ class ConceptDiagramTool(BaseTool):
         )
 
     def _extract_mermaid(self, text: str) -> str:
+        """从模型输出中提取 Mermaid 代码并清理可能的 Markdown 代码块包裹。"""
         s = (text or "").strip()
         if not s:
             return ""
@@ -76,6 +100,7 @@ class ConceptDiagramTool(BaseTool):
         return s.strip()
 
     def _encode_mermaid_ink(self, mermaid_code: str) -> str:
+        """将 Mermaid 代码按 mermaid.ink 的 pako 压缩+base64url 规则编码为 URL 片段。"""
         payload = json.dumps(
             {"code": mermaid_code, "mermaid": {"theme": "neutral"}},
             ensure_ascii=False,
@@ -87,6 +112,7 @@ class ConceptDiagramTool(BaseTool):
         return f"pako:{encoded}"
 
     def _render_with_mermaid_ink(self, mermaid_code: str, output_path: Path) -> None:
+        """调用 mermaid.ink 在线渲染服务，将 Mermaid 代码渲染为 PNG 并写入 output_path。"""
         encoded = self._encode_mermaid_ink(mermaid_code)
         url = f"https://mermaid.ink/img/{encoded}?type=png&theme=neutral&bgColor=!white"
         timeout = httpx.Timeout(60.0, connect=10.0)
@@ -106,6 +132,14 @@ class ConceptDiagramTool(BaseTool):
                     raise last_err
 
     def run(self, prompt: str, output_path: str, title: str = "") -> ToolResult:
+        """
+        生成概念示意图。
+
+        Args:
+            prompt: 需要图示化的概念/流程描述
+            output_path: 输出 PNG 路径（会自动创建父目录）
+            title: 可选标题，会注入到 LLM 提示词中
+        """
         try:
             if not prompt:
                 return ToolResult(success=False, output="", error="prompt 不能为空")
@@ -157,6 +191,7 @@ class ConceptDiagramTool(BaseTool):
 
 
 def _assert_file_ok(path: str) -> None:
+    """断言指定路径文件存在且非空（用于自测验证输出）。"""
     p = Path(path)
     if not p.exists():
         raise AssertionError(f"文件未生成: {p}")
@@ -165,6 +200,7 @@ def _assert_file_ok(path: str) -> None:
 
 
 def _run_self_test(output_dir: Optional[str] = None) -> None:
+    """运行本工具的最小自测：生成一张概念图并校验输出文件可用。"""
     base = Path(output_dir) if output_dir else (Path(__file__).resolve().parents[1] / "outputs" / "concept_diagram_tool_test")
     base.mkdir(parents=True, exist_ok=True)
 

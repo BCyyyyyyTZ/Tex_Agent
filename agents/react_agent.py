@@ -39,6 +39,14 @@ class ReActAgent(BaseAgent):
         system_prompt: str,
         tools: Optional[List[BaseTool]] = None,
     ):
+        """
+        初始化 ReAct Agent 的基础字段。
+
+        Args:
+            name: Agent 名称/标识
+            system_prompt: system 提示词
+            tools: 可用工具列表
+        """
         self._name = name
         self.system_prompt = system_prompt
         self.tools: List[BaseTool] = tools or []
@@ -46,6 +54,9 @@ class ReActAgent(BaseAgent):
 
     @property
     def name(self) -> str:
+        """
+        返回 Agent 名称（只读）。
+        """
         return self._name
 
     @abstractmethod

@@ -25,6 +25,7 @@ class BaseTool(ABC):
     """
 
     def __init__(self, name: str, description: str, input_schema: dict[str, str]):
+        """初始化工具的基础元信息（名称、描述与输入参数 schema）。"""
         self.name = name
         self.description = description
         self.input_schema = input_schema
@@ -62,4 +63,5 @@ class BaseTool(ABC):
         return await loop.run_in_executor(None, self.run, input)
 
     def __repr__(self) -> str:
+        """返回便于调试的工具简短表示（包含类名与工具名）。"""
         return f"{self.__class__.__name__}(name={self.name!r})"

@@ -51,11 +51,21 @@ class PlanAndSolveAgent(BaseAgent):
     """
 
     def __init__(self, name: str, system_prompt: str):
+        """
+        初始化计划-执行 Agent 的基础字段。
+
+        Args:
+            name: Agent 名称/标识
+            system_prompt: system 提示词
+        """
         self._name = name
         self.system_prompt = system_prompt
 
     @property
     def name(self) -> str:
+        """
+        返回 Agent 名称（只读）。
+        """
         return self._name
 
     @abstractmethod
@@ -126,4 +136,7 @@ class PlanAndSolveAgent(BaseAgent):
         )
 
     def reset(self) -> None:
+        """
+        重置 Agent 内部状态（占位，子类实现）。
+        """
         raise NotImplementedError

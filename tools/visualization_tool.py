@@ -29,10 +29,12 @@ class VisualizationTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """返回工具唯一标识符（用于路由与注册）。"""
         return "visualization"
 
     @property
     def description(self) -> str:
+        """返回工具用途说明（用于向模型/用户展示能力与输入输出）。"""
         return (
             "根据用户提供的数据生成学术图表（折线图、柱状图、散点图等）。"
             "图表风格符合 IEEE/ACM 学术规范，支持导出为高清 PDF/PNG 格式。"

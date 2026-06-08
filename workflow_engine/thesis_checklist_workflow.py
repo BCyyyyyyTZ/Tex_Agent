@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""
+论文检查清单工作流（Thesis Checklist Workflow）。
+
+该模块把“检查清单（Markdown） + LLM + PDF 批注工具”组合为可执行的 DAG 工作流：
+- 按二级标题（##）将清单拆成若干 section
+- 对每个 section 调用 LLM 生成对应的工具调用（pdf_comment）
+- ToolNode 执行 pdf_comment，在 PDF 上批注问题片段
+- 汇总各 section 的工具执行结果，输出统计信息
+
+该工作流的节点与消息模型来自 workflow_engine.*，工具来自 tools/pdf_comment_tool.py。
+"""
+
 import json
 import re
 import shutil
@@ -17,11 +29,24 @@ from workflow_engine.config import MODE
 
 @dataclass(frozen=True)
 class ChecklistSection:
+    """
+    清单分段结构。
+
+    title: Markdown 二级标题文本（## ...）
+    content: 该标题下的正文内容（原样保留，交给 LLM 做检查依据）
+    """
     title: str
     content: str
 
 
 def split_checklist_by_primary_headings(markdown_text: str) -> list[ChecklistSection]:
+    """
+    将 Markdown 清单按二级标题（##）切分为多个 ChecklistSection。
+
+    约定：
+    - 仅把 "## " 开头的行视为 section 标题
+    - 只保留有正文内容的 section（空内容会被过滤）
+    """
     text = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
     lines = text.split("\n")
 
@@ -59,6 +84,13 @@ _QUOTE_TRANSLATION = str.maketrans(
 
 
 def extract_question_list(llm_text: str) -> list[dict[str, Any]]:
+    """
+    从 LLM 回复中提取问题列表（JSON 数组）。
+
+    该实现兼容某些模型输出中的中英文引号差异，并要求模型使用：
+        BEGIN [ ...json array... ] END
+    的包裹格式，便于稳健提取。
+    """
     text = (llm_text or "").translate(_QUOTE_TRANSLATION)
     m = re.search(r"BEGIN\s*(\[[\s\S]*?\])\s*END", text)
     if not m:
@@ -77,6 +109,11 @@ def extract_question_list(llm_text: str) -> list[dict[str, Any]]:
 
 
 def build_section_prompt(section: ChecklistSection) -> str:
+    """
+    构造单个检查 section 的提示词。
+
+    目标是让 LLM 输出严格 TOOL_CALL 格式，从而驱动 ToolNode 执行 pdf_comment。
+    """
     return (
         "你是一个专业的论文检查助手。你的任务是根据给定的检查项，只检查用户上传的 PDF 论文是否符合要求，"
         "找出所有不符合要求的问题，并按指定格式输出问题列表。\n\n"
@@ -106,6 +143,15 @@ def build_section_prompt(section: ChecklistSection) -> str:
 
 
 class ThesisChecklistWorkflow:
+    """
+    论文检查工作流封装类。
+
+    负责：
+    - 读取并切分 checklist
+    - 选择/初始化 LLM 客户端（默认 QwenClient，可替换）
+    - 构建 workflow：prepare_pdf -> (sec_i_llm -> pdf_comment)* -> summary
+    - 对外提供 run(pdf_path, output_path) 作为一键执行入口
+    """
     def __init__(
         self,
         *,
@@ -119,6 +165,13 @@ class ThesisChecklistWorkflow:
         base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         temperature: float = 0.2,
     ):
+        """
+        Args:
+            checklist_path: Markdown 清单路径（按 ## 分段）
+            llm_client: 可选外部注入的 LLM 客户端；不传则按 model_name 选择默认实现
+            pdf_comment_tool: 可选外部注入的 PDF 批注工具实例
+            model_name/api_key/base_url/temperature: 默认 LLM 客户端初始化参数
+        """
         self.checklist_path = str(Path(checklist_path).resolve())
 
         with open(self.checklist_path, "r", encoding="utf-8") as f:
@@ -144,8 +197,22 @@ class ThesisChecklistWorkflow:
         self.pdf_comment_tool = pdf_comment_tool or PdfCommentTool()
 
     def build(self) -> Workflow:
+        """
+        构建并返回 Workflow 实例（不执行）。
+
+        节点组成：
+        - prepare_pdf: 复制 PDF 到输出路径（确保工具对输出文件写入）
+        - sec_*_llm: 每个 section 的 LLM 节点，输出 TOOL_CALL pdf_comment 或 none
+        - pdf_comment: 工具节点，执行批注
+        - summary: 汇总工具执行结果，输出统计信息
+        """
 
         def prepare_pdf(msg: WorkflowMessage, _ctx: WorkflowContext) -> WorkflowMessage:
+            """
+            把输入 PDF 复制到 output_path。
+
+            这样后续 pdf_comment 直接在 output_path 上打批注，避免破坏原始 pdf_path。
+            """
             pdf_path = str(Path(msg.metadata["pdf_path"]).resolve())
             output_path = str(Path(msg.metadata["output_path"]).resolve())
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +253,14 @@ class ThesisChecklistWorkflow:
 
 
         def summarize(msg: WorkflowMessage, ctx: WorkflowContext) -> WorkflowMessage:
+            """
+            汇总 pdf_comment 多次执行的结果，输出统计数据到 metadata。
+
+            统计项包括：
+            - total_issues: 总问题数
+            - success_count/error_count: 工具内部批注成功/失败计数
+            - tool_call_summaries: 每个 section 的简表
+            """
 
             results = msg.tool_results["results"]
 
@@ -250,6 +325,13 @@ class ThesisChecklistWorkflow:
         pdf_path: str,
         output_path: str,
     ) -> Any:
+        """
+        执行论文检查工作流。
+
+        Args:
+            pdf_path: 输入 PDF 路径
+            output_path: 输出 PDF 路径（带批注）
+        """
         ctx = WorkflowContext(
             metadata={
                 "file_to_upload": [pdf_path], 

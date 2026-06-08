@@ -62,6 +62,7 @@ class DoclingParseTool(BaseTool):
     """
 
     def __init__(self):
+        """初始化 Docling 解析工具，并声明输入 schema（doc_path/redo）。"""
         super().__init__(
             name="docling_parse",
             description="使用 Docling 解析文档（PDF/DOCX/MD 等），返回解析后的 Markdown 和 JSON 文件路径。支持缓存复用已解析结果（默认开启）。",
@@ -179,6 +180,7 @@ JSON 文件: {result.json_path}
             )
 
     def __repr__(self) -> str:
+        """返回工具的稳定字符串表示（便于日志与调试）。"""
         return "DoclingParseTool(name='docling_parse')"
 
 

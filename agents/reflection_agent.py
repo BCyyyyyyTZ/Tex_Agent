@@ -84,6 +84,20 @@ class ReflectionAgent(BaseAgent):
         temperature: float = None,
         max_history: int = 100,
     ):
+        """
+        初始化 ReflectionAgent。
+
+        该 Agent 内部包含两个角色：
+        - executor: 负责生成/改写答案（可调用工具）
+        - reviewer(self.llms['llm']): 负责提出修改意见或给出 FINISHED
+
+        Args:
+            name: Agent 名称/标识
+            system_prompt: 评审者提示词；默认使用内置 SYSTEM_PROMPT
+            tools: 可用工具列表（会同时注入 executor）
+            model_name/api_key/base_url/temperature: 评审者 LLM 的配置
+            max_history: 内部历史最大条数（控制上下文长度）
+        """
         if tools is None:
             tools = tool_list
         tools_info_list = []
@@ -116,7 +130,16 @@ class ReflectionAgent(BaseAgent):
         return history_messages
 
     def _build_executor_prompt(self) -> str:
-        """构建执行器提示"""
+        """
+        构建“修改者/执行器”侧的输入 prompt。
+
+        该 prompt 通常由三部分组成：
+        - 用户原始问题
+        - 上一版回答
+        - 最新的修改意见（反思结果）
+
+        执行器（SimpleAgent）据此生成改进后的回答。
+        """
         history_messages = [self.history[0], self.history[-2], self.history[-1]]
         messages = []
         for hist in history_messages:
@@ -132,6 +155,15 @@ class ReflectionAgent(BaseAgent):
         return prompt
 
     def run(self, message: Union[str, AgentMessage, dict]) -> AgentMessage:
+        """
+        执行“生成-反思-改写”的迭代流程。
+
+        流程概览：
+        1) 使用 executor 生成初版回答
+        2) 作为“评审者”调用 llm 产出 FINISHED 或 MODIFICATION
+        3) 若为 MODIFICATION，则把修改意见交给 executor 生成新版回答
+        4) 循环直到 FINISHED 或达到最大轮次
+        """
         self.reset()
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)

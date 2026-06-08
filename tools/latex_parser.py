@@ -49,10 +49,12 @@ class LaTeXParserTool(BaseTool):
 
     @property
     def name(self) -> str:
+        """返回工具唯一标识符（用于路由与注册）。"""
         return "latex_parser"
 
     @property
     def description(self) -> str:
+        """返回工具用途说明（用于向模型/用户展示能力与输入输出）。"""
         return (
             "解析 LaTeX 源文件，进行语法检查和文档结构分析。"
             "可识别语法错误（未闭合环境等）、提取章节层次、分析公式和图表。"

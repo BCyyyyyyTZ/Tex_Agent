@@ -1,3 +1,16 @@
+"""
+论文检查专用 Agent（PaperCheckAgent）。
+
+该 Agent 以“论文要求（Markdown/文本）”为检查标准，驱动 LLM 从 PDF 论文中找出所有不符合项：
+1) 读取 rules_path 作为检查规则注入到 system prompt
+2) LLM 输出 BEGIN ... END 包裹的 JSON 问题列表（页码/原文片段/问题原因）
+3) 调用 PdfCommentTool 在 PDF 上批注，输出带批注的 PDF（由 tool_args 指定路径）
+
+注意：
+- 页码规则以 PDF 的第一页为 1（在提示词中强调），但 PdfCommentTool 内部使用 0-based 索引；
+  这里的转换由工具内部处理/或由 LLM 输出规范控制。
+"""
+
 from typing import List, Optional, Union
 from agents.base_agent import BaseAgent
 from agents.simple_agent import SimpleAgent
@@ -46,6 +59,12 @@ SYSTEM_PROMPT = """你是一个专业的论文检查助手，你的任务是根�
 不要给出除以上定义的格式外其他任何格式的回复。"""
 
 class PaperCheckAgent(SimpleAgent):
+    """
+    面向 PDF 论文的“规则驱动检查 + 自动批注”Agent。
+
+    该类继承 SimpleAgent，复用其 LLM 调用与基础消息规范化能力；
+    同时将可用工具限制为 PdfCommentTool，使模型输出更聚焦于“生成批注列表”。
+    """
     def __init__(
         self,
         name: str,
@@ -55,6 +74,7 @@ class PaperCheckAgent(SimpleAgent):
         temperature: float = TEMPERATURE,
         max_history: int = 100,
     ):
+        """读取论文要求规则文件并构建仅包含 PdfCommentTool 的检查型 Agent。"""
         try:
             with open(rules_path, "r", encoding="utf-8") as f:
                 rules = f.read()
@@ -76,6 +96,17 @@ class PaperCheckAgent(SimpleAgent):
         )
 
     def paper_check(self, message: AgentMessage) -> AgentMessage:
+        """
+        执行论文检查并生成批注结果。
+
+        Args:
+            message: 输入消息；通常包含
+                - metadata.attachment: PDF 路径列表（供 Gemini 上传/或供上层系统处理）
+                - metadata.tool_args: pdf_comment 的默认参数（pdf_path/output_path）
+
+        Returns:
+            AgentMessage(content=tool_result.output)，其中 output 为批注工具返回的摘要文本。
+        """
         llm_content = self.run(message).content
         begin_index = llm_content.find("BEGIN")
         end_idx = llm_content.find("END")

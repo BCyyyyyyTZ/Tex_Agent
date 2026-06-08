@@ -28,6 +28,7 @@ class FileLoadingTool(BaseTool):
     """
 
     def __init__(self):
+        """初始化文件加载工具，并声明支持的输入路径参数 schema。"""
         super().__init__(
             name="file_loading",
             description="加载指定文件路径的文件内容并返回。输入文件的绝对路径，返回文件的文本内容。支持文本文件、PDF、Word等文件格式。",
