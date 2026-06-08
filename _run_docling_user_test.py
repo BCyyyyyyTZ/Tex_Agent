@@ -85,7 +85,7 @@ def run_test_d():
 
     parser = YAMLWorkflowParser()
     try:
-        cfg = parser.load_config("config/workflow_docling_user_test.json")
+        cfg = parser.load_config("config/workflow/workflow_docling_user_test.json")
         nodes = parser.parse_nodes(cfg)
         edges = parser.parse_edges(cfg)
         ctx = ContextManager(max_messages=50, default_limit=10)

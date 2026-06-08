@@ -134,29 +134,116 @@
     saveSel(lsKey, nextSel);
   }
 
-  function renderMergedUploaded(ul, status) {
+  function wirePendingFileLabel(inputEl, labelEl, clearBtn, emptyText) {
+    if (!inputEl || !labelEl) return;
+    function sync() {
+      var f = inputEl.files && inputEl.files[0];
+      labelEl.textContent = f ? "已选：" + f.name : emptyText || "";
+      labelEl.classList.toggle("file-pending--active", !!f);
+      if (clearBtn) {
+        clearBtn.style.display = f ? "inline-flex" : "none";
+      }
+    }
+    inputEl.addEventListener("change", sync);
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        inputEl.value = "";
+        try {
+          inputEl.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (_e) {
+          /* empty */
+        }
+      });
+    }
+    sync();
+  }
+
+  function parseErrorResponse(r) {
+    if (!r.ok) {
+      return r
+        .json()
+        .then(function (d) {
+          var de = d && d.detail;
+          if (typeof de === "string" && de.trim()) throw new Error(de);
+          throw new Error(r.statusText || "上传失败");
+        })
+        .catch(function (e) {
+          if (e instanceof Error) throw e;
+          throw new Error(r.statusText || "上传失败");
+        });
+    }
+    return r.json();
+  }
+
+  function renderGlobalUploadedSummary(ul, status) {
     if (!ul) return;
-    return Promise.all([fetchList("pdfs"), fetchList("documents")])
+    return Promise.all([
+      fetchList("pdfs"),
+      fetchList("documents"),
+      fetchList("skills"),
+      fetchList("checklists"),
+    ])
       .then(function (res) {
         var pdfF = (res[0] && res[0].files) || [];
         var docF = (res[1] && res[1].files) || [];
+        var skillF = (res[2] && res[2].files) || [];
+        var checkF = (res[3] && res[3].files) || [];
+
         var merged = []
           .concat(
             pdfF.map(function (f) {
-              return { cat: "pdfs", name: f.name, size: f.size, modified: f.modified };
+              return {
+                cat: "pdfs",
+                catLabel: "PDF",
+                name: f.name,
+                size: f.size,
+                modified: f.modified,
+              };
             })
           )
           .concat(
             docF.map(function (f) {
-              return { cat: "documents", name: f.name, size: f.size, modified: f.modified };
+              return {
+                cat: "documents",
+                catLabel: "文档",
+                name: f.name,
+                size: f.size,
+                modified: f.modified,
+              };
+            })
+          )
+          .concat(
+            skillF.map(function (f) {
+              return {
+                cat: "skills",
+                catLabel: "Skill",
+                name: f.name,
+                size: f.size,
+                modified: f.modified,
+              };
+            })
+          )
+          .concat(
+            checkF.map(function (f) {
+              return {
+                cat: "checklists",
+                catLabel: "Checklist",
+                name: f.name,
+                size: f.size,
+                modified: f.modified,
+              };
             })
           );
+
         merged.sort(function (a, b) {
           return String(b.modified || "").localeCompare(String(a.modified || ""));
         });
 
         var selPdf = loadSel(LS.pdfs);
         var selDoc = loadSel(LS.documents);
+        var selSkill = loadSel(LS.skills);
+        var selCl = loadSel(LS.checklists);
+
         var namesP = {};
         pdfF.forEach(function (f) {
           namesP[f.name] = true;
@@ -164,6 +251,14 @@
         var namesD = {};
         docF.forEach(function (f) {
           namesD[f.name] = true;
+        });
+        var namesS = {};
+        skillF.forEach(function (f) {
+          namesS[f.name] = true;
+        });
+        var namesC = {};
+        checkF.forEach(function (f) {
+          namesC[f.name] = true;
         });
         saveSel(
           LS.pdfs,
@@ -177,14 +272,28 @@
             return namesD[n];
           })
         );
+        saveSel(
+          LS.skills,
+          selSkill.filter(function (n) {
+            return namesS[n];
+          })
+        );
+        saveSel(
+          LS.checklists,
+          selCl.filter(function (n) {
+            return namesC[n];
+          })
+        );
         selPdf = loadSel(LS.pdfs);
         selDoc = loadSel(LS.documents);
+        selSkill = loadSel(LS.skills);
+        selCl = loadSel(LS.checklists);
 
         ul.innerHTML = "";
         if (merged.length === 0) {
           var li0 = document.createElement("li");
           li0.className = "asset-list-empty";
-          li0.textContent = "尚无从输入区旁上传的 PDF/文档。";
+          li0.textContent = "暂无已上传文件。可在下方输入区旁或右侧各区块上传。";
           ul.appendChild(li0);
           setAssetStatus(status, "", false);
           return;
@@ -198,20 +307,33 @@
           var cb = document.createElement("input");
           cb.type = "checkbox";
           cb.className = "asset-cb";
-          var lsKey = item.cat === "pdfs" ? LS.pdfs : LS.documents;
-          var curSel = item.cat === "pdfs" ? selPdf : selDoc;
+          var lsKey =
+            item.cat === "pdfs"
+              ? LS.pdfs
+              : item.cat === "documents"
+                ? LS.documents
+                : item.cat === "skills"
+                  ? LS.skills
+                  : LS.checklists;
+          var curSel =
+            item.cat === "pdfs"
+              ? selPdf
+              : item.cat === "documents"
+                ? selDoc
+                : item.cat === "skills"
+                  ? selSkill
+                  : selCl;
           cb.checked = curSel.indexOf(item.name) >= 0;
           cb.addEventListener("change", function () {
-            var k = item.cat === "pdfs" ? LS.pdfs : LS.documents;
-            var all = loadSel(k);
+            var all = loadSel(lsKey);
             var i = all.indexOf(item.name);
             if (cb.checked && i < 0) all.push(item.name);
             if (!cb.checked && i >= 0) all.splice(i, 1);
-            saveSel(k, all);
+            saveSel(lsKey, all);
           });
           var badge = document.createElement("span");
           badge.className = "asset-badge";
-          badge.textContent = item.cat === "pdfs" ? "PDF" : "文档";
+          badge.textContent = item.catLabel;
           var link = document.createElement("a");
           link.href = downloadUrl(item.cat, item.name);
           link.textContent = item.name;
@@ -230,7 +352,9 @@
         });
         setAssetStatus(
           status,
-          "共 " + merged.length + " 个已上传项",
+          "共 " +
+            merged.length +
+            " 个文件（PDF / 文档 / Skill / Checklist）；勾选将附加到发送消息",
           false
         );
       })
@@ -247,7 +371,7 @@
     var ustatus = document.getElementById("uploaded-files-status");
     if (!input || !btn) return;
     function afterUpload() {
-      return renderMergedUploaded(ul, ustatus);
+      return renderGlobalUploadedSummary(ul, ustatus);
     }
     function doUpload() {
       var f = input.files && input.files[0];
@@ -272,6 +396,11 @@
         })
         .then(function () {
           input.value = "";
+          try {
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          } catch (_e) {
+            /* empty */
+          }
           setComposerStatus(status, "已上传", false);
           return afterUpload();
         })
@@ -295,7 +424,7 @@
 
   window.getWebAssetSelection = getWebAssetSelection;
   window.refreshWebUploadedList = function () {
-    return renderMergedUploaded(
+    return renderGlobalUploadedSummary(
       document.getElementById("uploaded-files-list"),
       document.getElementById("uploaded-files-status")
     );
@@ -304,13 +433,38 @@
   function init() {
     wireComposerUpload();
 
+    wirePendingFileLabel(
+      document.getElementById("composer-file"),
+      document.getElementById("composer-pending-name"),
+      document.getElementById("composer-clear-file-btn"),
+      ""
+    );
+    wirePendingFileLabel(
+      document.getElementById("skill-file"),
+      document.getElementById("skill-pending-name"),
+      document.getElementById("skill-clear-file-btn"),
+      ""
+    );
+    wirePendingFileLabel(
+      document.getElementById("checklist-file"),
+      document.getElementById("checklist-pending-name"),
+      document.getElementById("checklist-clear-file-btn"),
+      ""
+    );
+
     var skillForm = document.getElementById("skill-upload-form");
     var skillFile = document.getElementById("skill-file");
     var skillStatus = document.getElementById("skill-panel-status");
     var skillList = document.getElementById("skill-list");
+    var skillSubmitBtn = skillForm
+      ? skillForm.querySelector('button[type="submit"]')
+      : null;
     if (skillForm && skillFile) {
-      skillForm.addEventListener("submit", function (ev) {
-        ev.preventDefault();
+      function doSkillUpload(ev) {
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
         var f = skillFile.files && skillFile.files[0];
         if (!f) {
           setAssetStatus(skillStatus, "请选择文件", true);
@@ -320,38 +474,45 @@
         var fd = new FormData();
         fd.append("file", f, f.name);
         fetch(API + "storage/skills", { method: "POST", body: fd })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().then(function (d) {
-                var de = d.detail;
-                if (typeof de === "string") throw new Error(de);
-                throw new Error(r.statusText);
-              });
-            }
-            return r.json();
-          })
+          .then(parseErrorResponse)
           .then(function () {
             skillFile.value = "";
+            try {
+              skillFile.dispatchEvent(new Event("change", { bubbles: true }));
+            } catch (_e) {
+              /* empty */
+            }
             return fetchList("skills");
           })
           .then(function (d) {
             var files = (d && d.files) || [];
             renderSkillChecklistList("skills", skillList, files, LS.skills);
             setAssetStatus(skillStatus, "共 " + files.length + " 个", false);
+            if (typeof window.refreshWebUploadedList === "function") {
+              window.refreshWebUploadedList();
+            }
           })
           .catch(function (e) {
             setAssetStatus(skillStatus, (e && e.message) || String(e), true);
           });
-      });
+      }
+      skillForm.addEventListener("submit", doSkillUpload, false);
+      if (skillSubmitBtn) {
+        skillSubmitBtn.addEventListener("click", doSkillUpload, true);
+      }
     }
 
     var cf = document.getElementById("checklist-upload-form");
     var cfile = document.getElementById("checklist-file");
     var cstatus = document.getElementById("checklist-panel-status");
     var clist = document.getElementById("checklist-list");
+    var checklistSubmitBtn = cf ? cf.querySelector('button[type="submit"]') : null;
     if (cf && cfile) {
-      cf.addEventListener("submit", function (ev) {
-        ev.preventDefault();
+      function doChecklistUpload(ev) {
+        if (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+        }
         var f2 = cfile.files && cfile.files[0];
         if (!f2) {
           setAssetStatus(cstatus, "请选择文件", true);
@@ -361,29 +522,32 @@
         var fd2 = new FormData();
         fd2.append("file", f2, f2.name);
         fetch(API + "storage/checklists", { method: "POST", body: fd2 })
-          .then(function (r) {
-            if (!r.ok) {
-              return r.json().then(function (d) {
-                var de = d.detail;
-                if (typeof de === "string") throw new Error(de);
-                throw new Error(r.statusText);
-              });
-            }
-            return r.json();
-          })
+          .then(parseErrorResponse)
           .then(function () {
             cfile.value = "";
+            try {
+              cfile.dispatchEvent(new Event("change", { bubbles: true }));
+            } catch (_e) {
+              /* empty */
+            }
             return fetchList("checklists");
           })
           .then(function (d) {
             var files = (d && d.files) || [];
             renderSkillChecklistList("checklists", clist, files, LS.checklists);
             setAssetStatus(cstatus, "共 " + files.length + " 个", false);
+            if (typeof window.refreshWebUploadedList === "function") {
+              window.refreshWebUploadedList();
+            }
           })
           .catch(function (e) {
             setAssetStatus(cstatus, (e && e.message) || String(e), true);
           });
-      });
+      }
+      cf.addEventListener("submit", doChecklistUpload, false);
+      if (checklistSubmitBtn) {
+        checklistSubmitBtn.addEventListener("click", doChecklistUpload, true);
+      }
     }
 
     return fetchList("skills")
@@ -417,7 +581,7 @@
         );
       })
       .then(function () {
-        return renderMergedUploaded(
+        return renderGlobalUploadedSummary(
           document.getElementById("uploaded-files-list"),
           document.getElementById("uploaded-files-status")
         );

@@ -2,13 +2,12 @@
 """
 TeX Agent CLI 核心类
 """
-import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from utils.logger import get_logger
 from utils.loading_spinner import run_with_loading
-from utils.display import display
+from utils.display import display, safe_print
 from workflow.graph_builder import build_app_from_workflow
 from workflow.run_dump import create_run_output_dir
 from context.context_manager import ContextManager
@@ -94,7 +93,7 @@ class TeXAgentCLI:
                 "design": MemoryFactory.create_memory("private", "design"),
                 "think": MemoryFactory.create_memory("private", "think"),
                 "execute": MemoryFactory.create_memory("private", "execute"),
-                # 会话落盘仍走 shared.jsonl；与 use_branch=True 时一致使用 BranchMemory
+                # shared：分支元数据（启用 use_branch 时）；不再落盘整段节点 prompt
                 "shared": MemoryFactory.create_shared_memory(branch_enabled=False),
             }
     
@@ -133,6 +132,7 @@ class TeXAgentCLI:
             persona_memory=self.persona_memory,
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
+            execution_mode="task",
         )
 
     def _human_input_provider(self, prompt: str, schema: Dict[str, Any], rules: Dict[str, Any]) -> Any:
@@ -140,50 +140,11 @@ class TeXAgentCLI:
         默认的人类输入提供器，可被替换/注入以支持 GUI、Web、测试桩。
         """
         _ = rules
-        print(f"\n🙋 用户节点请求: {prompt}")
+        safe_print(f"\n🙋 用户节点请求: {prompt}")
         options = schema.get("options", []) if isinstance(schema, dict) else []
         if isinstance(options, list) and options:
-            print(f"   可选项: {options}")
+            safe_print(f"   可选项: {options}")
         return input("   请输入反馈: ")
-
-    def _persist_new_messages_to_shared_memory_store(
-        self, new_messages_raw: List[Any], workflow_label: str
-    ) -> None:
-        """
-        将本轮追加到会话的消息同步写入 shared BranchMemory（memory_store/*.jsonl）。
-
-        说明：ctx.build 的检索仍走 ContextManager + state.messages（会话级）；
-        此处仅做与对话同语义的持久化，便于跨重启检索与 show_status 统计。
-        """
-        shared = self.memory_system.get("shared")
-        if shared is None or not hasattr(shared, "save"):
-            return
-        for raw in new_messages_raw:
-            msg = ensure_message(
-                raw,
-                default_role="assistant",
-                default_source_type="system",
-                default_source_id="workflow",
-            )
-            body = str(msg.content or "").strip()
-            if not body:
-                continue
-            key = f"session:{self.current_branch}:{uuid.uuid4().hex}"
-            meta: Dict[str, Any] = {
-                "role": msg.role,
-                "source_type": msg.source_type,
-                "source_id": msg.source_id,
-                "workflow": workflow_label,
-                "branch": self.current_branch,
-            }
-            if isinstance(msg.metadata, dict):
-                for k in ("node_id", "node_type"):
-                    if k in msg.metadata:
-                        meta[k] = msg.metadata[k]
-            try:
-                shared.save(key, body, metadata=meta)
-            except Exception as e:
-                logger.warning("会话记忆落盘失败: %s", e)
 
     def _execute_with_app(
         self,
@@ -306,7 +267,6 @@ class TeXAgentCLI:
                     default_source_id="workflow",
                 )
                 self.context.save(msg)
-            self._persist_new_messages_to_shared_memory_store(new_messages, workflow_label)
 
         return result
     
@@ -328,7 +288,7 @@ class TeXAgentCLI:
         
         context_size = len(self.context) if self.context else 0
         workflow_label = workflow_name or self.DEFAULT_WORKFLOW
-        print(f"\n🔄 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
+        safe_print(f"\n🔄 执行任务 [分支: {self.current_branch} | 工作流: {workflow_label}] (对话: {context_size}条)")
 
         try:
             app = self._build_app_for_workflow(workflow_name)
@@ -364,22 +324,22 @@ class TeXAgentCLI:
         from workflow.workflow_parser import YAMLWorkflowParser
         from config.planner_config import MAX_PLAN_ROUNDS_DEFAULT
 
-        print("\n🧠 [1/4] 初始化规划器...")
+        safe_print("\n🧠 [1/4] 初始化规划器...")
         planner = AutoAgentsMASPlanner(max_plan_rounds=MAX_PLAN_ROUNDS_DEFAULT)
         parser = YAMLWorkflowParser()
 
-        print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
+        safe_print("   [2/4] PlanAgent + Supervisor 规划中（需 10~30 秒）...")
         plan = planner.decompose(user_input)
 
-        print("   [3/4] 为各节点分配 Agent 类型...")
+        safe_print("   [3/4] 为各节点分配 Agent 类型...")
         plan = planner.assign(plan, [])
 
         nodes, edges = parser.from_task_plan(plan)
-        print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
+        safe_print(f"   规划完成：{len(nodes)} 个专家节点，{len(edges)} 条边")
         for n in nodes:
-            print(f"      - [{n.agent_name}] {n.node_id}")
+            safe_print(f"      - [{n.agent_name}] {n.node_id}")
 
-        print("   [4/4] 构建动态图（即将执行）...")
+        safe_print("   [4/4] 构建动态图（即将执行）...")
         app = parser.build_graph(
             nodes,
             edges,
@@ -387,8 +347,82 @@ class TeXAgentCLI:
             persona_memory=self.persona_memory,
             runtime_memory=self.context,
             human_input_provider=self._human_input_provider,
+            default_context_profile="dialogue",
+            default_workflow_name="plan_dynamic",
         )
         return nodes, edges, app
+
+    def build_auto_graph_and_app(
+        self, user_input: str, branch: Optional[str] = None
+    ) -> Tuple[List[Any], List[Any], Any]:
+        """
+        Auto 模式：当前默认单节点直连（后续可路由到 plan/task）。
+        """
+        from config.auto_config import AUTO_NODE_ID, AUTO_WORKFLOW_LABEL
+        from config.context_settings import (
+            PROFILE_AUTO_SINGLE,
+            get_profile_agent_spec,
+            get_profile_node_defaults,
+        )
+        from workflow.workflow_parser import NodeConfig
+        from workflow.graph_builder import build_dynamic_graph
+
+        target_branch = branch or self.current_branch
+        if target_branch != self.current_branch:
+            self.switch_branch(target_branch)
+
+        agent_spec = get_profile_agent_spec(PROFILE_AUTO_SINGLE)
+        node_cfg = dict(get_profile_node_defaults(PROFILE_AUTO_SINGLE))
+        node_cfg.setdefault("context_profile", PROFILE_AUTO_SINGLE)
+        node_cfg.setdefault("system_prompt", agent_spec.get("system_prompt", ""))
+        node_cfg.setdefault("subtask", agent_spec.get("subtask", ""))
+        node_cfg.setdefault("depends_on", [])
+
+        nodes = [
+            NodeConfig(
+                node_id=str(agent_spec.get("node_id") or AUTO_NODE_ID),
+                node_type="agent",
+                agent_name=str(agent_spec.get("agent_name") or "SimpleAgent"),
+                config=node_cfg,
+            )
+        ]
+        edges = []
+        app = build_dynamic_graph(
+            nodes=nodes,
+            edges=edges,
+            context_manager=self.context,
+            persona_memory=self.persona_memory,
+            runtime_memory=self.context,
+            default_workflow_name=AUTO_WORKFLOW_LABEL,
+            default_context_profile="auto_single",
+            human_input_provider=self._human_input_provider,
+        )
+        return nodes, edges, app
+
+    def run_auto_task(
+        self,
+        user_input: str,
+        branch: str = None,
+        *,
+        use_loading: bool = True,
+    ) -> dict:
+        """Auto 模式执行（当前为单节点）。"""
+        from config.auto_config import AUTO_WORKFLOW_LABEL
+
+        nodes, edges, app = self.build_auto_graph_and_app(user_input, branch)
+        result = self._execute_with_app(
+            user_input,
+            app,
+            workflow_label=AUTO_WORKFLOW_LABEL,
+            use_loading=use_loading,
+        )
+        try:
+            result.setdefault("metadata", {})["__auto_graph__"] = (
+                _serialize_plan_graph_for_ui(nodes, edges)
+            )
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("[run_auto_task] 无法序列化 auto 图供 UI：%s", ex)
+        return result
 
     def run_plan_task(
         self, user_input: str, branch: str = None, *, use_loading: bool = True
@@ -412,20 +446,20 @@ class TeXAgentCLI:
         if result.get("error") is None:
             node_ids = [n.node_id for n in nodes]
             hit = [nid for nid in node_ids if nid in result.get("metadata", {})]
-            print(f"\n   节点结构化输出已写入 metadata：{hit}")
+            safe_print(f"\n   节点结构化输出已写入 metadata：{hit}")
 
         return result
     
     def switch_branch(self, branch_name: str) -> bool:
         """切换分支；未知分支时返回 False。"""
         if branch_name == self.current_branch:
-            print(f"✅ 已经在分支 '{branch_name}'")
+            safe_print(f"✅ 已经在分支 '{branch_name}'")
             return True
 
         sh = self.memory_system.get("shared")
         if self.use_branch and sh is not None and hasattr(sh, "list_branches"):
             if branch_name not in sh.list_branches():
-                print(f"❌ 无此分支: {branch_name!r}")
+                safe_print(f"❌ 无此分支: {branch_name!r}")
                 return False
 
         old_branch = self.current_branch
@@ -440,8 +474,8 @@ class TeXAgentCLI:
                     )
         self._rebuild_workflow()
 
-        print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
-        print(f"   📝 对话历史: {len(self.context)} 条")
+        safe_print(f"✅ 从 '{old_branch}' 切换到 '{branch_name}'")
+        safe_print(f"   📝 对话历史: {len(self.context)} 条")
         return True
 
     def create_branch(self, branch_name: str, from_branch: str = "main") -> bool:
@@ -468,8 +502,49 @@ class TeXAgentCLI:
         else:
             self.contexts[branch_name] = ContextManager(max_messages=200, default_limit=20)
 
-        print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
+        safe_print(f"✅ 创建分支: {branch_name} (基于 {from_b})")
         return True
+
+    def get_branch_chat_history_for_api(self, branch_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        供 Web：返回某分支在 ContextManager 中的对话摘要（user / assistant 文本）。
+        不自动新建未知分支；分支须在记忆系统中已存在（与 switch_branch 一致）。
+        """
+        name = str(branch_name or self.current_branch).strip()
+        if self.use_branch:
+            sh = self.memory_system.get("shared")
+            if sh is not None and hasattr(sh, "list_branches"):
+                branches = sh.list_branches()
+                if name not in branches:
+                    raise ValueError(f"无此分支: {name}")
+
+        ctx = self.contexts.get(name)
+        if ctx is None:
+            return {"branch": name, "messages": []}
+
+        messages_out: List[Dict[str, Any]] = []
+        for msg in ctx.load():
+            if hasattr(msg, "to_dict"):
+                d = msg.to_dict()
+            else:
+                d = ensure_message(
+                    msg,
+                    default_role="assistant",
+                    default_source_type="system",
+                    default_source_id="context",
+                ).to_dict()
+            role = str(d.get("role") or "assistant")
+            if role not in ("user", "assistant"):
+                continue
+            body = str(d.get("content") or "").strip()
+            if not body:
+                continue
+            if role == "assistant":
+                from utils.reply_format import format_reply_for_ui
+
+                body = format_reply_for_ui(body)
+            messages_out.append({"role": role, "content": body})
+        return {"branch": name, "messages": messages_out}
 
     def get_branch_tree_for_api(self) -> Dict[str, Any]:
         """
@@ -524,7 +599,7 @@ class TeXAgentCLI:
     def merge_branch(self, branch_name: str):
         """合并分支"""
         if branch_name == "main":
-            print("❌ 不能合并主分支")
+            safe_print("❌ 不能合并主分支")
             return
         
         results = {}
@@ -533,7 +608,7 @@ class TeXAgentCLI:
                 results[name] = memory.merge_to_main(branch_name)
         
         merged_total = sum(r.get('merged_count', 0) for r in results.values())
-        print(f"✅ 分支 {branch_name} 已合并，共 {merged_total} 条记忆")
+        safe_print(f"✅ 分支 {branch_name} 已合并，共 {merged_total} 条记忆")
         
         if self.current_branch == branch_name:
             self.switch_branch("main")
@@ -543,24 +618,24 @@ class TeXAgentCLI:
         shared_mem = self.memory_system.get("shared")
         if hasattr(shared_mem, 'list_branches'):
             branches = shared_mem.list_branches()
-            print(f"\n📋 分支列表:")
+            safe_print(f"\n📋 分支列表:")
             for branch in branches:
                 ctx_size = len(self.contexts.get(branch, ContextManager()))
                 marker = "▶️" if branch == self.current_branch else "  "
-                print(f"  {marker} {branch} - {ctx_size} 条对话")
-            print()
+                safe_print(f"  {marker} {branch} - {ctx_size} 条对话")
+            safe_print()
     
     def show_status(self):
         """显示状态"""
-        print(display.banner("系统状态", width=50))
-        print(f"\n🌿 当前分支: {self.current_branch}")
-        print(f"   对话历史: {len(self.context)} 条")
+        safe_print(display.banner("系统状态", width=50))
+        safe_print(f"\n🌿 当前分支: {self.current_branch}")
+        safe_print(f"   对话历史: {len(self.context)} 条")
         
-        print(f"\n📚 记忆统计:")
+        safe_print(f"\n📚 记忆统计:")
         for name, memory in self.memory_system.items():
-            print(f"   {name}: {memory.get_size()} 条")
-        print(f"   用户画像文件: {self.persona_memory.path}")
-        print()
+            safe_print(f"   {name}: {memory.get_size()} 条")
+        safe_print(f"   用户画像文件: {self.persona_memory.path}")
+        safe_print()
     
     def clear_all(self):
         """清空所有"""
@@ -569,22 +644,22 @@ class TeXAgentCLI:
         self.persona_memory.reset_to_default()
         for ctx in self.contexts.values():
             ctx.clear()
-        print("✅ 已清空所有记忆、用户画像与对话")
+        safe_print("✅ 已清空所有记忆、用户画像与对话")
     
     def show_branch_status(self):
         """显示分支状态"""
         shared_mem = self.memory_system.get("shared")
         if hasattr(shared_mem, 'get_branch_info'):
             info = shared_mem.get_branch_info()
-            print(f"\n📊 分支系统状态:")
-            print(f"   启用: {info.get('enabled')}")
-            print(f"   当前: {info.get('current')}")
-            print(f"   分支: {', '.join(info.get('branches', []))}")
+            safe_print(f"\n📊 分支系统状态:")
+            safe_print(f"   启用: {info.get('enabled')}")
+            safe_print(f"   当前: {info.get('current')}")
+            safe_print(f"   分支: {', '.join(info.get('branches', []))}")
             if info.get('branch_details'):
-                print(f"\n   分支详情:")
+                safe_print(f"\n   分支详情:")
                 for name, details in info.get('branch_details', {}).items():
-                    print(f"     📁 {name}: {details.get('size', 0)} 条记忆")
-            print()
+                    safe_print(f"     📁 {name}: {details.get('size', 0)} 条记忆")
+            safe_print()
     
     def process_input(self, input_line: str) -> bool:
         """处理用户输入"""

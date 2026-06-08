@@ -7,6 +7,14 @@ from memory.simple_memory import SimpleMemory
 from memory.base_memory import MemoryType
 from utils.logger import get_logger
 from config.planner_config import METADATA_CHAIN_RESULT_MAX_CHARS
+from config.context_settings import (
+    PROFILE_LEGACY,
+    default_include_metadata_chain,
+    dialogue_max_turns,
+    filter_messages_for_memory,
+    format_dialogue_history,
+    memory_search_enabled,
+)
 
 logger = get_logger(__name__)
 MsgType = Union[Dict[str, Any], WorkflowMessage]
@@ -112,7 +120,14 @@ class ContextManager(BaseContext):
             return text[-max_tokens:]
         return text
 
-    def search(self, query: str, limit: int = 10, state: Optional[Dict[str, Any]] = None) -> List[Any]:
+    def search(
+        self,
+        query: str,
+        limit: int = 10,
+        state: Optional[Dict[str, Any]] = None,
+        *,
+        context_profile: str = PROFILE_LEGACY,
+    ) -> List[Any]:
         """
         在「会话消息」中检索，不读写图内 metadata。
 
@@ -133,14 +148,12 @@ class ContextManager(BaseContext):
         if not msgs_raw:
             return []
 
-        mem = SimpleMemory(MemoryType.SHARED, max_size=max(len(msgs_raw), 16))
-        for i, raw in enumerate(msgs_raw):
-            msg = ensure_message(
-                raw,
-                default_role="assistant",
-                default_source_type="system",
-                default_source_id="session",
-            )
+        filtered = filter_messages_for_memory(msgs_raw, context_profile)
+        if not filtered:
+            return []
+
+        mem = SimpleMemory(MemoryType.SHARED, max_size=max(len(filtered), 16))
+        for i, msg in enumerate(filtered):
             meta = dict(msg.metadata or {})
             meta.setdefault("role", msg.role)
             meta.setdefault("source_type", msg.source_type)
@@ -164,35 +177,72 @@ class ContextManager(BaseContext):
             # 兼容旧参数：synthetic_metadata_history=True 等价于 minimal
             history_mode = "minimal" if cfg.get("synthetic_metadata_history") else "full"
         
+        profile = str(cfg.get("context_profile") or PROFILE_LEGACY).strip().lower()
+
         # Query 提取
         query = state.get("input", "")
         if not query and msgs:
             query = str(msgs[-1].content)
-            
+
         # Memory 检索
         mem_items: List[Any] = []
-        if memory and query:
+        if memory and query and memory_search_enabled(cfg, profile):
             mem_limit = int(cfg.get("mem_limit", 3) or 3)
             try:
-                mem_items = memory.search(query=query, limit=mem_limit, state=state)
+                mem_items = memory.search(
+                    query=query, limit=mem_limit, state=state, context_profile=profile
+                )
             except TypeError:
                 mem_items = memory.search(query=query, limit=mem_limit)
-            
+
         # 组装
         if retrieved and retrieved.strip():
             parts.append(f"<context type='retrieved'>\n{retrieved}\n</context>")
         if mem_items:
             mem_str = "\n".join(f"- {str(it)}" for it in mem_items)
-            parts.append(f"<context type='memory'>\n{mem_str}\n</context>")
+            parts.append(
+                f"<context type='memory' priority='low'>\n{mem_str}\n</context>"
+            )
         if history_mode == "minimal":
-            chain = format_metadata_chain_for_prompt(state)
-            if chain.strip():
-                parts.append(f"<context type='metadata_chain'>\n{chain}\n</context>")
+            incl_chain = default_include_metadata_chain(
+                profile, is_terminal=bool(cfg.get("is_terminal")), node_config=cfg
+            )
+            if incl_chain:
+                chain = format_metadata_chain_for_prompt(state)
+                if chain.strip():
+                    parts.append(
+                        f"<context type='metadata_chain' priority='low'>\n{chain}\n</context>"
+                    )
+            if profile != PROFILE_LEGACY:
+                dlg_msgs = filter_messages_for_memory(
+                    list(self._messages) if self._messages else msgs_raw,
+                    profile,
+                )
+                dlg = format_dialogue_history(
+                    dlg_msgs, max_turns=dialogue_max_turns(profile)
+                )
+                if dlg.strip():
+                    parts.append(
+                        f"<context type='dialogue_history' priority='low'>\n{dlg}\n</context>"
+                    )
         else:
             limit = cfg.get("conv_limit", self.max_messages or 20)
-            window = msgs[-limit:] if limit else msgs
-            if window:
-                parts.append(f"<context type='history'>\n{self.structure(window, cfg.get('format', 'plain'))}\n</context>")
+            if profile != PROFILE_LEGACY:
+                window_msgs = filter_messages_for_memory(msgs, profile)
+                window = window_msgs[-limit:] if limit else window_msgs
+                if window:
+                    parts.append(
+                        f"<context type='dialogue_history' priority='low'>\n"
+                        f"{format_dialogue_history(window, max_turns=dialogue_max_turns(profile))}\n"
+                        f"</context>"
+                    )
+            else:
+                window = msgs[-limit:] if limit else msgs
+                if window:
+                    parts.append(
+                        f"<context type='history'>\n"
+                        f"{self.structure(window, cfg.get('format', 'plain'))}\n</context>"
+                    )
 
         structured = "\n\n".join(parts)
         return self.compress(structured, cfg.get("max_tokens"))

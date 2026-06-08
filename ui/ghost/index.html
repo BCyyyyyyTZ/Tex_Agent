@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TeX Agent — 幽灵窗口</title>
+  <link rel="stylesheet" href="/static/ghost.css" />
+</head>
+<body>
+  <header class="top-bar">
+    <div class="brand">TeX Agent <span class="sub">幽灵窗口</span></div>
+    <div class="meta" id="meta-root">—</div>
+    <div class="stats" id="stats">连接中…</div>
+    <label class="file-pick">
+      当前文件
+      <div class="file-select-wrap">
+        <select id="file-select"></select>
+        <span id="file-pick-global-status" class="global-status" aria-label="项目状态点"></span>
+      </div>
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="show-polish" checked /> 润色建议
+    </label>
+    <label class="toggle">
+      <input type="checkbox" id="ghost-enabled" checked /> 显示幽灵卡
+    </label>
+    <button type="button" id="trigger-compile" class="top-btn">编译检查</button>
+    <button type="button" id="toggle-polish-panel" class="top-btn">主动润色</button>
+  </header>
+
+  <div id="compile-indicator" class="compile-indicator" hidden>
+    <span id="compile-indicator-icon" class="compile-icon compile-running" aria-hidden="true"></span>
+    <span id="compile-indicator-text">正在进行编译检查</span>
+  </div>
+
+  <section class="polish-panel" id="polish-panel" hidden>
+    <label>
+      目标文件
+      <select id="polish-target-file"></select>
+    </label>
+    <label class="grow">
+      润色需求
+      <input id="polish-query" type="text" placeholder="例如：将摘要段落改得更学术、避免口语化" />
+    </label>
+    <button type="button" id="submit-polish" class="top-btn primary">生成润色建议</button>
+    <span id="polish-status" class="polish-status"></span>
+  </section>
+
+  <main class="editor-wrap" id="editor-wrap">
+    <div class="source-panel" id="source-panel"></div>
+    <div class="ghost-layer" id="ghost-layer"></div>
+  </main>
+
+  <footer class="hint">
+    拖动卡片标题栏移动 · 右下角缩放 · 「应用」写回 .tex · 保存文件后自动刷新诊断
+  </footer>
+
+  <script src="/static/ghost.js"></script>
+</body>
+</html>

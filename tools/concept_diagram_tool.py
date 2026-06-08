@@ -6,7 +6,7 @@ import sys
 import time
 import zlib
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import httpx
 
@@ -16,6 +16,7 @@ if __package__ in {None, ""}:
 from agents.base_agent import GeminiClient
 from core.message import ToolResult
 from tools.base_tool import BaseTool
+from tools.web_tool_utils import unique_output_path, web_tool_output_dir
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -36,6 +37,7 @@ class ConceptDiagramTool(BaseTool):
                 "prompt": "必填，概念描述或需要图示化的内容",
                 "output_path": "必填，输出图片路径，例如 'outputs/diagram.png'",
                 "title": "可选，图标题",
+                "mermaid_code": "可选，直接提供 Mermaid 代码（跳过 Gemini）",
             },
         )
         self.model_name = model_name
@@ -105,38 +107,49 @@ class ConceptDiagramTool(BaseTool):
                         continue
                     raise last_err
 
-    def run(self, prompt: str, output_path: str, title: str = "") -> ToolResult:
+    def run(
+        self,
+        prompt: str = "",
+        output_path: str = "",
+        title: str = "",
+        mermaid_code: str = "",
+    ) -> ToolResult:
         try:
-            if not prompt:
-                return ToolResult(success=False, output="", error="prompt 不能为空")
             if not output_path:
                 return ToolResult(success=False, output="", error="output_path 不能为空")
-
-            api_key = self._resolve_api_key("")
-            if not api_key:
-                return ToolResult(
-                    success=False,
-                    output="",
-                    error="未配置 GEMINI_API_KEY 或 GOOGLE_API_KEY，无法调用 GeminiClient",
-                )
 
             out = Path(output_path)
             out.parent.mkdir(parents=True, exist_ok=True)
 
-            llm = GeminiClient(model_name=self.model_name, api_key=api_key, temperature=self.temperature)
-            llm_prompt = self._build_prompt(prompt, title)
-            raw = llm.response(llm_prompt)
-            mermaid_code = self._extract_mermaid(raw)
+            manual = self._extract_mermaid(mermaid_code)
+            if manual:
+                code = manual
+            else:
+                if not prompt:
+                    return ToolResult(success=False, output="", error="prompt 不能为空（或直接提供 mermaid_code）")
 
-            if not mermaid_code.lower().lstrip().startswith(("flowchart", "graph")):
+                api_key = self._resolve_api_key("")
+                if not api_key:
+                    return ToolResult(
+                        success=False,
+                        output="",
+                        error="未配置 GEMINI_API_KEY 或 GOOGLE_API_KEY。调试时可直接在 mermaid_code 字段粘贴 Mermaid 代码。",
+                    )
+
+                llm = GeminiClient(model_name=self.model_name, api_key=api_key, temperature=self.temperature)
+                llm_prompt = self._build_prompt(prompt, title)
+                raw = llm.response(llm_prompt)
+                code = self._extract_mermaid(raw)
+
+            if not code.lower().lstrip().startswith(("flowchart", "graph")):
                 return ToolResult(
                     success=False,
                     output="",
-                    error="模型输出不是有效的 Mermaid flowchart 代码",
-                    metadata={"llm_output": raw},
+                    error="不是有效的 Mermaid flowchart 代码（需以 flowchart 或 graph 开头）",
+                    metadata={"mermaid_code": code},
                 )
 
-            self._render_with_mermaid_ink(mermaid_code, out)
+            self._render_with_mermaid_ink(code, out)
             if not out.exists() or out.stat().st_size <= 0:
                 return ToolResult(success=False, output="", error="图片生成失败：输出文件为空")
 
@@ -145,9 +158,9 @@ class ConceptDiagramTool(BaseTool):
                 output=str(out),
                 metadata={
                     "output_path": str(out),
-                    "model_name": self.model_name,
+                    "model_name": self.model_name if not manual else "",
                     "render_backend": "mermaid.ink",
-                    "mermaid_code": mermaid_code,
+                    "mermaid_code": code,
                     "title": title,
                 },
             )
@@ -156,44 +169,4 @@ class ConceptDiagramTool(BaseTool):
             return ToolResult(success=False, output="", error=f"ConceptDiagramTool 失败: {e}")
 
 
-def _assert_file_ok(path: str) -> None:
-    p = Path(path)
-    if not p.exists():
-        raise AssertionError(f"文件未生成: {p}")
-    if p.stat().st_size <= 0:
-        raise AssertionError(f"文件为空: {p}")
-
-
-def _run_self_test(output_dir: Optional[str] = None) -> None:
-    base = Path(output_dir) if output_dir else (Path(__file__).resolve().parents[1] / "outputs" / "concept_diagram_tool_test")
-    base.mkdir(parents=True, exist_ok=True)
-
-    for p in base.glob("*.png"):
-        try:
-            p.unlink()
-        except Exception:
-            pass
-
-    tool = ConceptDiagramTool(model_name="gemini-3.1-flash-lite-preview", api_key="", temperature=0.2)
-    r = tool.run(
-        prompt=(
-            "请画出一个完整的论文方法与实验流程概念图，主题为面向长文档的检索增强生成系统用于学术问答\n"
-            "需要包含数据来源与采集 解析与清洗 段落切分 去重 质量过滤\n"
-            "需要包含离线索引构建模块 编码器训练 向量表示 向量库构建 稀疏索引构建 元数据存储\n"
-            "需要包含训练阶段 模拟查询生成 正负样本构造 对比学习 监督微调 偏好优化\n"
-            "需要包含在线推理阶段 查询改写 混合检索 交叉重排 上下文拼接 生成回答 引用对齐 事实核验 安全过滤\n"
-            "需要包含失败回退路径 检索为空时关键词检索 仍为空时拒答并给出下一步建议\n"
-            "需要包含评测与分析 自动指标 人工评测 消融实验 误差分析\n"
-            "需要包含部署与迭代 缓存 监控 反馈收集 周期性重建索引 模型版本回滚"
-        ),
-        output_path=str(base / "rag_system_overview.png"),
-        title="RAG System Overview",
-    )
-    assert r.success, r.error
-    _assert_file_ok(r.output)
-    print(f"概念示意图自测通过，输出目录: {base.resolve()}")
-
-
-if __name__ == "__main__":
-    out_dir = sys.argv[1] if len(sys.argv) > 1 else None
-    _run_self_test(out_dir)
+__all__ = ["ConceptDiagramTool", "unique_output_path", "web_tool_output_dir"]

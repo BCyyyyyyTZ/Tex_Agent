@@ -17,6 +17,10 @@ from langgraph.graph import StateGraph, START, END
 from core.state import WorkflowState
 from context.context_manager import ContextManager
 from config.planner_config import DEFAULT_HISTORY_MODE
+from config.context_settings import (
+    resolve_graph_context_profile,
+    resolve_node_context_profile,
+)
 from utils.logger import get_logger
 from workflow.condition_evaluator import route_by_conditions
 from workflow.workflow_parser import EdgeConfig, NodeConfig
@@ -33,6 +37,29 @@ def _resolve_entry_node(node_ids: list, edges: list) -> str:
     target_nodes = {e.to_node for e in edges}
     entry_candidates = [nid for nid in node_ids if nid not in target_nodes]
     return entry_candidates[0] if entry_candidates else node_ids[0]
+
+
+def _effective_agent_node_config(
+    raw_config: Dict[str, Any],
+    *,
+    graph_profile: str,
+    is_terminal: bool,
+) -> Dict[str, Any]:
+    """合并图级 context_profile，并为非 legacy 填充安全默认值（可被 JSON 显式覆盖）。"""
+    cfg = dict(raw_config or {})
+    profile = resolve_node_context_profile(cfg, graph_profile=graph_profile)
+    cfg["context_profile"] = profile
+    from config.context_settings import PROFILE_LEGACY
+
+    if profile != PROFILE_LEGACY:
+        cfg.setdefault("is_terminal", is_terminal)
+        if "include_metadata_chain" not in cfg:
+            from config.context_settings import default_include_metadata_chain
+
+            cfg["include_metadata_chain"] = default_include_metadata_chain(
+                profile, is_terminal=is_terminal, node_config=cfg
+            )
+    return cfg
 
 
 def _resolve_terminal_nodes(node_ids: list, edges: list) -> set:
@@ -57,22 +84,35 @@ def load_workflow_graph_config(workflow_name: str = "default") -> Tuple[list, li
 def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     """根据 agent_type 实例化对应 Agent。"""
     from agents.simple_agent import SimpleAgent as _SimpleAgent
+    from agents.multi_simple_agent import MultiSimpleAgent as _MultiSimpleAgent
     from config.planner_config import AGENT_TYPE_NAMES, NODE_DEFAULT_TEMPERATURE
 
     system_prompt = node_config.get("system_prompt", f"你是 {node_id} 专家。")
     temperature = float(node_config.get("temperature", NODE_DEFAULT_TEMPERATURE))
+    max_tok = node_config.get("max_tokens")
 
     alias = str(agent_type or "").strip() or "SimpleAgent"
     if alias not in AGENT_TYPE_NAMES:
         logger.warning(f"[DynamicGraph] 未知 Agent 类型 '{alias}'，降级为 SimpleAgent")
-    elif alias not in ("SimpleAgent", "SimpleAgent_new"):
-        logger.warning(f"[DynamicGraph] '{alias}' 尚未实现，降级为 SimpleAgent")
+        alias = "SimpleAgent"
+    
+    if alias == "MultiSimpleAgent":
+        return _MultiSimpleAgent(
+            name=node_id,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            tools=[],
+        )
 
+    # 兼容旧实现
+    if alias not in ("SimpleAgent", "SimpleAgent_new"):
+        logger.warning(f"[DynamicGraph] '{alias}' 尚未实现，降级为 SimpleAgent")
     return _SimpleAgent(
         name=node_id,
         system_prompt=system_prompt,
         temperature=temperature,
         tools=[],
+        max_tokens=int(max_tok) if max_tok is not None else None,
     )
 
 
@@ -150,6 +190,7 @@ def build_dynamic_graph(
     runtime_memory: Optional[Any] = None,
     default_workflow_name: str = "default",
     default_history_mode: Optional[str] = None,
+    default_context_profile: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
 ) -> Any:
     """
@@ -166,7 +207,7 @@ def build_dynamic_graph(
       - tool             → make_tool_node
       - user             → make_user_node
       - parallel_fork    → make_parallel_fork_node（轻量分叉标记）
-      - parallel_join    → make_parallel_join_node（汇聚 + agent 整合）
+      - parallel_join    → make_parallel_join_node（汇聚；可选 passthrough_join 无 LLM）
 
     Returns:
         已编译的 LangGraph CompiledGraph，支持 .invoke() / .ainvoke()。
@@ -181,6 +222,10 @@ def build_dynamic_graph(
 
     eff_history_mode = (
         default_history_mode if default_history_mode is not None else DEFAULT_HISTORY_MODE
+    )
+    graph_profile = resolve_graph_context_profile(
+        default_workflow_name,
+        explicit=default_context_profile,
     )
 
     # 兜底：nodes 为空时退回 default workflow 配置图
@@ -256,8 +301,14 @@ def build_dynamic_graph(
                     f"[DynamicGraph] parallel_join 节点 '{nid}' 未指定 source_branches，"
                     f"从边推断: {src_branches}"
                 )
-            agent = _build_agent_instance(
-                node_cfg.agent_name or "SimpleAgent", nid, node_cfg.config
+            join_cfg = node_cfg.config if isinstance(node_cfg.config, dict) else {}
+            passthrough_join = bool(join_cfg.get("passthrough_join"))
+            agent = (
+                None
+                if passthrough_join
+                else _build_agent_instance(
+                    node_cfg.agent_name or "SimpleAgent", nid, join_cfg
+                )
             )
             node_fn = make_parallel_join_node(
                 agent=agent,
@@ -274,7 +325,8 @@ def build_dynamic_graph(
             graph.add_node(nid, node_fn)
             logger.debug(
                 f"[DynamicGraph] 注册并行汇聚节点: {nid} "
-                f"(sources={src_branches}, policy={node_cfg.join_policy})"
+                f"(sources={src_branches}, policy={node_cfg.join_policy}"
+                f"{', passthrough_join 无 LLM' if passthrough_join else ''})"
             )
             continue
 
@@ -283,12 +335,17 @@ def build_dynamic_graph(
             logger.warning(
                 f"[DynamicGraph] 节点 '{nid}' 的 node_type='{node_type}' 不受支持，降级为 agent"
             )
-        agent = _build_agent_instance(node_cfg.agent_name, nid, node_cfg.config)
+        eff_cfg = _effective_agent_node_config(
+            node_cfg.config,
+            graph_profile=graph_profile,
+            is_terminal=nid in terminal_nodes,
+        )
+        agent = _build_agent_instance(node_cfg.agent_name, nid, eff_cfg)
         node_fn = make_agent_node(
             agent=agent,
             ctx=ctx,
             node_id=nid,
-            node_config=node_cfg.config,
+            node_config=eff_cfg,
             persona_memory=persona_memory,
             runtime_memory=runtime_memory,
             default_history_mode=eff_history_mode,
@@ -360,14 +417,17 @@ def build_app_from_workflow(
     persona_memory: Optional[Any] = None,
     runtime_memory: Optional[Any] = None,
     default_history_mode: Optional[str] = None,
+    default_context_profile: Optional[str] = None,
     human_input_provider: Optional[Any] = None,
     config_dict: Optional[Dict[str, Any]] = None,
+    execution_mode: Optional[str] = None,
 ) -> Any:
     """
     统一的工作流构建入口。
 
     - 若传入 ``config_dict``（含 ``nodes`` / ``edges``），从内存 JSON 解析，不再读注册表文件。
     - 否则按 ``workflow_name`` 从 ``workflow_registry.json`` 加载文件。
+    - 名称以 ``checklist_multi`` / ``checklist_annotate`` 开头时，不使用 ``persona_memory`` / ``runtime_memory`` 注入。
     """
     if config_dict is not None:
         from workflow.workflow_parser import YAMLWorkflowParser
@@ -377,13 +437,28 @@ def build_app_from_workflow(
         edges = parser.parse_edges(config_dict)
     else:
         nodes, edges = load_workflow_graph_config(workflow_name)
+
+    wf_label = workflow_name or "default"
+    eff_persona = persona_memory
+    eff_runtime = runtime_memory
+    # 论文批注类工作流：不注入会话 memory 检索与用户画像，避免无关上下文进入各节点 prompt
+    _wl = str(wf_label)
+    if _wl.startswith("checklist_multi") or _wl.startswith("checklist_annotate"):
+        eff_persona = None
+        eff_runtime = None
+
+    eff_profile = default_context_profile
+    if eff_profile is None:
+        eff_profile = resolve_graph_context_profile(_wl, mode=execution_mode)
+
     return build_dynamic_graph(
         nodes=nodes,
         edges=edges,
         context_manager=context_manager,
-        persona_memory=persona_memory,
-        runtime_memory=runtime_memory,
-        default_workflow_name=workflow_name,
+        persona_memory=eff_persona,
+        runtime_memory=eff_runtime,
+        default_workflow_name=wf_label,
         default_history_mode=default_history_mode,
+        default_context_profile=eff_profile,
         human_input_provider=human_input_provider,
     )

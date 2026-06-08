@@ -8,6 +8,7 @@ TeX Agent Web UI：FastAPI 服务 + 静态页面（Cursor 风格聊天 + Markdow
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
@@ -20,14 +21,18 @@ from collections import deque
 from typing import Any, AsyncIterator, Dict, List, Literal, Optional, Set, Tuple
 
 import anyio
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from core.agent_cli import TeXAgentCLI, _serialize_plan_graph_for_ui
+from utils.run_cancel import clear_run_cancel, install_sigint_handler, is_run_cancelled
 from ui.web import file_storage
+from ui.web.conferences_data import list_deadlines
+from latex.watch_service import WatchService
+from latex.watch_events import WatchSnapshot
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -63,6 +68,12 @@ DEFAULT_WEB_WORKFLOW: Dict[str, Any] = {
 }
 
 
+def _sanitize_reply_text(text: str) -> str:
+    from utils.reply_format import format_reply_for_ui
+
+    return format_reply_for_ui(text)
+
+
 def _format_reply_from_result(result: Dict[str, Any]) -> str:
     """
     从工作流 state 中只取「最后一处节点产物」的文本，原样给前端做 Markdown 渲染。
@@ -73,14 +84,16 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
     3) 退化为最后一条含内容的 assistant 消息（极少情况下 output / 元数据未写）
     """
     err = result.get("error")
+    meta: Dict[str, Any] = result.get("metadata") or {}
+
     if err:
-        return f"**执行出错**\n\n```\n{err}\n```"
+        body = f"**执行出错**\n\n```\n{err}\n```"
+        return _append_artifact_download_links_to_reply(body, meta)
 
     out = str(result.get("output") or "").strip()
     if out:
-        return out
+        return _append_artifact_download_links_to_reply(_sanitize_reply_text(out), meta)
 
-    meta: Dict[str, Any] = result.get("metadata") or {}
     order = meta.get("__execution_order__")
     if isinstance(order, list) and order:
         last_id = str(order[-1])
@@ -89,7 +102,7 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             if isinstance(node_data, dict):
                 r = str(node_data.get("result") or "").strip()
                 if r:
-                    return r
+                    return _append_artifact_download_links_to_reply(_sanitize_reply_text(r), meta)
 
     messages: List[Any] = result.get("messages") or []
     for m in reversed(messages):
@@ -99,9 +112,51 @@ def _format_reply_from_result(result: Dict[str, Any]) -> str:
             continue
         content = str(m.get("content") or "").strip()
         if content:
-            return content
+            return _append_artifact_download_links_to_reply(_sanitize_reply_text(content), meta)
 
-    return "（本轮无有效输出。）"
+    return _append_artifact_download_links_to_reply("（本轮无有效输出。）", meta)
+
+
+def _collect_artifact_download_links(metadata: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """从工作流 metadata 各节点中收集 offer_artifact_download 注册的下载项。"""
+    out: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+    meta = metadata or {}
+    for k, v in meta.items():
+        if str(k).startswith("__") or not isinstance(v, dict):
+            continue
+        inner = v.get("metadata")
+        if not isinstance(inner, dict):
+            continue
+        tm = inner.get("tool_metadata")
+        if not isinstance(tm, dict):
+            continue
+        tok = tm.get("download_token")
+        if not tok:
+            continue
+        ts = str(tok)
+        if ts in seen:
+            continue
+        seen.add(ts)
+        rel = str(tm.get("relative_url") or f"/api/download/artifact?token={ts}")
+        fn = str(tm.get("download_filename") or "download")
+        out.append((fn, rel))
+    return out
+
+
+def _append_artifact_download_links_to_reply(text: str, metadata: Dict[str, Any]) -> str:
+    """在终局回复末尾附加 Markdown 下载列表（与工具输出互补，防止 LLM 省略链接）。"""
+    links = _collect_artifact_download_links(metadata)
+    if not links:
+        return text or ""
+    block_lines = ["", "---", "**附件下载**", ""]
+    for fn, url in links:
+        block_lines.append(f"* [{fn}]({url})")
+    block = "\n".join(block_lines)
+    base = (text or "").rstrip()
+    if not base:
+        return block.strip()
+    return base + block
 
 
 class TeXAgentWebUI(TeXAgentCLI):
@@ -128,6 +183,7 @@ class TeXAgentWebUI(TeXAgentCLI):
                 persona_memory=self.persona_memory,
                 runtime_memory=self.context,
                 human_input_provider=self._human_input_provider,
+                execution_mode="task",
             )
         return super()._build_app_for_workflow(workflow_name)
 
@@ -274,10 +330,10 @@ def _validate_workflow_dict(d: Dict[str, Any]) -> None:
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户输入")
-    mode: Literal["task", "plan"] = "task"
+    mode: Literal["task", "plan", "auto"] = "auto"
     workflow: Optional[str] = Field(
         None,
-        description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 中的名称，默认 default",
+        description="工作流名称；填 __web__ 使用左侧自组工作流，否则为 registry 名称；省略时服务端用 DEFAULT_WORKFLOW（通常为 default）",
     )
     # 勾选后随请求发送 basename，服务端解析为 storage 下绝对路径并注入消息前部
     active_pdfs: Optional[List[str]] = Field(
@@ -296,7 +352,7 @@ class ChatRequest(BaseModel):
         default=False,
         description=(
             "为 true 时以 NDJSON 流式返回：plan 先发 plan_graph；"
-            "task 先发 workflow_graph；二者均推送 exec_nodes 与 result"
+            "task/auto 先发 workflow_graph；均推送 exec_nodes 与 result"
         ),
     )
     stream_plan: bool = Field(
@@ -306,7 +362,7 @@ class ChatRequest(BaseModel):
 
 
 class WorkflowDraftIn(BaseModel):
-    """与 ``config/workflow_*.json`` 同构的 ``nodes`` / ``edges``。"""
+    """与 ``config/workflow/workflow_*.json`` 同构的 ``nodes`` / ``edges``。"""
 
     nodes: List[Dict[str, Any]] = Field(default_factory=list)
     edges: List[Dict[str, Any]] = Field(default_factory=list)
@@ -399,6 +455,65 @@ class ToolsListOut(BaseModel):
     tools: List[ToolItemOut]
 
 
+class ChartPlotBody(BaseModel):
+    chart_type: str = Field(..., description="bar | line | pie")
+    data: Dict[str, Any] = Field(default_factory=dict)
+    title: str = ""
+    x_label: str = ""
+    y_label: str = ""
+    width: float = 8.0
+    height: float = 5.0
+    dpi: int = 200
+    legend: bool = True
+
+
+class ConceptDiagramBody(BaseModel):
+    prompt: str = ""
+    title: str = ""
+    mermaid_code: str = Field("", description="直接提供 Mermaid 代码时跳过 Gemini")
+
+
+class DrawingToolResponse(BaseModel):
+    success: bool
+    output_url: Optional[str] = None
+    output_path: Optional[str] = None
+    output_text: Optional[str] = None
+    mermaid_code: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class LatexTableBody(BaseModel):
+    headers: str = ""
+    rows: str = ""
+    caption: str = ""
+    label: str = ""
+    alignment: str = ""
+    highlight_best: bool = False
+
+
+class PaletteBody(BaseModel):
+    theme: str = "academic"
+    count: int = 6
+    seed: Optional[int] = None
+
+
+class TextStatsBody(BaseModel):
+    text: str = ""
+
+
+class PaperTitleBody(BaseModel):
+    keywords: str = ""
+    style: str = "serious"
+    count: int = 5
+    seed: Optional[int] = None
+    use_llm: bool = True
+
+
+class QrcodeBody(BaseModel):
+    content: str = ""
+
+
 class PdfFileItem(BaseModel):
     name: str
     size: int
@@ -424,6 +539,59 @@ class ChatResponse(BaseModel):
     )
 
 
+class RAGIndexResponse(BaseModel):
+    ok: bool = True
+    indexed_chunks: int
+    total_chunks: int
+    source: str = ""
+
+
+class RAGTextIndexRequest(BaseModel):
+    text: str = Field(..., min_length=1)
+    source: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RAGHitOut(BaseModel):
+    id: str = ""
+    content: str
+    source: str = ""
+    score: float = 0.0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RAGQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=20)
+
+
+class RAGQueryResponse(BaseModel):
+    query: str
+    top_k: int
+    hits: List[RAGHitOut] = Field(default_factory=list)
+
+
+class RAGRecordOut(BaseModel):
+    id: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    document: Optional[str] = None
+
+
+class RAGRecordsResponse(BaseModel):
+    items: List[RAGRecordOut] = Field(default_factory=list)
+    total: int = 0
+    offset: int = 0
+    limit: int = 20
+    has_next: bool = False
+
+
+class RAGDeleteResponse(BaseModel):
+    ok: bool = True
+    deleted: int = 0
+    total: int = 0
+    record_id: Optional[str] = None
+
+
 class BranchNodeOut(BaseModel):
     id: str
     parent: Optional[str] = None
@@ -444,6 +612,24 @@ class BranchCreateBody(BaseModel):
 class BranchSwitchBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
 
+
+class BranchHistoryMsgOut(BaseModel):
+    role: str
+    content: str
+
+
+class BranchHistoryOut(BaseModel):
+    branch: str
+    messages: List[BranchHistoryMsgOut]
+
+class WatchStartRequest(BaseModel):
+    root: str = Field(..., description="LaTeX 项目根目录")
+    main_tex: Optional[str] = Field(None, description="主文件相对路径")
+    idle_polish_sec: Optional[float] = Field(2.0, description="空闲润色触发时间")
+
+class WatchStartResponse(BaseModel):
+    watch_id: str
+    status: str
 
 def _augment_message_with_active_files(message: str, body: "ChatRequest") -> str:
     """将各 storage 子目录中已勾选文件解析为绝对路径，置于用户消息前。"""
@@ -520,6 +706,10 @@ async def _upload_to_category(
 _BR_NAME = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 _cli: Optional[TeXAgentWebUI] = None
+_rag_pipeline: Optional[Any] = None
+
+# 阶段 9：LaTeX 监视服务会话存储
+_watch_sessions: Dict[str, WatchService] = {}
 
 
 def get_cli() -> TeXAgentWebUI:
@@ -529,10 +719,61 @@ def get_cli() -> TeXAgentWebUI:
     return _cli
 
 
+def get_rag_pipeline() -> Any:
+    global _rag_pipeline
+    if _rag_pipeline is None:
+        from rag.rag_pipeline import RAGPipeline
+
+        _rag_pipeline = RAGPipeline()
+    return _rag_pipeline
+
+
+def _parse_rag_metadata_json(raw: str) -> Dict[str, Any]:
+    txt = (raw or "").strip()
+    if not txt:
+        return {}
+    try:
+        obj = json.loads(txt)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"metadata_json 不是合法 JSON: {e}") from e
+    if not isinstance(obj, dict):
+        raise ValueError("metadata_json 必须是 JSON 对象")
+    return obj
+
+
+def _record_matches_metadata(
+    metadata: Dict[str, Any], key: str, value: str
+) -> bool:
+    if not key:
+        return True
+    if key not in metadata:
+        return False
+    if not value:
+        return True
+    raw = metadata.get(key)
+    if raw is None:
+        return False
+    return value.lower() in str(raw).lower()
+
+
+async def _drain_worker_queue(out_q: queue.Queue) -> Tuple[str, Any]:
+    """
+    异步轮询工作线程队列。勿使用 to_thread.run_sync(queue.get)，否则 Ctrl+C 无法打断。
+    """
+    while True:
+        try:
+            return out_q.get_nowait()
+        except queue.Empty:
+            if is_run_cancelled():
+                raise KeyboardInterrupt
+            await asyncio.sleep(0.15)
+
+
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from ui.web.ide_launch import schedule_open_ide
 
+    install_sigint_handler()
     # 默认用系统/Windows 打开；TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1 时再试 Simple（见 ide_launch）
     schedule_open_ide(1.0)
     yield
@@ -556,6 +797,311 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> Dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/conferences/deadlines")
+    async def conferences_deadlines(
+        fields: Optional[str] = Query(
+            None,
+            description="逗号分隔领域：cv,nlp,networking,ml 等；空=全部",
+        ),
+        include_past: bool = Query(False, description="是否包含已截止会议"),
+    ) -> Dict[str, Any]:
+        """顶会投稿日历（静态 JSON，非实时）。"""
+        field_list: Optional[List[str]] = None
+        if fields and fields.strip():
+            field_list = [x.strip() for x in fields.split(",") if x.strip()]
+        try:
+            return list_deadlines(fields=field_list, include_past=include_past)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=500, detail=f"日历配置 JSON 无效: {e}") from e
+
+    # --- 阶段 9: LaTeX Watch API ---
+    @app.post("/api/latex/watch", response_model=WatchStartResponse)
+    async def start_latex_watch(body: WatchStartRequest) -> WatchStartResponse:
+        import uuid
+        root_path = Path(body.root).expanduser().resolve()
+        if not root_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"目录不存在: {body.root}")
+            
+        # 检查是否已有同目录的 running session
+        for wid, svc in _watch_sessions.items():
+            if svc.root_path == root_path and svc.status == "running":
+                return WatchStartResponse(watch_id=wid, status="already_running")
+                
+        watch_id = str(uuid.uuid4())
+        service = WatchService(
+            watch_id=watch_id,
+            root=str(root_path),
+            main_tex=body.main_tex,
+            idle_polish_sec=body.idle_polish_sec
+        )
+        service.start()
+        _watch_sessions[watch_id] = service
+        return WatchStartResponse(watch_id=watch_id, status="started")
+
+    @app.get("/api/latex/watch/{watch_id}", response_model=WatchSnapshot)
+    async def get_latex_watch_status(watch_id: str) -> WatchSnapshot:
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        return _watch_sessions[watch_id].get_snapshot()
+
+    @app.get("/api/latex/watch/{watch_id}/snapshot", response_model=WatchSnapshot)
+    async def get_latex_watch_snapshot(watch_id: str) -> WatchSnapshot:
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        return _watch_sessions[watch_id].get_snapshot()
+
+    @app.delete("/api/latex/watch/{watch_id}")
+    async def stop_latex_watch(watch_id: str):
+        if watch_id not in _watch_sessions:
+            raise HTTPException(status_code=404, detail="Watch session not found")
+        _watch_sessions[watch_id].stop()
+        del _watch_sessions[watch_id]
+        return {"status": "stopped", "watch_id": watch_id}
+    # -------------------------------
+
+    @app.post("/api/rag/index-text", response_model=RAGIndexResponse)
+    async def rag_index_text_ep(body: RAGTextIndexRequest) -> RAGIndexResponse:
+        def _work() -> Tuple[int, int, str]:
+            p = get_rag_pipeline()
+            src = (body.source or "").strip()
+            md = body.metadata if isinstance(body.metadata, dict) else {}
+            indexed = p.index_text(body.text, source=src, metadata=md)
+            return indexed, p.document_count(), src
+
+        try:
+            indexed, total, src = await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGIndexResponse(
+            indexed_chunks=indexed,
+            total_chunks=total,
+            source=src,
+        )
+
+    @app.post("/api/rag/index-file", response_model=RAGIndexResponse)
+    async def rag_index_file_ep(
+        file: UploadFile = File(..., description="待注入 RAG 的文本文件"),
+        source: str = Form("", description="可选 source 覆盖值"),
+        metadata_json: str = Form("{}", description="可选 metadata JSON 对象"),
+    ) -> RAGIndexResponse:
+        try:
+            metadata = _parse_rag_metadata_json(metadata_json)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="上传文件为空")
+        if len(raw) > file_storage.MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件过大，单文件上限 {file_storage.MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+            )
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail="仅支持 UTF-8 文本文件上传到 RAG",
+            ) from e
+        src = (source or "").strip() or str(file.filename or "upload_text")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            indexed = p.index_text(text, source=src, metadata=metadata)
+            return indexed, p.document_count()
+
+        try:
+            indexed, total = await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGIndexResponse(
+            indexed_chunks=indexed,
+            total_chunks=total,
+            source=src,
+        )
+
+    @app.post("/api/rag/query", response_model=RAGQueryResponse)
+    async def rag_query_ep(body: RAGQueryRequest) -> RAGQueryResponse:
+        q = body.query.strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="query 不能为空")
+
+        def _work() -> List[Any]:
+            p = get_rag_pipeline()
+            return p.retrieve_documents(q, k=body.top_k)
+
+        try:
+            docs = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+        hits = [
+            RAGHitOut(
+                id=str(((getattr(d, "metadata", {}) or {}).get("_id") or "")),
+                content=str(getattr(d, "content", "") or ""),
+                source=str(getattr(d, "source", "") or ""),
+                score=float(getattr(d, "score", 0.0) or 0.0),
+                metadata=(getattr(d, "metadata", {}) or {}),
+            )
+            for d in docs
+        ]
+        return RAGQueryResponse(query=q, top_k=body.top_k, hits=hits)
+
+    @app.get("/api/rag/records", response_model=RAGRecordsResponse)
+    async def rag_records_ep(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(20, ge=1, le=50),
+        metadata_key: str = Query("", description="metadata 字段名"),
+        metadata_value: str = Query("", description="metadata 字段值（可留空）"),
+        include_document: bool = Query(False, description="是否附带文档片段文本"),
+    ) -> RAGRecordsResponse:
+        from rag.store_listing import MAX_LIST_PAGE_SIZE, StoreField
+
+        key = (metadata_key or "").strip()
+        val = (metadata_value or "").strip()
+        fetch_fields = StoreField.DEFAULT
+        if include_document:
+            fetch_fields |= StoreField.DOCUMENT
+
+        def _work() -> RAGRecordsResponse:
+            p = get_rag_pipeline()
+            if not key:
+                scan_offset = offset
+                total = 0
+                raw_items: List[Any] = []
+                while len(raw_items) < limit:
+                    page = p.list_stored_page(
+                        offset=scan_offset,
+                        limit=min(limit - len(raw_items), MAX_LIST_PAGE_SIZE),
+                        fetch_fields=fetch_fields,
+                    )
+                    total = int(page.total)
+                    raw_items.extend(page.items)
+                    if not page.has_next:
+                        break
+                    if len(page.items) <= 0:
+                        break
+                    scan_offset += len(page.items)
+                items = [
+                    RAGRecordOut(
+                        id=str(getattr(rec, "id", "") or ""),
+                        metadata=(getattr(rec, "metadata", {}) or {}),
+                        document=(
+                            str(getattr(rec, "document", "") or "")
+                            if include_document
+                            else None
+                        ),
+                    )
+                    for rec in raw_items
+                ]
+                return RAGRecordsResponse(
+                    items=items,
+                    total=total,
+                    offset=int(offset),
+                    limit=int(limit),
+                    has_next=(offset + len(items) < total),
+                )
+
+            scan_offset = 0
+            filtered: List[RAGRecordOut] = []
+            while True:
+                page = p.list_stored_page(
+                    offset=scan_offset,
+                    limit=MAX_LIST_PAGE_SIZE,
+                    fetch_fields=fetch_fields,
+                )
+                for rec in page.items:
+                    md = getattr(rec, "metadata", {}) or {}
+                    if not isinstance(md, dict):
+                        md = {}
+                    if _record_matches_metadata(md, key, val):
+                        filtered.append(
+                            RAGRecordOut(
+                                id=str(getattr(rec, "id", "") or ""),
+                                metadata=md,
+                                document=(
+                                    str(getattr(rec, "document", "") or "")
+                                    if include_document
+                                    else None
+                                ),
+                            )
+                        )
+                if not page.has_next:
+                    break
+                if len(page.items) <= 0:
+                    break
+                scan_offset += len(page.items)
+
+            total = len(filtered)
+            sliced = filtered[offset : offset + limit]
+            return RAGRecordsResponse(
+                items=sliced,
+                total=total,
+                offset=int(offset),
+                limit=int(limit),
+                has_next=(offset + len(sliced) < total),
+            )
+
+        try:
+            return await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.delete("/api/rag/records/{record_id}", response_model=RAGDeleteResponse)
+    async def rag_delete_record_ep(record_id: str) -> RAGDeleteResponse:
+        rid = (record_id or "").strip()
+        if not rid:
+            raise HTTPException(status_code=400, detail="record_id 不能为空")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            deleted = p.delete_chunks_by_ids([rid])
+            return deleted, p.document_count()
+
+        try:
+            deleted, total = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGDeleteResponse(deleted=deleted, total=total, record_id=rid)
+
+    @app.delete("/api/rag/records/by-source", response_model=RAGDeleteResponse)
+    @app.delete("/api/rag/records/delete-by-source", response_model=RAGDeleteResponse)
+    async def rag_delete_by_source_ep(
+        source: str = Query(..., min_length=1, description="按 metadata.source 删除"),
+    ) -> RAGDeleteResponse:
+        src = source.strip()
+        if not src:
+            raise HTTPException(status_code=400, detail="source 不能为空")
+
+        def _work() -> Tuple[int, int]:
+            p = get_rag_pipeline()
+            deleted = p.delete_by_source(src)
+            return deleted, p.document_count()
+
+        try:
+            deleted, total = await anyio.to_thread.run_sync(_work)
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        return RAGDeleteResponse(deleted=deleted, total=total, record_id=src)
 
     @app.get("/api/branches", response_model=BranchTreeOut)
     async def get_branches() -> BranchTreeOut:
@@ -612,6 +1158,39 @@ def create_app() -> FastAPI:
         if not ok:
             raise HTTPException(status_code=404, detail="无此分支")
         return await get_branches()
+
+    @app.get("/api/branches/history", response_model=BranchHistoryOut)
+    async def get_branch_history_ep(
+        branch: Optional[str] = Query(
+            None,
+            description="分支名；省略时为当前活动分支",
+        ),
+    ) -> BranchHistoryOut:
+        """返回指定分支的服务端对话历史，供切换分支后刷新聊天区。"""
+
+        def _work() -> BranchHistoryOut:
+            cli = get_cli()
+            name_q = (branch or cli.current_branch or "main").strip()
+            if not _BR_NAME.match(name_q):
+                raise ValueError("分支名无效")
+            raw = cli.get_branch_chat_history_for_api(name_q)
+            msgs = raw.get("messages") or []
+            return BranchHistoryOut(
+                branch=str(raw.get("branch") or name_q),
+                messages=[
+                    BranchHistoryMsgOut(
+                        role=str(m.get("role") or "user"),
+                        content=str(m.get("content") or ""),
+                    )
+                    for m in msgs
+                    if isinstance(m, dict)
+                ],
+            )
+
+        try:
+            return await anyio.to_thread.run_sync(_work)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
     @app.get("/api/workflow/draft", response_model=WorkflowDraftIn)
     async def get_workflow_draft() -> WorkflowDraftIn:
@@ -676,6 +1255,179 @@ def create_app() -> FastAPI:
             )
 
         return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/chart-plot", response_model=DrawingToolResponse)
+    async def drawing_chart_plot(body: ChartPlotBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.chart_plot_tool import ChartPlotTool
+            from tools.concept_diagram_tool import unique_output_path
+
+            out = unique_output_path("chart")
+            tool = ChartPlotTool()
+            result = tool.run(
+                chart_type=body.chart_type,
+                data=body.data,
+                output_path=str(out),
+                title=body.title,
+                x_label=body.x_label,
+                y_label=body.y_label,
+                width=body.width,
+                height=body.height,
+                dpi=body.dpi,
+                legend=body.legend,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "图表生成失败")
+            fname = out.name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(out),
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/concept-diagram", response_model=DrawingToolResponse)
+    async def drawing_concept_diagram(body: ConceptDiagramBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.concept_diagram_tool import ConceptDiagramTool, unique_output_path
+
+            out = unique_output_path("diagram")
+            tool = ConceptDiagramTool()
+            result = tool.run(
+                prompt=body.prompt,
+                output_path=str(out),
+                title=body.title,
+                mermaid_code=body.mermaid_code,
+            )
+            meta = result.metadata or {}
+            if not result.success:
+                return DrawingToolResponse(
+                    success=False,
+                    error=result.error or "概念图生成失败",
+                    mermaid_code=str(meta.get("mermaid_code") or "") or None,
+                )
+            fname = out.name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(out),
+                mermaid_code=str(meta.get("mermaid_code") or "") or None,
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/latex-table", response_model=DrawingToolResponse)
+    async def drawing_latex_table(body: LatexTableBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.latex_table_tool import LatexTableTool
+
+            tool = LatexTableTool()
+            result = tool.run(
+                headers=body.headers,
+                rows=body.rows,
+                caption=body.caption,
+                label=body.label,
+                alignment=body.alignment,
+                highlight_best=body.highlight_best,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "LaTeX 表格生成失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/palette", response_model=DrawingToolResponse)
+    async def drawing_palette(body: PaletteBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.palette_tool import PaletteTool
+
+            tool = PaletteTool()
+            result = tool.run(theme=body.theme, count=body.count, seed=body.seed)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "配色生成失败")
+            meta = result.metadata or {}
+            fname = Path(str(meta.get("output_path") or result.output)).name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(result.output),
+                metadata=meta,
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/text-stats", response_model=DrawingToolResponse)
+    async def drawing_text_stats(body: TextStatsBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.text_stats_tool import TextStatsTool
+
+            result = TextStatsTool().run(text=body.text)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "文本统计失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/paper-title", response_model=DrawingToolResponse)
+    async def drawing_paper_title(body: PaperTitleBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.paper_title_tool import PaperTitleTool
+
+            result = PaperTitleTool().run(
+                keywords=body.keywords,
+                style=body.style,
+                count=body.count,
+                seed=body.seed,
+                use_llm=body.use_llm,
+            )
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "标题生成失败")
+            return DrawingToolResponse(
+                success=True,
+                output_text=result.output,
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.post("/api/drawing/qrcode", response_model=DrawingToolResponse)
+    async def drawing_qrcode(body: QrcodeBody) -> DrawingToolResponse:
+        def _work() -> DrawingToolResponse:
+            from tools.qrcode_tool import QrcodeTool
+
+            result = QrcodeTool().run(content=body.content)
+            if not result.success:
+                return DrawingToolResponse(success=False, error=result.error or "QR 码生成失败")
+            fname = Path(str(result.output)).name
+            return DrawingToolResponse(
+                success=True,
+                output_url=f"/api/drawing/output/{fname}",
+                output_path=str(result.output),
+                metadata=result.metadata or {},
+            )
+
+        return await anyio.to_thread.run_sync(_work)
+
+    @app.get("/api/drawing/output/{filename}")
+    async def drawing_output_file(filename: str) -> FileResponse:
+        from tools.web_tool_utils import web_tool_output_dir
+
+        safe = Path(filename).name
+        if safe != filename or not safe.endswith(".png"):
+            raise HTTPException(status_code=400, detail="无效文件名")
+        p = web_tool_output_dir() / safe
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(p, media_type="image/png", filename=p.name)
 
     @app.get("/api/storage/pdfs", response_model=PdfListResponse)
     async def list_pdfs_ep() -> PdfListResponse:
@@ -785,6 +1537,32 @@ def create_app() -> FastAPI:
             filename=p.name,
         )
 
+    @app.get("/api/download/artifact")
+    async def download_artifact_ep(
+        token: str = Query(..., min_length=8, description="offer_artifact_download 工具返回的 download_token"),
+    ) -> FileResponse:
+        """工作流生成的文件经令牌登记后，供浏览器本地下载。"""
+
+        def _resolve_path() -> Optional[Path]:
+            from utils.web_artifact_registry import get_file_path
+
+            raw = get_file_path(token)
+            if not raw:
+                return None
+            return Path(raw)
+
+        p = await anyio.to_thread.run_sync(_resolve_path)
+        if p is None:
+            raise HTTPException(status_code=404, detail="下载链接无效或已过期")
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="文件已不存在")
+        return FileResponse(
+            str(p),
+            media_type=file_storage.media_type_for_path(p),
+            filename=p.name,
+            content_disposition_type="attachment",
+        )
+
     @app.post("/api/chat")
     async def chat(body: ChatRequest):
         cli = get_cli()
@@ -797,6 +1575,8 @@ def create_app() -> FastAPI:
         if body.mode == "plan" and use_stream:
 
             async def ndjson_plan_stream() -> AsyncIterator[bytes]:
+                clear_run_cancel()
+
                 def _line(obj: Dict[str, Any]) -> bytes:
                     return (
                         json.dumps(obj, ensure_ascii=False) + "\n"
@@ -836,29 +1616,41 @@ def create_app() -> FastAPI:
                             on_graph_progress=_emit_batch,
                         )
                         out_q.put(("done", res))
+                    except KeyboardInterrupt as ex:
+                        out_q.put(("err", ex))
                     except Exception as ex:  # noqa: BLE001
                         out_q.put(("err", ex))
 
                 threading.Thread(target=_run_plan_execute, daemon=True).start()
                 result: Optional[Dict[str, Any]] = None
-                while True:
-                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
-                    if kind == "exec":
-                        yield _line({"type": "exec_nodes", "node_ids": payload})
-                    elif kind == "done":
-                        result = payload
-                        break
-                    elif kind == "err":
-                        yield _line(
-                            {
-                                "type": "result",
-                                "reply": "",
-                                "error": str(payload),
-                            }
-                        )
-                        return
-                    else:
-                        break
+                try:
+                    while True:
+                        kind, payload = await _drain_worker_queue(out_q)
+                        if kind == "exec":
+                            yield _line({"type": "exec_nodes", "node_ids": payload})
+                        elif kind == "done":
+                            result = payload
+                            break
+                        elif kind == "err":
+                            yield _line(
+                                {
+                                    "type": "result",
+                                    "reply": "",
+                                    "error": str(payload),
+                                }
+                            )
+                            return
+                        else:
+                            break
+                except KeyboardInterrupt:
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": "已中断（Ctrl+C）",
+                        }
+                    )
+                    return
 
                 if not isinstance(result, dict):
                     yield _line(
@@ -891,39 +1683,45 @@ def create_app() -> FastAPI:
                 media_type="application/x-ndjson",
             )
 
-        if body.mode == "task" and use_stream:
+        if body.mode in ("task", "auto") and use_stream:
 
             async def ndjson_task_stream() -> AsyncIterator[bytes]:
+                clear_run_cancel()
+
                 def _line(obj: Dict[str, Any]) -> bytes:
                     return (
                         json.dumps(obj, ensure_ascii=False) + "\n"
                     ).encode("utf-8")
 
-                workflow_label = body.workflow or cli.DEFAULT_WORKFLOW
+                if body.mode == "auto":
+                    from config.auto_config import AUTO_WORKFLOW_LABEL
+
+                    workflow_label = AUTO_WORKFLOW_LABEL
+                else:
+                    workflow_label = body.workflow or cli.DEFAULT_WORKFLOW
 
                 try:
-                    graph_payload = _workflow_stream_graph_payload(
-                        cli, body.workflow
-                    )
+                    if body.mode == "auto":
+                        def _build_auto_bundle():
+                            n, e, a = cli.build_auto_graph_and_app(user_text)
+                            return n, e, a
+
+                        nodes, edges, app = await anyio.to_thread.run_sync(
+                            _build_auto_bundle
+                        )
+                        graph_payload = _serialize_plan_graph_for_ui(nodes, edges)
+                    else:
+                        graph_payload = _workflow_stream_graph_payload(
+                            cli, body.workflow
+                        )
+                        app = await anyio.to_thread.run_sync(
+                            lambda: cli._build_app_for_workflow(body.workflow)
+                        )
                 except ValueError as e:
                     yield _line({"type": "error", "detail": str(e)})
                     return
                 except Exception as e:  # noqa: BLE001
                     yield _line({"type": "error", "detail": str(e)})
-                    return
-
-                try:
-                    app = await anyio.to_thread.run_sync(
-                        lambda: cli._build_app_for_workflow(body.workflow)
-                    )
-                except Exception as e:  # noqa: BLE001
-                    yield _line(
-                        {
-                            "type": "result",
-                            "reply": "",
-                            "error": str(e),
-                        }
-                    )
                     return
 
                 yield _line(
@@ -948,6 +1746,8 @@ def create_app() -> FastAPI:
                             on_graph_progress=_emit_batch,
                         )
                         out_q.put(("done", res))
+                    except KeyboardInterrupt as ex:
+                        out_q.put(("err", ex))
                     except Exception as ex:  # noqa: BLE001
                         out_q.put(("err", ex))
 
@@ -955,24 +1755,34 @@ def create_app() -> FastAPI:
                     target=_run_task_execute, daemon=True
                 ).start()
                 result: Optional[Dict[str, Any]] = None
-                while True:
-                    kind, payload = await anyio.to_thread.run_sync(out_q.get)
-                    if kind == "exec":
-                        yield _line({"type": "exec_nodes", "node_ids": payload})
-                    elif kind == "done":
-                        result = payload
-                        break
-                    elif kind == "err":
-                        yield _line(
-                            {
-                                "type": "result",
-                                "reply": "",
-                                "error": str(payload),
-                            }
-                        )
-                        return
-                    else:
-                        break
+                try:
+                    while True:
+                        kind, payload = await _drain_worker_queue(out_q)
+                        if kind == "exec":
+                            yield _line({"type": "exec_nodes", "node_ids": payload})
+                        elif kind == "done":
+                            result = payload
+                            break
+                        elif kind == "err":
+                            yield _line(
+                                {
+                                    "type": "result",
+                                    "reply": "",
+                                    "error": str(payload),
+                                }
+                            )
+                            return
+                        else:
+                            break
+                except KeyboardInterrupt:
+                    yield _line(
+                        {
+                            "type": "result",
+                            "reply": "",
+                            "error": "已中断（Ctrl+C）",
+                        }
+                    )
+                    return
 
                 if not isinstance(result, dict):
                     yield _line(
@@ -1002,14 +1812,19 @@ def create_app() -> FastAPI:
         def run_sync() -> Dict[str, Any]:
             if body.mode == "plan":
                 return cli.run_plan_task(user_text, use_loading=False)
+            if body.mode == "auto":
+                return cli.run_auto_task(user_text, use_loading=False)
             return cli.run_task(
                 user_text,
                 workflow_name=body.workflow,
                 use_loading=False,
             )
 
+        clear_run_cancel()
         try:
             result = await anyio.to_thread.run_sync(run_sync)
+        except KeyboardInterrupt:
+            raise
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except Exception as e:
@@ -1020,6 +1835,8 @@ def create_app() -> FastAPI:
         plan_graph = None
         if body.mode == "plan":
             plan_graph = (result.get("metadata") or {}).get("__plan_graph__")
+        elif body.mode == "auto":
+            plan_graph = (result.get("metadata") or {}).get("__auto_graph__")
         return ChatResponse(
             reply=text,
             error=str(err) if err else None,
@@ -1027,6 +1844,22 @@ def create_app() -> FastAPI:
         )
 
     if STATIC_DIR.is_dir():
+        index_path = STATIC_DIR / "index.html"
+
+        @app.get("/", include_in_schema=False)
+        async def serve_index() -> FileResponse:
+            """禁用 index 强缓存，避免用户看不到新加的顶栏入口。"""
+            if not index_path.is_file():
+                raise HTTPException(status_code=404, detail="index.html not found")
+            return FileResponse(
+                index_path,
+                media_type="text/html; charset=utf-8",
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                },
+            )
+
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
     return app
@@ -1040,7 +1873,14 @@ def main() -> None:
 
     host = os.environ.get("TEX_AGENT_WEB_HOST", "127.0.0.1")
     port = int(os.environ.get("TEX_AGENT_WEB_PORT", "8765"))
-    uvicorn.run("ui.web.server:app", host=host, port=port, reload=False)
+    install_sigint_handler()
+    uvicorn.run(
+        "ui.web.server:app",
+        host=host,
+        port=port,
+        reload=False,
+        timeout_graceful_shutdown=3,
+    )
 
 
 if __name__ == "__main__":

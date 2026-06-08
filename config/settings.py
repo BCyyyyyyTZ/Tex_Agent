@@ -22,10 +22,10 @@ def _resolve_rag_persist_dir(raw: str) -> str:
     return str((_project_root / p).resolve())
 
 def _resolve_parsed_doc_dir(raw: str) -> str:
-    """解析结果输出根目录：空则默认 doc/parsed_doc；相对路径相对于项目根。"""
+    """解析结果输出根目录：空则默认 storage/documents；相对路径相对于项目根。"""
     text = (raw or "").strip()
     if not text:
-        text = "doc/parsed_doc"
+        text = "storage/documents"
     p = Path(text)
     if p.is_absolute():
         return str(p.resolve())
@@ -45,6 +45,16 @@ def _env_int(key: str, default: int) -> int:
         return default
     try:
         return int(str(raw).strip())
+    except ValueError:
+        return default
+
+
+def _env_float(key: str, default: float) -> float:
+    raw = os.getenv(key)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return float(str(raw).strip())
     except ValueError:
         return default
 
@@ -69,7 +79,7 @@ class Settings:
         default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini")
     )
     llm_temperature: float = 0.7
-    llm_max_tokens: int = 2048
+    llm_max_tokens: int = 8192
     llm_timeout: int = 240
     llm_max_retries: int = 3
 
@@ -81,6 +91,14 @@ class Settings:
 
     # ---- ArXiv 工具配置 ----
     arxiv_max_results: int = 5
+    # 默认仅输出标题+链接+摘要（省 token、减轻下游节点负担）；ARXIV_OUTPUT_FULL=1 恢复完整格式
+    arxiv_output_full: bool = field(
+        default_factory=lambda: os.getenv("ARXIV_OUTPUT_FULL", "").strip().lower()
+        in ("1", "true", "yes", "on")
+    )
+    arxiv_abstract_max_chars: int = field(
+        default_factory=lambda: int(os.getenv("ARXIV_ABSTRACT_MAX_CHARS", "360"))
+    )
 
     # ---- RAG 配置 ----
     # rag_chunk_size:     文档分块大小（字符数），较大值保留更多上下文，但向量质量下降
@@ -122,6 +140,40 @@ class Settings:
     # 取值：auto | cpu | cuda（大小写不敏感）。
     docling_pdf_device: str = field(
         default_factory=lambda: (os.getenv("DOCLING_PDF_DEVICE", "auto") or "auto").strip().lower()
+    )
+
+    # ---- LaTeX 子系统（阶段 3+）----
+    latex_chktex_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_CHKTEX_TIMEOUT_SEC", 30))
+    )
+    latex_latexmk_fast_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LATEXMK_FAST_TIMEOUT_SEC", 120))
+    )
+    latex_latexmk_full_timeout_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LATEXMK_FULL_TIMEOUT_SEC", 600))
+    )
+    latex_llm_max_issues_per_run: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_LLM_MAX_ISSUES_PER_RUN", 5))
+    )
+    latex_slice_context_lines: int = field(
+        default_factory=lambda: max(0, _env_int("LATEX_SLICE_CONTEXT_LINES", 10))
+    )
+
+    # ---- LaTeX 监视与润色（阶段 8+）----
+    latex_watch_diagnose_debounce_ms: int = field(
+        default_factory=lambda: max(100, _env_int("LATEX_WATCH_DIAGNOSE_DEBOUNCE_MS", 500))
+    )
+    latex_watch_idle_polish_sec: int = field(
+        default_factory=lambda: max(1, _env_int("LATEX_WATCH_IDLE_POLISH_SEC", 2))
+    )
+    latex_watch_enable_latexmk: bool = field(
+        default_factory=lambda: _env_bool("LATEX_WATCH_ENABLE_LATEXMK", False)
+    )
+    latex_ghost_quiet_sec: float = field(
+        default_factory=lambda: max(0.1, _env_float("LATEX_GHOST_QUIET_SEC", 1.0))
+    )
+    latex_ghost_auto_polish: bool = field(
+        default_factory=lambda: _env_bool("LATEX_GHOST_AUTO_POLISH", False)
     )
 
     def __repr__(self) -> str:

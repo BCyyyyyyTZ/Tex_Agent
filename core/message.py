@@ -66,6 +66,9 @@ class WorkflowMessage(BaseModel):
         source_type = data.get("source_type")
         source_id = data.get("source_id")
 
+        if source_type == "chat":
+            source_type = "user" if role == "user" else "agent"
+
         if not source_type:
             if tool_name or role == "tool":
                 source_type = "tool"

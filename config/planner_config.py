@@ -97,25 +97,15 @@ PERSONA_ENTRY_NODE_FORMAT_ADDON: str = """
 ---
 """
 
-FINAL_DELIVERY_SYSTEM_ADDON: str = """
----
-[终节点交付判据 - 必须严格遵守]
-你是最终交付节点，必须直接、全面回答用户的原始问题。
+# 终节点交付契约正文已迁至 config/context_profiles.py（按 Profile 可覆盖）
+from config.context_profiles import (  # noqa: E402
+    DELIVERY_BRIEF_DEFAULT,
+    DELIVERY_FULL_DEFAULT,
+    resolve_delivery_addon,
+)
 
-【强制输出要求】
-1) 直接结论/答案（先给答案再补细节，不允许开篇就说"根据上游分析"）；
-2) 充分利用所有上游节点的完整输出，整合成连贯的最终答案，不得遗漏重要细节；
-3) 至少包含一项可执行步骤、具体示例或行动建议；
-4) 结构清晰：使用标题/列表/表格等组织信息，不要写成一大段流水文字；
-5) 字数要求：result 字段内容不得少于 300 字（中文），必须足够完整；
-6) 若存在假设或限制，需简明说明（不能作为减少内容的借口）。
-
-【严格禁止】
-- 仅复述上游摘要或阶段性说明
-- 以"该任务已完成"等敷衍语句结束
-- 在答案主体之外反问用户是否需要补充
----
-"""
+FINAL_DELIVERY_BRIEF_ADDON: str = DELIVERY_BRIEF_DEFAULT
+FINAL_DELIVERY_SYSTEM_ADDON: str = DELIVERY_FULL_DEFAULT
 
 
 # ------------------------------------------------------------------
@@ -135,6 +125,21 @@ FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS: List[str] = [
 ]
 
 
+def resolve_final_delivery_addon(
+    delivery_style: str,
+    profile: Optional[str] = None,
+) -> str:
+    """delivery_style: none | brief | full；profile 可选，用于按模式取契约文案。"""
+    if profile:
+        return resolve_delivery_addon(profile, delivery_style)
+    s = str(delivery_style or "full").strip().lower()
+    if s == "none":
+        return ""
+    if s == "brief":
+        return FINAL_DELIVERY_BRIEF_ADDON
+    return FINAL_DELIVERY_SYSTEM_ADDON
+
+
 # ------------------------------------------------------------------
 # 复杂度 → Agent 类型映射表
 # ------------------------------------------------------------------
@@ -150,7 +155,12 @@ COMPLEXITY_COMPLEX_KEYWORDS: List[str] = [
 COMPLEXITY_MEDIUM_KEYWORDS: List[str] = [
     "分析", "比较", "评估", "检索", "推理", "多步", "综合", "归纳",
 ]
-AGENT_TYPE_NAMES: List[str] = ["SimpleAgent", "SimpleAgent_new", "ReActAgent", "PlanAndSolveAgent"]
+AGENT_TYPE_NAMES: List[str] = [
+    "SimpleAgent", "SimpleAgent_new", 
+    "MultiSimpleAgent",
+    "ReActAgent", 
+    "PlanAndSolveAgent"
+]
 
 
 # ------------------------------------------------------------------
@@ -172,7 +182,7 @@ PLAN_OUTPUT_SCHEMA: str = """{
         "summary": "<摘要描述>"
       },
       "tool_name": "<tool 节点必填：如 arxiv_search>",
-      "tool_input": "<tool 节点必填：建议使用模板 ${metadata.<node_id>.result}>",
+      "tool_input": "<tool 节点必填：arxiv_search 时写固定短英文关键词，如 \"Agentic RAG\" 或 \"LLM agent memory\"（2~8 词）；禁止 ${metadata.xxx.summary} 或 result 全文；同一方案最多 1 次 arxiv>",
       "prompt_template": "<user 节点必填：给用户的提问文本>",
       "input_schema": "<user 节点可选：{\"type\":\"text\"} 或 {\"type\":\"single_choice\",\"options\":[...]}>",
       "validation": "<user 节点可选：{\"required\":true}>",

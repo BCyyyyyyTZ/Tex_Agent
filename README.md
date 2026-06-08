@@ -21,6 +21,7 @@ pip install -r requirements.txt
 # 3. 配置环境变量
 cp .env.example .env
 # 编辑 .env，填写 OPENAI_API_KEY 等
+```
 
 **启动服务：**
 
@@ -28,6 +29,8 @@ cp .env.example .env
 # 方式 A：模块入口（常用）
 python -m ui.web.server
 
+python -m ui.overleaf.server 然后打开http://127.0.0.1:8772/
+```
 
 默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。
 
@@ -45,66 +48,286 @@ python -m ui.web.server
 
 **启动后打开浏览器：** 默认尝试**系统默认浏览器**（WSL 常见为调 Windows 侧打开，见 `ui/web/browser_open.py`）。可设置 `TEX_AGENT_NO_OPEN_BROWSER=1` 不自动打开；`TEX_AGENT_ALSO_OPEN_SIMPLE_BROWSER=1` 在打开系统浏览器后**再**尝试 Simple Browser。详见 `ui/web/ide_launch.py` 与 `scripts/start_texagent_web.py` 文头说明。
 
+## 论文审查功能的使用说明
+
+### 不同方式实现论文审查
+
+#### 直接上传PDF + 多模态大模型理解
+
+对应工作流含“multi”字段，包括：
++ `checklist_multi_v1`：6个审查节点并行工作，略快但可能由于API的原因不够稳定
++ `checklist_multi_v2`：6个审查节点串行工作，更稳定
++ `checklist_multi_v3`：仅包括一个审查LMM节点，更快但效果可能退步
++ `checklist_multi_v4`：效果同v1，但**支持用户自然语言交互**
+
+#### 本地进行pdf解析 + 上传纯文本内容给LLM
+
+对应工作流含“text”字段，包括：
++ `checklist_text_v1`：旧版工作流，没有包括对参考文献的审查
++ `checklist_text_v2`：包括对**所有正文部分**的审查（摘要、绪论、背景与相关工作、方法、实验、参考文献 共 6 部分，**不包括图片、图表、表格等**）；支持自然语言输入路径
++ `checklist_text_v3`：审查逻辑与 v2 相同；`preflight_inputs` 关闭 LLM，适合 `check_text.py` 批量脚本（结构化 JSON 路径输入）
+
+v1 / v2 支持自然语言交互（含待审 PDF、checklist 路径，可选输出路径）。v3 推荐批处理时使用 `check_text.py` 或自行传入上述 JSON。工作时六路并行分别审查各章节文本，结束后提供批注 PDF 下载。
+
+### 如何运行
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/BCyyyyyyTZ/Tex_Agent.git
+cd TeX_Agent
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 配置环境变量
+cp .env.example .env
+
+# 4. 运行web-ui
+python -m ui.web.server
+
+# 5. 选择带multi或text的工作流，对工作流的描述见上
+
+# 6. 如果选用multi_v1~v3工作流，需要构造输入，直接输在对话框中，例如：
+"pdf_path": "./storage/pdfs/paper1.pdf",
+"checklist_path": "./storage/checklists/thesis-checklists.md",
+"output_path": "./storage/documents/paper1-checked.pdf"
+# 路径可以使用绝对路径或相对Tex_Agent的相对路径
+# 可以不用手动上传文件，直接在输入注入文件路径即可
+
+# 如果其他工作流，就可以不用标准格式的输入，可以支持自然语言输入
+
+# 7. 如果正常就可以看到输出了（请耐心等待），输出的文档点击链接下载，也会同时保存在"output_path"路径下
+```
+
+### 一些说明
+
+1. Gemini API可能连接不够稳定，并发执行大概率会有的连接失败，串行执行也有小概率失败某一个节点 —— 一个节点失败理论上有的时候不影响正常输出标注pdf，但会在UI显示有错误（有些情况下一些节点请求API失败，但Agent会根据请求成功的API输出进行工作，仍然在"output_path"下保存结果）
+2. 目前支持的工作流是`checklist_multi_v1`、`checklist_multi_v2`、`checklist_multi_v3`、`checklist_multi_v4`（支持论文审查），其他一些工作流属于是项目开发过程中调试用的，可能不能运行或有一些问题，尽量不要使用
+3. 目前项目可以更方便地自定义工作流，可以参考 `checklist_multi_v1` 设计节点和边的关系，将 JSON 保存在 `config/workflow/` 下，并在 `config/workflow_registry.json` 中注册（关于自定义工作流的详细说明之后可以补充）
+4. `checklist_multi_v4`支持用户自然语言输入，需要包括文件路径信息和checkinglist路径信息
+
+## 命令行批量审查：`check.py`（checklist_multi v1 / v2 / v3）
+
+用于不经过 Web UI、按配置文件顺序跑多份 PDF 的 checklist 审查。
+
+1. **论文文件组织结构**
+   - `files/input/`：待审PDF原件（还在这里面的就是没审查的，审查完的会移动到checked下面）
+   - `files/checklist/`：checklist 文件
+   - `files/output/`：批注后的 PDF（脚本自动生成，无需在配置里写路径，同一个论文多次批注的结果会在后面标版本的）
+   - `files/checked/`：已审PDF原件
 
 
-## 在现有架构基础上进行修改的说明
+2. **配置文件**：仓库中config/run_config.json
+   - `version`：`"v1"`、`"v2"` 或 `"v3"`（对应三套并行/串行/单节点审查策略）
+   - `checklist_path`：绝对路径 or 相对于 `files/checklist/` 的相对路径
+   - `pdf_path`（单个）或 `pdf_paths`（列表）：绝对路径 or 相对于 `files/input/` 的相对路径  
+   - 不用写输出路径
 
-**注意：当前版本已统一为动态工作流链路。默认、自定义、plan 都走同一套动态构图与执行器。**
+3. **运行**：
 
-### 统一工作流设计（推荐按此理解与修改）
+   ```bash
+   python check.py
+   ```
 
-**现在 `task` 与 `plan` 的底层执行方式一致，差异只在前置步骤（是否先规划）。**
+4. **行为说明**
+   - 启动前会探测 **Gemini** 与 **OpenAI 兼容 API**；**连不上模型则直接退出**，不跑任何 PDF。
+   - 某个 **PDF 或 checklist 路径不存在**：**跳过该条**（若共享的 checklist 不存在则整批跳过）。
+   - 某一 PDF **执行失败（非连接类错误）**：打印错误并**继续**下一个。
+   - 运行中出现 **连接类错误**：**立即停止**，不再处理后续文件。
+   - **成功**：在 `files/output/` 生成批注 PDF，并把**原稿**归档到 `files/checked/`；**失败**：原文件仍留在原位置（例如仍在 `files/input/`）。
 
-#### 入口调用链
+5. **退出码**：`0` 表示本批全部成功；`1` 表示存在失败项、配置错误或没有任何可处理文件；`2` 表示模型连通性检查失败或运行中出现连接类错误并已中止。
 
-`task`：`main.py` -> `core/agent_cli.py` `run_task()` -> `_execute_with_app()`  
-`plan`：`main.py` -> `core/agent_cli.py` `run_plan_task()` -> `_execute_with_app()`
+## 命令行批量审查：`check_text.py`（checklist_text_v3）
 
-#### 核心代码
+用于不经过 Web UI、按**结构化路径**批量跑 **文本审查**工作流（`checklist_text_v3`，与 v2 审查逻辑一致；首节点 `preflight_inputs` 不调用 LLM，适合批处理）。
 
-##### 1. workflow/graph_builder.py 动态配置装配
+1. **配置文件**（可选）：将 `config/run_config_text.example.json` 复制为 `config/run_config_text.json`，字段说明：
+   - `workflow`：默认 `checklist_text_v3`
+   - `checklist_path`：审查清单（绝对路径或相对项目根）
+   - `output_dir`：输出目录；每篇生成 `{PDF 原名}-checked.pdf`（重名时自动加 `_1` 后缀）
+   - `pdf_paths`：待审 PDF 列表（绝对路径或相对项目根）
 
-- `build_app_from_workflow(workflow_name, ...)`：统一构建入口；可选参数 **`config_dict`** 时直接解析内存中的 `nodes/edges`（JSON），用于 Web 左侧「自定义」工作流，无需写注册表文件
-- `load_workflow_graph_config(workflow_name)`：从 `workflow_registry` 读取配置
-- `build_dynamic_graph(nodes, edges, ...)`：根据配置构图并执行
+2. **运行**：
 
-当前不再维护硬编码 `design/think/execute` 构图逻辑，默认工作流也走配置文件驱动：
-- `config/workflow_registry.json` 中的 `default`
-- 对应配置文件 `config/workflow_default_dynamic.json`
+   ```bash
+   # 使用配置文件
+   python check_text.py
 
-##### 2. workflow/workflow_registry.py 工作流注册
+   # 或命令行直接指定
+   python check_text.py --checklist thesis-checklists.md --output-dir files/output_text --pdfs doc/a.pdf doc/b.pdf
+   ```
 
-- `workflows.<name>` 支持 `file` 类型配置
-- `task --wf <name> ...` 即按名称加载对应配置
+3. **行为说明**
+   - 每篇论文向工作流传入 JSON：`{"pdf_path":"...","checklist_path":"...","output_path":"..."}`。
+   - 某一 PDF 失败（非连接类错误）：打印错误并继续下一篇；连接类错误则立即停止。
 
-##### 3. workflow/nodes.py 节点执行逻辑
+4. **退出码**：与 `check.py` 相同（`0` / `1` / `2`）。
 
-当前动态节点统一使用 `make_agent_node()`：
-- 从节点配置读取 `system_prompt/subtask/depends_on`
-- 统一注入 JSON 输出约束
-- 解析结构化输出并写入 `state["metadata"]`
-- 支持将结果写入共享记忆
 
-##### 4. config/agent_config.py 的角色
+## 解析文章（pdf -> md + json）
 
-`agent_config.py` 仍可作为提示词模板来源，但当前默认执行路径优先读取  
-`config/workflow_default_dynamic.json` 中的节点配置。建议以 workflow 配置为准进行维护。
+### pypdf+pdfminer
 
-#### 修改时应遵守的规约
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
 
-+ 不要破坏状态契约：core/state.py 的 WorkflowState 字段名保持兼容（messages/current_node/input/output/error/metadata）。
-+ 所有 workflow 修改都以配置为主（registry + workflow json/yaml），避免再引入硬编码图路径。
-+ 节点返回格式统一：每个节点返回 dict，至少保证 current_node、error 语义一致；messages 继续走可合并列表。
-+ Agent 接口不改签名：遵守 BaseAgent 的 run/reset/ainvoke 约束，避免影响其他实现。
-+ 目前RAG开发不太成熟，请忽略RAG相关的接口和内容
+# 2. 配置环境变量
+cp .env.example .env
 
-### 动态planner
+# 3. 直接运行web-ui   
+python -m ui.web.server
 
-**plan 命令当前会先执行规划，然后复用与 task 相同的底层执行器。**
+# 4. 选择工作流：thesis_chapter_extract
 
-这部分是让planner agent自动生成流程的路线，目前不太能支持亲自设计图结构和agent的要求，相关说明后续补充
+# 5. 支持自然语言输入，给定待解析文件的路径和需要解析的章节（或章节名、摘要、全文等字样）
+```
+
+
+### 命令行直接调用工具（docling）
+
+```bash
+# 1. 安装依赖
+pip install -r requirements.txt
+
+# 2. 配置环境变量
+cp .env.example .env
+
+# 3. 直接运行document_parse
+#    必填的参数是待解析的pdf路径
+#    可选参数：-o 保存结果的路径；不填会默认保存在Tex_Agent/storage/documents路径下   
+python -m rag.document_parse "D:\papers\my.pdf" -o "D:\output\my_parse_folder"
+```
 
 ---
+
+## LaTeX 论文辅助写作功能的说明
+
+TeX_Agent 提供了一套 LaTeX 论文辅助写作子系统，覆盖**项目扫描**、**静态检查（ChkTeX）**、**编译检查（latexmk）**、**LLM 纠错建议**与**主动润色**。
+
+| 通道 | 入口 | 适用场景 |
+|------|------|----------|
+| **Ghost 幽灵窗口（推荐）** | `python -m latex.ghost_cli` | 边看源码边改、行间纠错卡、应用/对比/忽略、项目文件树 |
+| 一次性诊断 | `python main.py task --wf latex_diagnose_v0/v1` | CI、全库体检、无 UI |
+| 终端监视 | `python -m latex.watch_cli` | 纯终端输出、旧版 watch 行为 |
+
+---
+
+### 1. 独立幽灵窗口 Ghost UI
+
+Ghost UI 在**独立浏览器页**中展示 LaTeX 源码与**行间浮动建议卡**，不依赖 VS Code 扩展。
+
+#### 快速启动
+
+```bash
+# 在项目根目录执行（需已配置 .env 中的 LLM API Key，纠错建议才可用）
+python -m latex.ghost_cli --root latex文件夹 --main-tex 主tex文件.tex
+```
+
+启动后会尝试打开浏览器，默认地址：
+
+**http://127.0.0.1:8771/**
+
+`--root` 为 LaTeX 项目根目录；`--main-tex` 为编译入口主文件（相对 `root` 的正斜杠路径，如 `paper.tex`）。系统会扫描 `main_tex` 的 `\input` 闭包内全部子 `.tex`，子文件上的报错也会出现在对应文件的 Ghost 视图中。
+
+#### 常用命令行参数
+
+```bash
+python -m latex.ghost_cli \
+  --root 文件夹 \
+  --main-tex paper.tex \
+  --quiet-sec 1.0 \     # 静默时间（s），当文件修改后静默多少秒再触发静态检查
+  --no-browser          # 可选：不自动打开浏览器，手动访问 http://127.0.0.1:8771/
+```
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--root` | （必填） | LaTeX 项目根目录，支持绝对路径或相对项目根 |
+| `--main-tex` | 无 | 主 tex，用于 latexmk 编译入口；建议始终指定 |
+| `--quiet-sec` | `1.0` | 文件修改后静默多少秒再触发**静态检查** |
+| `--disable-latexmk` | 关闭 | 默认**开启** latexmk；加上此参数则不做编译检查 |
+| `--enable-auto-polish` | 关闭 | 启用后会在停笔约 2s 自动润色（Ghost 默认**关闭**自动润色，请用页面内「主动润色」） |
+| `--idle-polish-sec` | `2.0` | 仅在与 `--enable-auto-polish` 联用时生效 |
+| `--host` / `--port` | `127.0.0.1` / `8771` | 监听地址与端口 |
+| `--no-browser` | 关闭 | 不自动打开系统浏览器 |
+
+#### 页面功能说明
+
+| 功能 | 说明 |
+|------|------|
+| **项目文件树** | 顶栏下拉按 `\input` / `\bibliography` 关系树状展示；可选 `.tex`、`.bib`；节点旁圆点表示该文件有待处理纠错卡或润色卡 |
+| **源码区** | 当前选中文件的行号与内容；纠错范围红色高亮，润色范围绿色高亮 |
+| **纠错幽灵卡** | 展示报错信息、定位、原因分析、改正方案；支持**应用**（直接替换）、**对比**（原文注释 + 新文插入）、**忽略** |
+| **主动润色** | 底栏「主动润色」：输入需求 + 选择目标文件，由 LLM 生成润色卡（绿色） |
+| **编译检查** | 顶栏按钮「编译检查」：手动触发整项目 latexmk |
+
+#### 诊断与刷新策略（Ghost 专用）
+
+与通用 `watch_cli` 不同，Ghost 采用 **GhostWatchPolicy**：
+
+1. **静态检查（ChkTeX）**
+   - 仅在您对监视目录内 `.tex` / `.bib` **有修改**，且**静默 `--quiet-sec` 秒（默认 1s）无新修改**后触发。
+   - 扫描范围为 `main_tex` 可达闭包内的全部子 tex（不是只扫主文件）。
+   - 用户一直不编辑时，**不会**反复空跑静态检查。
+
+2. **编译检查（latexmk）**
+   - **启动时自动执行一次**（以 `main_tex` 为入口编译整个项目，生成/更新 `paper.log` 等；**不是**对每个子 tex 单独编译）。
+   - 之后仅在您点击 **「编译检查」** 时再次编译。
+   - 编译在后台进行；顶部状态条会显示进度，结束后变为「编译检查完成」（可能编译检查完成后还要稍后一会才能看见结果，这是由于检查之后报错会经过处理生成改正建议）。
+
+3. **纠错建议（LLM）**
+   - 仅针对 **error** 级问题生成卡片；warning 不进 LLM 纠错链。
+   - 若同一轮 error 集合未变，不重复调用 LLM，避免卡片抖动。
+   - 点击「忽略」会持久化：同一文件、同一行、同一报错再次出现时默认不再出卡、不再送 LLM。
+
+4. **行号确认**
+   - 合并诊断后、出卡前会在报错行附近 **±5 行** 内根据报错锚点校准行号，缓解子文件 log 行号偏移。
+
+5. **前端刷新**
+   - 轮询 snapshot 时，仅当诊断结果版本或编译状态变化才重绘卡片，减少长卡片阅读时滚动条被重置。
+
+#### 应用 / 对比 使用注意
+
+- **应用**：按建议的 `range` 直接替换磁盘上的对应片段。
+- **对比**：将 `range` 内原文改为 `% [TeX_Agent][compare] ...` 注释，并在其下插入建议正文，便于对照后决定是否再点「应用」。
+- 空范围或重复点击「对比」已做幂等处理，避免产生 `% [TeX_Agent][compare] (empty)` 等污染行。
+
+静态资源目录：`ui/ghost/`（`ghost.js`、`ghost.css`）。
+
+
+### 2. 一次性全库诊断（CLI）
+
+若只需对项目做一次全面体检、不需要浏览器 UI，可使用 `main.py task`：
+
+- **基础诊断（无 LLM）**：ChkTeX + latexmk，速度快。
+  ```bash
+  python main.py task --wf latex_diagnose_v0 "{\"root\":\"您的项目路径\",\"main_tex\":\"paper.tex\"}"
+  ```
+- **智能诊断（带 LLM 修复建议）**：在 error 上调用大模型生成修改建议。
+  ```bash
+  python main.py task --wf latex_diagnose_v1 "{\"root\":\"您的项目路径\",\"main_tex\":\"paper.tex\"}"
+  ```
+
+
+### 3. 实时监视（终端 Watch 模式）
+
+```bash
+python -m latex.watch_cli start --root 您的项目路径 --main_tex main.tex
+```
+
+终端内输出诊断与润色摘要；默认防抖约 500ms、空闲约 2s 自动润色。改稿交互请优先使用上一节的 **Ghost UI**。
+
+### 4. 环境与依赖说明
+
+| 项 | 说明 |
+|----|------|
+| **路径** | `root` 支持 Windows / Linux 路径；API 与 JSON 内相对路径统一为正斜杠 |
+| **TeX 工具链** | 建议安装 `chktex`、`latexmk`（及 TeX 发行版）。未安装时静态/编译能力会降级 |
+| **LLM** | 纠错卡与主动润色需配置 `.env` 中 `OPENAI_API_KEY`（或项目使用的兼容 API） |
+| **编译轮次** | 语法纠错通常**一次** latexmk + log 解析即可发现致命错误；完整引用/bib 收敛可能需 latexmk 多轮，Ghost 默认 `fast` 模式，侧重快速报错而非最终 PDF 质量 |
+
+
 
 ## 项目目录树结构与文件说明
 
@@ -114,9 +337,20 @@ TeX_Agent/
 ├── requirements.txt             # 项目依赖（含 FastAPI、uvicorn、python-multipart 等）
 ├── .env.example                 # 环境变量示例（OPENAI_API_KEY 等，复制为 .env 使用）
 ├── README.md                    # 本文件
+├── check.py                     # 无 UI：按 config/run_config.json 批量跑 checklist_multi
+├── files/                       # check.py 推荐目录：input / checklist / output / checked（见文首说明）
 ├── storage/pdfs/                # Web 上传的 PDF 存放目录（用户文件默认被 .gitignore 忽略）
-├── ui/web/                      # FastAPI Web UI：server.py、静态页、pdf_storage、ide_launch 等
+├── ui/web/                      # FastAPI Web UI（默认 :8765）：server.py、静态页、pdf_storage 等
 │   └── static/                  # index.html、app.js、分支/工作流/PDF 相关 JS 与样式
+├── ui/ghost/                    # Ghost 幽灵窗口前端（默认 :8771）：index.html、ghost.js、ghost.css
+├── latex/                       # LaTeX 辅助写作：监视、诊断、Ghost 服务与项目树
+│   ├── ghost_cli.py             # 启动 Ghost：`python -m latex.ghost_cli --root ... --main-tex ...`
+│   ├── ghost_server.py          # Ghost HTTP 服务与 /api/* 路由
+│   ├── ghost_watch_policy.py    # Ghost 专用触发策略（静态防抖、启动一次编译、手动再编译）
+│   ├── watch_cli.py             # 终端监视模式
+│   ├── watch_service.py         # 诊断聚合、ChkTeX / latexmk、snapshot
+│   ├── project_tree.py          # 项目文件树（\input / bib）
+│   └── apply_compare.py         # 应用 / 对比写回磁盘
 ├── Framework.md                 # 框架拓展路线图
 │
 ├── doc/                         # 相关说明文件
@@ -125,9 +359,10 @@ TeX_Agent/
 ├── config/                      # 统一配置层（开发者只需关注此目录即可完成大部分配置）
 │   ├── settings.py              # 全局配置：LLM 模型、API Key、RAG 分块参数、超时、重试
 │   ├── agent_config.py          # 各 Agent 的 system prompt、temperature 等行为参数
-│   ├── workflow_registry.json   # 工作流注册表（name -> file path）
-│   ├── workflow_default_dynamic.json     # 默认工作流动态配置
-│   ├── workflow_five_nodes_example.json  # 5 节点示例工作流配置
+│   ├── run_config.json          # check.py 运行配置（纳入版本库）
+│   ├── run_config.example.json  # 配置模板备份/参考
+│   ├── workflow_registry.json   # 工作流注册表（name -> config/workflow/*.json）
+│   ├── workflow/                # 各工作流 JSON（如 workflow_default_dynamic.json、workflow_checklist_multi_v*.json）
 │   ├── planner_config.py        # 动态规划：温度、轮数、JSON 输出约束、parse_llm_json 等
 │   └── logging_config.py        # 日志级别、格式、输出目标配置
 │

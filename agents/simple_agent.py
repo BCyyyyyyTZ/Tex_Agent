@@ -84,18 +84,62 @@ class SimpleAgent(BaseAgent):
         base_url: str = BASE_URL,
         temperature: float = TEMPERATURE,
         max_history: int = 100,
+        max_tokens: Optional[int] = None,
     ):
         if tools is None:
             tools = tool_list
-        if system_prompt is None:
-            tools_info_list = []
-            for tool in tools:
-                tools_info_list.append({"tool_name": tool.name, "tool_description": tool.description, "tool_input_schema": tool.input_schema})
-            system_prompt = SYSTEM_PROMPT.format(tools=tools_info_list)
-        super().__init__(name, system_prompt, tools)
-        self.set_gemini("llm", model_name, api_key, temperature)
-        self.history = []
+        super().__init__(name, system_prompt or DEFAULT_SYSTEM_PROMPT, tools)
+
+        self.model_name = model_name or settings.llm_model
+        self.temperature = float(
+            settings.llm_temperature if temperature is None else temperature
+        )
+        if self.temperature <= 0:
+            self.temperature = DEFAULT_TEMPERATURE
+
+        self.openai_api_key = api_key or settings.openai_api_key
+        self.openai_base_url = base_url or settings.openai_base_url
+        self.gemini_api_key = (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or ""
+        )
+
+        self._llm_max_tokens = max_tokens
+        self.backend = self._init_backend()
+        self.history: List[WorkflowMessage] = []
         self.max_history = max_history
+
+    def _init_backend(self) -> str:
+        model_lower = (self.model_name or "").lower()
+        wants_gemini = "gemini" in model_lower
+
+        if wants_gemini and self.gemini_api_key:
+            self.set_gemini("llm", self.model_name, self.gemini_api_key, self.temperature, self._llm_max_tokens)
+            return "gemini"
+
+        if self.openai_api_key:
+            self.set_llm(
+                "llm",
+                self.model_name,
+                self.openai_api_key,
+                self.openai_base_url,
+                self.temperature,
+                self._llm_max_tokens,
+            )
+            if wants_gemini:
+                logger.warning(
+                    f"[{self.name}] 检测到 Gemini 模型名但未配置 GEMINI_API_KEY，已回退 OpenAI 兼容通道"
+                )
+            return "openai"
+
+        if wants_gemini:
+            raise AgentError(
+                f"{self.name} 启动失败：模型 {self.model_name} 需要 GEMINI_API_KEY 或 GOOGLE_API_KEY"
+            )
+        raise AgentError(
+            f"{self.name} 启动失败：未配置可用 API Key（OPENAI_API_KEY / GEMINI_API_KEY）"
+        )
 
     def _build_history_messages(self) -> List[str]:
         """构建对话历史消息列表"""

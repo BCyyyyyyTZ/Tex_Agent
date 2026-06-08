@@ -2,7 +2,7 @@
 工作流注册表加载器。
 
 职责：
-1. 从 config/workflow_registry.json 读取“名称 -> 工作流规格”映射
+1. 从 config/workflow_registry.json 读取“名称 -> 工作流规格”映射（具体图定义在 config/workflow/*.json）
 2. 支持 file 规格：通过 YAML/JSON 配置文件解析动态图
 3. 所有 workflow（包含 default）统一转换为 nodes / edges
 """

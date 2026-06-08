@@ -1,0 +1,143 @@
+{
+    "_comment": "checklist 单节点全量审查 v3：不拆分 checklist，一次 MultiSimpleAgent 覆盖原 v2 六路维度，再页边标注 PDF",
+    "nodes": [
+        {
+            "node_id": "register_inputs",
+            "node_type": "tool",
+            "tool_name": "register_inputs",
+            "config": {
+                "tool_input": "${input}",
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "load_checklist",
+            "node_type": "tool",
+            "tool_name": "file_loading",
+            "config": {
+                "tool_input": "${metadata.register_inputs.metadata.tool_metadata.checklist_abs_path}",
+                "depends_on": [
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "gemini_upload_pdf",
+            "node_type": "tool",
+            "tool_name": "gemini_upload_pdf",
+            "config": {
+                "tool_input": "${metadata.register_inputs.metadata.tool_metadata.pdf_abs_path}",
+                "depends_on": [
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "checklist_unified_review",
+            "node_type": "agent",
+            "agent_name": "MultiSimpleAgent",
+            "config": {
+                "system_prompt": "你是资深的学术论文综合审查专家。你必须在一次审查中，严格依据用户提供的【完整 Checklist】全文，对上传的 PDF 做全面检查，覆盖以下方面（与 checklist 条目对应，勿遗漏）：摘要与导言、结构与逻辑、语言规范、内容完整性（方法/实验/数据/定义等）、图表与引用、排版与公式格式。",
+                "subtask": "请仔细阅读已上传的 PDF 与【完整 Checklist】（不要只处理局部章节；checklist 未要求拆分时则整体执行）。在同一轮输出中完成所有相关检查。要求：1. 精准定位：每条问题须给出 'text' 字段，值为从 PDF 中一字不差摘录的原文片段（尽量短、可唯一检索，不要包含多余换行）。2. 依据明确：'comment' 必须全中文，直接说明违背了 Checklist 中哪一条或哪一款。3. 编码：直接输出汉字，严禁 \\uXXXX 形式的 Unicode 转义。4. 输出严格 JSON，格式为：```json{\"result\":\"[{\"page_idx\":1,\"text\":\"一字不差原句\",\"comment\":\"纯中文意见\"}]\",\"summary\":\"全文审查的中文总结\"}```。无问题则 result=\"[]\"。page_idx 从 1 开始。",
+                "attachment": "${metadata.gemini_upload_pdf.metadata.tool_metadata.gemini_file}",
+                "depends_on": [
+                    "load_checklist",
+                    "gemini_upload_pdf"
+                ],
+                "temperature": 0.1,
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "pdf_annotator",
+            "node_type": "tool",
+            "tool_name": "pdf_comment",
+            "config": {
+                "tool_input": {
+                    "pdf_path": "${metadata.register_inputs.metadata.tool_metadata.pdf_abs_path}",
+                    "output_path": "${metadata.register_inputs.metadata.tool_metadata.output_pdf_abs_path}",
+                    "question_list": "${metadata.checklist_unified_review.result}"
+                },
+                "depends_on": [
+                    "checklist_unified_review",
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "offer_download",
+            "node_type": "tool",
+            "tool_name": "offer_artifact_download",
+            "config": {
+                "tool_input": {
+                    "file_path": "${metadata.pdf_annotator.metadata.tool_metadata.output_path}"
+                },
+                "depends_on": [
+                    "pdf_annotator",
+                    "register_inputs"
+                ],
+                "history_mode": "minimal"
+            }
+        },
+        {
+            "node_id": "final_report",
+            "node_type": "agent",
+            "agent_name": "SimpleAgent",
+            "config": {
+                "system_prompt": "你是审查结果总结助手。",
+                "subtask": "根据 checklist_unified_review、pdf_annotator 与 offer_download 的输出，给用户一段简明中文总结：总问题数、主要问题类型、带标注 PDF 路径；并提醒用户可在对话中的「附件下载」链接点击保存到本机。不要再做 PDF 理解。",
+                "depends_on": [
+                    "checklist_unified_review",
+                    "pdf_annotator",
+                    "offer_download",
+                    "register_inputs"
+                ],
+                "temperature": 0.15,
+                "history_mode": "minimal",
+                "single_turn_contract_mode": "always",
+                "include_metadata_chain": false,
+                "upstream_result_max_chars": 3000
+            }
+        }
+    ],
+    "edges": [
+        {
+            "from_node": "register_inputs",
+            "to_node": "load_checklist",
+            "condition": null
+        },
+        {
+            "from_node": "register_inputs",
+            "to_node": "gemini_upload_pdf",
+            "condition": null
+        },
+        {
+            "from_node": "load_checklist",
+            "to_node": "checklist_unified_review",
+            "condition": null
+        },
+        {
+            "from_node": "gemini_upload_pdf",
+            "to_node": "checklist_unified_review",
+            "condition": null
+        },
+        {
+            "from_node": "checklist_unified_review",
+            "to_node": "pdf_annotator",
+            "condition": null
+        },
+        {
+            "from_node": "pdf_annotator",
+            "to_node": "offer_download",
+            "condition": null
+        },
+        {
+            "from_node": "offer_download",
+            "to_node": "final_report",
+            "condition": null
+        }
+    ]
+}

@@ -3,16 +3,128 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <title>TeX Agent</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css"
     />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=settings-15" />
+    <link rel="stylesheet" href="conferences_calendar.css?v=8" />
+    <link rel="stylesheet" href="drawing_tools.css?v=4" />
   </head>
   <body>
     <div class="app-shell" id="app-shell">
     <div class="app-layout" id="app-layout">
+      <div class="layout-col layout-col--rag" id="col-rag">
+      <aside class="sidebar-rag" aria-label="RAG 管理">
+        <h2 class="sidebar-rag-title">RAG 管理</h2>
+        <p class="sidebar-rag-desc">
+          RAG库相关录入、查询、删除
+        </p>
+
+        <section class="rag-block" id="rag-upload-block">
+          <h3 class="rag-block-title">录入</h3>
+          <form id="rag-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
+            <div class="right-upload-group">
+              <input
+                type="file"
+                id="rag-file"
+                name="file"
+                class="composer-file-input-native"
+                aria-label="选择要上传到 RAG 的文件"
+              />
+              <label class="composer-file-btn composer-file-btn--compact" for="rag-file">
+                <span class="composer-file-btn__icon" aria-hidden="true">📎</span>
+                <span class="composer-file-btn__text">选择文件</span>
+              </label>
+              <button type="submit" class="btn-secondary btn-upload-tight">上传并入库</button>
+            </div>
+            <label class="rag-inline-label">
+              Source（可选）
+              <input type="text" id="rag-source" class="branch-input" placeholder="默认使用文件名" />
+            </label>
+            <label class="rag-inline-label">
+              metadata JSON（可选）
+              <textarea id="rag-metadata-json" rows="1" class="wf-ta wf-ta--compact-json" placeholder='例如: {"tag":"intro","author":"alice"}'></textarea>
+            </label>
+          </form>
+          <div class="rag-pending-row">
+            <p id="rag-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button type="button" id="rag-clear-file-btn" class="btn-tiny rag-clear-file-btn" title="取消当前已选文件" aria-label="取消当前已选文件">-</button>
+          </div>
+          <p id="rag-upload-status" class="asset-panel-status" role="status"></p>
+        </section>
+
+        <section class="rag-block" id="rag-delete-block">
+          <h3 class="rag-block-title">删除</h3>
+          <form id="rag-delete-id-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                按记录 ID 删除
+                <input type="text" id="rag-delete-id-input" class="branch-input" placeholder="输入完整记录 id" />
+              </label>
+              <button type="submit" class="btn-secondary btn-rag-del">按 ID 删除</button>
+            </div>
+          </form>
+          <form id="rag-delete-source-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                按 source 删除全部
+                <input type="text" id="rag-delete-source-input" class="branch-input" placeholder="输入 source 值" />
+              </label>
+              <button type="submit" class="btn-secondary btn-rag-del">按 source 删除</button>
+            </div>
+          </form>
+          <p id="rag-delete-status" class="asset-panel-status" role="status"></p>
+        </section>
+
+        <section class="rag-block rag-block--query" id="rag-query-block">
+          <div class="rag-block-head">
+            <h3 class="rag-block-title">查询</h3>
+            <button type="submit" form="rag-query-form" class="btn-secondary btn-rag-run">执行查询</button>
+          </div>
+          <form id="rag-query-form" class="rag-query-form" autocomplete="off">
+            <div class="rag-query-row">
+              <label class="rag-inline-label rag-inline-label--small">
+                查询方式
+                <select id="rag-query-mode" class="branch-select">
+                  <option value="semantic" selected>语义查询（Top-K）</option>
+                  <option value="metadata">按 Metadata 查询</option>
+                </select>
+              </label>
+            </div>
+            <div class="rag-query-row rag-query-row--main">
+              <label class="rag-inline-label rag-inline-label--query" id="rag-query-text-wrap">
+                查询文本
+                <textarea id="rag-query-input" rows="1" class="wf-ta wf-ta--query-one-line" placeholder="输入检索问题..."></textarea>
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-top-k-wrap">
+                Top-K
+                <input type="number" id="rag-top-k" class="branch-input" min="1" max="20" value="5" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-meta-key-wrap">
+                字段名
+                <input type="text" id="rag-meta-key" class="branch-input" placeholder="如 source / tag" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-meta-value-wrap">
+                字段值（可空）
+                <input type="text" id="rag-meta-value" class="branch-input" placeholder="可留空仅按字段筛选" />
+              </label>
+              <label class="rag-inline-label rag-inline-label--small" id="rag-record-limit-wrap">
+                条数
+                <input type="number" id="rag-record-limit" class="branch-input" min="1" max="50" value="20" />
+              </label>
+            </div>
+          </form>
+          <p id="rag-query-status" class="asset-panel-status" role="status"></p>
+          <ul id="rag-result-list" class="asset-list asset-list--rag-results" aria-live="polite"></ul>
+        </section>
+      </aside>
+      </div>
+
+      <div class="layout-gutter" id="gutter-right-rag" title="拖动调整列宽" role="separator" aria-label="调整 RAG 与工作流列之间宽度"></div>
+
       <div class="layout-col layout-col--wf" id="col-wf">
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
@@ -105,22 +217,113 @@
               <h1>TeX Agent</h1>
               <p class="tagline">论文写作智能体 · 与 CLI 共享会话与工作流</p>
             </div>
+            <button
+              type="button"
+              class="conf-cal-brand-btn"
+              data-conf-cal-open
+              title="顶会投稿倒计时（未来一年，静态数据）"
+              aria-haspopup="dialog"
+            >
+              ◈ 顶会日历
+            </button>
           </div>
-          <div class="header-actions" role="toolbar" aria-label="工作流与模式">
-            <label class="select-wrap select-wrap--header">
+          <div class="header-actions" role="toolbar" aria-label="工作流与布局">
+            <label class="select-wrap select-wrap--header" id="workflow-select-wrap">
               <span class="label">工作流</span>
               <select id="workflow-select" title="已注册或左侧自定义">
-                <option value="default" selected>default（注册表）</option>
-                <option value="__web__">自定义（左侧编排）</option>
+                <option value="__web__" selected>自定义（左侧编排）</option>
+                <option value="default">default（模板）</option>
               </select>
             </label>
             <label class="select-wrap select-wrap--header">
               <span class="label">模式</span>
               <select id="mode" title="执行模式">
-                <option value="task" selected>task（工作流）</option>
+                <option value="auto" selected>auto（单节点直连，默认）</option>
+                <option value="task">task（注册表工作流）</option>
                 <option value="plan">plan（动态规划，较慢）</option>
               </select>
             </label>
+            <div
+              class="panel-toggles"
+              id="panel-toggles"
+              role="group"
+              aria-label="侧栏开关"
+            >
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="rag"
+                aria-pressed="true"
+                aria-label="RAG"
+                title="RAG"
+              >
+                <span class="panel-toggle__icon panel-toggle__icon--db" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <ellipse cx="8" cy="4" rx="6" ry="2"/>
+                    <path d="M2 4v2.5C2 7.88 4.69 9 8 9s6-1.12 6-2.5V4"/>
+                    <path d="M2 6.5v3C2 10.88 4.69 12 8 12s6-1.12 6-2.5v-3"/>
+                    <path d="M2 9.5v2C2 12.88 4.69 14 8 14s6-1.12 6-2.5v-2"/>
+                  </svg>
+                </span>
+                <span class="panel-toggle__tip">RAG</span>
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="wf"
+                aria-pressed="true"
+                aria-label="工作流"
+                title="工作流"
+              >
+                <span class="panel-toggle__icon" aria-hidden="true">◫</span>
+                <span class="panel-toggle__tip">工作流</span>
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="branch"
+                aria-pressed="true"
+                aria-label="分支"
+                title="分支"
+              >
+                <span class="panel-toggle__icon" aria-hidden="true">⑂</span>
+                <span class="panel-toggle__tip">分支</span>
+              </button>
+              <button
+                type="button"
+                class="panel-toggle is-active"
+                data-panel="right"
+                aria-pressed="true"
+                aria-label="资料"
+                title="资料"
+              >
+                <span class="panel-toggle__icon" aria-hidden="true">⊞</span>
+                <span class="panel-toggle__tip">资料</span>
+              </button>
+              <button
+                type="button"
+                class="panel-toggle panel-toggle--tools"
+                id="drawing-tools-open"
+                data-drawing-tools-open
+                aria-label="工具"
+                title="工具"
+              >
+                <span class="panel-toggle__icon" aria-hidden="true">✎</span>
+                <span class="panel-toggle__tip">工具</span>
+              </button>
+            </div>
+            <button
+              type="button"
+              id="user-settings-trigger"
+              class="header-settings-btn"
+              data-user-settings-open
+              title="用户设置"
+              aria-haspopup="dialog"
+              onclick="window.TexAgentSettings && window.TexAgentSettings.open && window.TexAgentSettings.open()"
+            >
+              <span class="header-settings-btn__orb" aria-hidden="true"></span>
+              <span>设置</span>
+            </button>
           </div>
         </header>
 
@@ -149,7 +352,17 @@
                   <span class="composer-file-btn__text">选择文件</span>
                 </label>
                 <button type="button" class="btn-secondary btn-upload-tight" id="composer-upload-btn">上传</button>
+                <button
+                  type="button"
+                  id="composer-clear-file-btn"
+                  class="btn-tiny file-clear-btn"
+                  title="取消当前已选文件"
+                  aria-label="取消当前已选文件"
+                >
+                  -
+                </button>
               </div>
+              <span id="composer-pending-name" class="file-pending-label" aria-live="polite"></span>
               <span id="composer-upload-status" class="composer-upload-status" role="status"></span>
             </div>
             <textarea
@@ -159,7 +372,12 @@
               spellcheck="false"
             ></textarea>
             <div class="form-footer">
-              <span class="hint">点「发送」最稳；Enter 发送。PDF 与 其它常用文档 使用上方选择并上传。选用「自定义」工作流前请先最左侧保存。竖条可拖曳调节各列宽。</span>
+              <ul class="composer-hints" aria-label="操作提示">
+                <li><kbd>Enter</kbd> 发送，<kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</li>
+                <li>PDF / 文档：在上方选择文件并上传；右侧资料可勾选后附带路径</li>
+                <li>工作流：顶栏选择；改左侧编排后请点击「保存到服务器」</li>
+                <li>顶栏可显隐侧栏；拖动列间竖线调节宽度</li>
+              </ul>
               <button type="submit" id="send" class="btn-primary">发送</button>
             </div>
           </form>
@@ -193,6 +411,18 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
+          <div class="file-pending-row file-pending-row--right">
+            <p id="skill-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button
+              type="button"
+              id="skill-clear-file-btn"
+              class="btn-tiny file-clear-btn"
+              title="取消当前已选文件"
+              aria-label="取消当前已选文件"
+            >
+              -
+            </button>
+          </div>
           <p id="skill-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="skill-list" aria-live="polite"></ul>
         </div>
@@ -214,12 +444,27 @@
               <button type="submit" class="btn-secondary btn-upload-tight">上传</button>
             </div>
           </form>
+          <div class="file-pending-row file-pending-row--right">
+            <p id="checklist-pending-name" class="file-pending-label file-pending-label--right" aria-live="polite"></p>
+            <button
+              type="button"
+              id="checklist-clear-file-btn"
+              class="btn-tiny file-clear-btn"
+              title="取消当前已选文件"
+              aria-label="取消当前已选文件"
+            >
+              -
+            </button>
+          </div>
           <p id="checklist-panel-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--right" id="checklist-list" aria-live="polite"></ul>
         </div>
 
-        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="已上传的 PDF 与其它文档">
-          <h3 class="uploaded-files-title">已上传文件列表</h3>
+        <div class="uploaded-files-block" id="uploaded-files-block" aria-label="服务器已存储的全部上传文件">
+          <h3 class="uploaded-files-title">已上传文件（汇总）</h3>
+          <p class="uploaded-files-desc">
+            含底部上传的 PDF/文档与右侧 Skill、Checklist；勾选后发送时会附带路径。
+          </p>
           <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
         </div>
@@ -228,13 +473,338 @@
     </div>
     </div>
 
+    <div
+      id="conf-cal-overlay"
+      class="conf-cal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="conf-cal-title"
+      aria-hidden="true"
+    >
+      <div class="conf-cal-panel">
+        <div class="conf-cal-scanline" aria-hidden="true"></div>
+        <header class="conf-cal-head">
+          <div>
+            <h2 id="conf-cal-title" class="conf-cal-title">CONFERENCE DEADLINE RADAR</h2>
+            <p class="conf-cal-sub">2026–2027 · 静态参考 · 请以官网为准</p>
+          </div>
+          <button type="button" id="conf-cal-close" class="conf-cal-close" aria-label="关闭日历">×</button>
+        </header>
+        <div id="conf-cal-filters" class="conf-cal-filters" role="group" aria-label="研究领域筛选"></div>
+        <p id="conf-cal-status" class="conf-cal-status" role="status"></p>
+        <div id="conf-cal-list" class="conf-cal-body" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div
+      id="user-settings-overlay"
+      class="settings-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="user-settings-title"
+      aria-hidden="true"
+    >
+      <div class="settings-panel">
+        <header class="settings-head">
+          <div>
+            <h2 id="user-settings-title" class="settings-title">用户设置</h2>
+            <p class="settings-sub">本地保存，仅影响当前浏览器</p>
+          </div>
+          <button type="button" id="user-settings-close" class="settings-close" aria-label="关闭设置">×</button>
+        </header>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">主题色</h3>
+          <div id="settings-theme-list" class="settings-theme-list" aria-label="选择主题色"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">界面图案</h3>
+          <div id="settings-pattern-list" class="settings-theme-list" aria-label="选择界面图案"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3 class="settings-section-title">用户资料</h3>
+          <div class="settings-grid">
+            <label class="settings-field">
+              <span>昵称</span>
+              <input id="settings-display-name" type="text" placeholder="例如 yulin" />
+            </label>
+            <label class="settings-field">
+              <span>机构 / 团队</span>
+              <input id="settings-affiliation" type="text" placeholder="例如 Lab / University" />
+            </label>
+            <label class="settings-field">
+              <span>研究方向</span>
+              <input id="settings-research-fields" type="text" placeholder="例如 NLP, Systems, Networking" />
+            </label>
+            <label class="settings-field">
+              <span>个人主页</span>
+              <input id="settings-homepage" type="url" placeholder="https://..." />
+            </label>
+            <label class="settings-field settings-field--wide">
+              <span>备注</span>
+              <textarea id="settings-note" rows="3" placeholder="只保存在本地，可记录偏好或常用背景"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <footer class="settings-actions">
+          <button type="button" id="user-settings-reset" class="btn-secondary">恢复默认</button>
+          <button type="button" id="user-settings-save" class="btn-primary">保存设置</button>
+        </footer>
+      </div>
+    </div>
+
+    <div
+      id="drawing-tools-overlay"
+      class="drawing-tools-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawing-tools-title"
+      aria-hidden="true"
+    >
+      <div class="drawing-tools-panel">
+        <header class="drawing-tools-head">
+          <div>
+            <h2 id="drawing-tools-title" class="drawing-tools-title">工具箱</h2>
+          </div>
+          <button type="button" id="drawing-tools-close" class="drawing-tools-close" aria-label="关闭">×</button>
+        </header>
+
+        <div class="drawing-tools-tabs" role="tablist" aria-label="工具类型">
+          <button type="button" class="drawing-tools-tab is-active" data-tab="chart" role="tab" aria-selected="true">统计图表</button>
+          <button type="button" class="drawing-tools-tab" data-tab="diagram" role="tab" aria-selected="false">概念图</button>
+          <button type="button" class="drawing-tools-tab" data-tab="latex" role="tab" aria-selected="false">LaTeX 表格</button>
+          <button type="button" class="drawing-tools-tab" data-tab="palette" role="tab" aria-selected="false">配色</button>
+          <button type="button" class="drawing-tools-tab" data-tab="text" role="tab" aria-selected="false">文本统计</button>
+          <button type="button" class="drawing-tools-tab" data-tab="title" role="tab" aria-selected="false">标题生成</button>
+          <button type="button" class="drawing-tools-tab" data-tab="qrcode" role="tab" aria-selected="false">QR 码</button>
+        </div>
+
+        <div class="drawing-tools-body">
+          <section id="drawing-tab-chart" class="drawing-tools-pane is-active" role="tabpanel">
+            <form id="chart-plot-form" class="drawing-form" autocomplete="off">
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>图表类型</span>
+                  <select id="chart-type" class="branch-select">
+                    <option value="bar">柱状图 (bar)</option>
+                    <option value="line">折线图 (line)</option>
+                    <option value="pie">饼状图 (pie)</option>
+                  </select>
+                </label>
+                <label class="drawing-field">
+                  <span>标题</span>
+                  <input type="text" id="chart-title" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>X 轴标签</span>
+                  <input type="text" id="chart-x-label" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>Y 轴标签</span>
+                  <input type="text" id="chart-y-label" class="branch-input" placeholder="可选" />
+                </label>
+              </div>
+              <label class="drawing-field drawing-field--wide">
+                <span>数据 JSON</span>
+                <textarea id="chart-data-json" rows="6" class="wf-ta" spellcheck="false">{"x": ["A", "B", "C"], "y": [3, 5, 2]}</textarea>
+              </label>
+              <p class="drawing-hint">bar/line 支持 <code>{"x":[],"y":[]}</code> 或 <code>{"x":[],"series":[{"name":"S1","y":[]}]}</code>；pie 支持 <code>{"labels":[],"values":[]}</code></p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary" id="chart-plot-submit">生成图表</button>
+                <button type="button" class="btn-secondary" id="chart-plot-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="chart-plot-status" class="drawing-status" role="status"></p>
+            <div id="chart-plot-result" class="drawing-result" hidden>
+              <img id="chart-plot-img" alt="生成的统计图表" />
+              <a id="chart-plot-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
+
+          <section id="drawing-tab-diagram" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="concept-diagram-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>概念描述（需 Gemini Key）</span>
+                <textarea id="diagram-prompt" rows="4" class="wf-ta" placeholder="描述需要图示化的概念、流程或系统架构…"></textarea>
+              </label>
+              <label class="drawing-field">
+                <span>图标题</span>
+                <input type="text" id="diagram-title" class="branch-input" placeholder="可选" />
+              </label>
+              <label class="drawing-field drawing-field--wide">
+                <span>手动输入 Mermaid 代码（跳过 Gemini，直接渲染）</span>
+                <textarea id="diagram-mermaid" rows="8" class="wf-ta" spellcheck="false">flowchart TB
+  A[数据采集] --> B[预处理]
+  B --> C[索引构建]
+  C --> D[在线检索]
+  D --> E[生成回答]</textarea>
+              </label>
+              <p class="drawing-hint">未配置 Gemini Key 时，请直接在上方粘贴 Mermaid 代码并生成。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary" id="concept-diagram-submit">生成概念图</button>
+                <button type="button" class="btn-secondary" id="concept-diagram-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="concept-diagram-status" class="drawing-status" role="status"></p>
+            <pre id="concept-diagram-code" class="drawing-code-preview" hidden></pre>
+            <div id="concept-diagram-result" class="drawing-result" hidden>
+              <img id="concept-diagram-img" alt="生成的概念示意图" />
+              <a id="concept-diagram-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
+
+          <section id="drawing-tab-latex" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="latex-table-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>表头（逗号分隔）</span>
+                <input type="text" id="latex-headers" class="branch-input" value="Method, Accuracy, F1" />
+              </label>
+              <label class="drawing-field drawing-field--wide">
+                <span>数据行（JSON 或 Tab/逗号分隔）</span>
+                <textarea id="latex-rows" rows="6" class="wf-ta" spellcheck="false">[["BERT", "0.91", "0.88"], ["GPT", "0.93", "0.90"], ["Ours", "0.95", "0.92"]]</textarea>
+              </label>
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>表标题</span>
+                  <input type="text" id="latex-caption" class="branch-input" placeholder="可选" />
+                </label>
+                <label class="drawing-field">
+                  <span>label</span>
+                  <input type="text" id="latex-label" class="branch-input" placeholder="如 main_results" />
+                </label>
+              </div>
+              <p class="drawing-hint">模板生成，无需 LLM。需导言区 <code>\usepackage{booktabs}</code>。数值列可自动居中，可选高亮每列最优值。</p>
+              <label class="drawing-field drawing-field--inline">
+                <input type="checkbox" id="latex-highlight-best" />
+                <span>高亮每列最优数值（粗体）</span>
+              </label>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成 LaTeX</button>
+                <button type="button" class="btn-secondary" id="latex-table-reset">清空重置</button>
+                <button type="button" class="btn-secondary" id="latex-table-copy">复制代码</button>
+              </div>
+            </form>
+            <p id="latex-table-status" class="drawing-status" role="status"></p>
+            <pre id="latex-table-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-palette" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="palette-form" class="drawing-form" autocomplete="off">
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>主题</span>
+                  <select id="palette-theme" class="branch-select">
+                    <option value="academic">学术稳重</option>
+                    <option value="ieee">IEEE 风</option>
+                    <option value="nature">自然大地</option>
+                    <option value="ocean">海洋蓝调</option>
+                    <option value="sunset">日落暖色</option>
+                    <option value="pastel">柔和粉彩</option>
+                    <option value="grayscale">印刷灰阶</option>
+                    <option value="colorblind">色盲友好</option>
+                    <option value="random">随机主题</option>
+                  </select>
+                </label>
+                <label class="drawing-field">
+                  <span>颜色数量</span>
+                  <input type="number" id="palette-count" class="branch-input" min="3" max="8" value="6" />
+                </label>
+              </div>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成配色</button>
+                <button type="button" class="btn-secondary" id="palette-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="palette-desc" class="drawing-hint palette-desc" hidden></p>
+            <p id="palette-status" class="drawing-status" role="status"></p>
+            <div id="palette-swatches" class="palette-swatches" hidden></div>
+            <div id="palette-result" class="drawing-result" hidden>
+              <img id="palette-img" alt="配色预览条" />
+            </div>
+          </section>
+
+          <section id="drawing-tab-text" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="text-stats-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>待分析文本</span>
+                <textarea id="text-stats-input" rows="8" class="wf-ta" placeholder="粘贴摘要、段落或整段文稿…"></textarea>
+              </label>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">开始统计</button>
+                <button type="button" class="btn-secondary" id="text-stats-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="text-stats-status" class="drawing-status" role="status"></p>
+            <pre id="text-stats-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-title" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="paper-title-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>主题关键词</span>
+                <input type="text" id="paper-title-keywords" class="branch-input" placeholder="如 retrieval augmented generation" />
+              </label>
+              <div class="drawing-form-grid">
+                <label class="drawing-field">
+                  <span>风格</span>
+                  <select id="paper-title-style" class="branch-select">
+                    <option value="serious">正经学术风</option>
+                    <option value="funny">趣味脑洞风</option>
+                  </select>
+                </label>
+                <label class="drawing-field drawing-field--inline">
+                  <input type="checkbox" id="paper-title-use-llm" checked />
+                  <span>启用 OpenAI 生成 2 条</span>
+                </label>
+              </div>
+              <p class="drawing-hint">3 条本地模板（即时，无需 API）+ 2 条 OpenAI 风格各异（正经学术 / 脑洞趣味）。API 读取 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code>，未配置时自动退化为纯本地。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成标题</button>
+                <button type="button" class="btn-secondary" id="paper-title-reset">清空重置</button>
+                <button type="button" class="btn-secondary" id="paper-title-copy">复制结果</button>
+              </div>
+            </form>
+            <p id="paper-title-status" class="drawing-status" role="status"></p>
+            <pre id="paper-title-output" class="drawing-code-preview" hidden></pre>
+          </section>
+
+          <section id="drawing-tab-qrcode" class="drawing-tools-pane" role="tabpanel" hidden>
+            <form id="qrcode-form" class="drawing-form" autocomplete="off">
+              <label class="drawing-field drawing-field--wide">
+                <span>内容（URL 或文本）</span>
+                <input type="text" id="qrcode-content" class="branch-input" placeholder="https://arxiv.org/abs/..." />
+              </label>
+              <p class="drawing-hint">适合论文链接、个人主页、数据集 DOI 等（依赖见 requirements.txt）。</p>
+              <div class="drawing-actions">
+                <button type="submit" class="btn-primary">生成 QR 码</button>
+                <button type="button" class="btn-secondary" id="qrcode-reset">清空重置</button>
+              </div>
+            </form>
+            <p id="qrcode-status" class="drawing-status" role="status"></p>
+            <div id="qrcode-result" class="drawing-result drawing-result--qrcode" hidden>
+              <img id="qrcode-img" alt="生成的 QR 码" />
+              <a id="qrcode-download" class="btn-secondary drawing-download" download>下载 PNG</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <script src="vendor/marked.min.js"></script>
     <script src="vendor/purify.min.js"></script>
     <script src="vendor/highlight.min.js"></script>
-    <script src="layout_resizer.js"></script>
+    <script src="panel_toggles.js"></script>
+    <script src="layout_resizer.js?v=right-drag-1"></script>
     <script src="branch_graph.js"></script>
     <script src="workflow_builder.js"></script>
     <script src="web_assets.js"></script>
-    <script src="app.js"></script>
+    <script src="rag_assets.js?v=rag-delete-5"></script>
+    <script src="conferences_calendar.js?v=4"></script>
+    <script src="user_settings.js?v=settings-6"></script>
+    <script src="drawing_tools.js?v=4"></script>
+    <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>

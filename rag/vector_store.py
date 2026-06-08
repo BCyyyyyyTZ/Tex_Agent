@@ -144,7 +144,15 @@ class ChromaRetriever(BaseRetriever):
 
         documents: List[RetrievedDocument] = []
         for i, doc_text in enumerate(results["documents"][0]):
-            meta = results["metadatas"][0][i] if results.get("metadatas") else {}
+            raw_meta = results["metadatas"][0][i] if results.get("metadatas") else {}
+            meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+            rid = ""
+            try:
+                rid = str((results.get("ids") or [[]])[0][i] or "")
+            except Exception:
+                rid = ""
+            if rid:
+                meta["_id"] = rid
             distance = results["distances"][0][i] if results.get("distances") else 1.0
             score = 1.0 / (1.0 + distance)
 

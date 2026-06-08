@@ -40,6 +40,16 @@ dist/
 build/
 *.egg-info/
 
+# ---- check.py 工作目录（保留 .gitkeep）----
+files/input/*
+!files/input/.gitkeep
+files/checklist/*
+!files/checklist/.gitkeep
+files/checked/*
+!files/checked/.gitkeep
+files/output/*
+!files/output/.gitkeep
+
 # ---- 日志文件 ----
 *.log
 logs/
@@ -53,9 +63,13 @@ storage/checklists/*
 !storage/checklists/.gitkeep
 storage/documents/*
 !storage/documents/.gitkeep
+storage/
 
 # ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
 output/
 memory_store/
 # RAG 工具集成测试落盘输出（本地查看用）
 tests/test_rag/_rag_tool_output/
+
+# 关于latex解析的测试内容
+tests/test_latex/VaLoRA_TMC

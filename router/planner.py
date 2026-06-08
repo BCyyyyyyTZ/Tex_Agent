@@ -71,6 +71,13 @@ class MASPlanner(ABC):
 # ============================================================
 # 从 config/planner_config.py 统一导入常量与工具函数
 # ============================================================
+from config.context_settings import (
+    PROFILE_DIALOGUE,
+    get_planner_extra_principles,
+    get_planner_local_config,
+    match_intent,
+)
+from config.context_settings import should_persona_file_write
 from config.planner_config import (
     PLANNER_TEMPERATURE,
     MAX_PLAN_ROUNDS_DEFAULT,
@@ -258,14 +265,19 @@ class AutoAgentsMASPlanner(MASPlanner):
             f"2.1) node_type='tool' 与 node_type='user' 都是可选能力，默认不强制使用。\n"
             f"2.2) 仅当[确实能提升结果质量]时才使用 tool 节点；否则使用 agent 节点直接完成。\n"
             f"2.3) 若使用 tool 节点，必须包含 node_type='tool'、tool_name、tool_input；"
-            f"tool_input 不能为空字符串，优先引用 ${'{metadata.<上游节点>.result}'}，否则使用 ${'{input}'}。\n"
+            f"tool_input 不能为空字符串，优先引用 ${'{metadata.<上游节点>.result}'}，否则使用 ${'{input}'}。"
+            f"若 tool_name 为 arxiv_search，tool_input 必须是短英文关键词（2~8 词），"
+            f"例如固定写 \"Agentic RAG\" 或 \"LLM agent memory\"，"
+            f"禁止引用 ${'{metadata.<节点>.summary}'} 或 ${'{metadata.<节点>.result}'} 全文。"
+            f"禁止用 {{\"query\": ...}} 包裹长文。"
+            f"同一方案内 arxiv_search 最多 1 个节点，禁止在 parallel_fork 下并行多个 arxiv_search。\n"
             f"2.4) 仅当任务存在真实的人类决策点时，才允许插入 user 节点；"
             f"不得把原本应由 agent 完成的分析任务转嫁给用户。\n"
             f"2.5) 最终交付节点必须是 agent 节点，不得设置为 user/tool。\n"
             f"3) 图结构支持以下模式（可组合）：\n"
             f"   A) 线性链（默认）：A → B → C，简单任务推荐。\n"
             f"   B) 并行分叉：使用 parallel_fork + 多条出边 + parallel_join，"
-            f"适合可并行独立分析的子任务（如同时检索文献 + 分析风险）。\n"
+            f"适合可并行独立分析的子任务；但 arxiv_search 不得放入并行分支（仅允许串行 1 次）。\n"
             f"   C) 条件路由：从一个节点出发，根据 metadata 字段值选择不同后继，"
             f"适合[如果质量够高就直接交付，否则走 review]类场景。\n"
             f"   并行节点中：parallel_fork 必须包含 parallel_branches 列表；"
@@ -274,7 +286,12 @@ class AutoAgentsMASPlanner(MASPlanner):
             f'{{\"field\": \"metadata.<node_id>.<key>\", \"op\": \"gte\", \"value\": 0.7}}。\n'
             f"4) 必须包含[最终交付节点]（整合并输出最终可执行步骤给用户）。\n"
             f"5) 每个节点 subtask 必须可执行，避免空泛描述。\n"
-            f"6) 每个节点必须满足[单次流水线执行契约]：禁止等待式追问用户。\n\n"
+            f"6) 每个节点必须满足[单次流水线执行契约]：禁止等待式追问用户。\n"
+        )
+        for i, line in enumerate(get_planner_extra_principles(), start=7):
+            prompt += f"{i}) {line}\n"
+        prompt += (
+            "\n"
             f"单次流水线执行契约：\n{SINGLE_TURN_NODE_CONTRACT}\n\n"
             f"【输出规范（硬约束）】\n"
             f"- 必须且只能输出一个合法 JSON 对象，禁止任何解释、前言、后记。\n"
@@ -381,6 +398,8 @@ class AutoAgentsMASPlanner(MASPlanner):
         reasons.extend(self._local_topology_issues(plan_json))
         reasons.extend(self._local_intent_issues(task, plan_json))
         reasons.extend(self._local_single_turn_contract_issues(plan_json))
+        reasons.extend(self._local_plan_persona_issues(task, plan_json))
+        reasons.extend(self._local_plan_echo_issues(task, plan_json))
 
         out: List[str] = []
         seen: set = set()
@@ -457,6 +476,49 @@ class AutoAgentsMASPlanner(MASPlanner):
                         "任务偏答疑/指导，但规划中出现明显测试/验收型节点，存在意图偏移"
                     )
                     break
+        return issues
+
+    def _local_plan_echo_issues(self, task: str, plan_json: Dict[str, Any]) -> List[str]:
+        issues: List[str] = []
+        if not match_intent("echo", task):
+            return issues
+        agents = plan_json.get("agents", [])
+        if not isinstance(agents, list):
+            return issues
+        agent_nodes = [
+            a for a in agents
+            if isinstance(a, dict) and str(a.get("node_type", "agent")).lower() == "agent"
+        ]
+        if len(agent_nodes) != 1:
+            issues.append("echo 意图任务应仅为 1 个 agent 终节点（见 context_config intent_patterns.echo）")
+        return issues
+
+    def _local_plan_persona_issues(self, task: str, plan_json: Dict[str, Any]) -> List[str]:
+        issues: List[str] = []
+        if should_persona_file_write(task, PROFILE_DIALOGUE):
+            return issues
+        pcfg = get_planner_local_config()
+        persona_tools = [str(x).lower() for x in (pcfg.get("forbidden_persona_tool_names") or [])]
+        sub_markers = list(pcfg.get("persona_subtask_markers") or [])
+        task_markers = list(pcfg.get("persona_task_markers") or [])
+        agents = plan_json.get("agents", [])
+        if not isinstance(agents, list):
+            return issues
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            if str(agent.get("node_type", "")).lower() == "tool":
+                tname = str(agent.get("tool_name", "")).lower()
+                if any(p in tname for p in persona_tools):
+                    issues.append(
+                        f"非画像任务不应规划画像工具节点: {agent.get('node_id', '?')}"
+                    )
+            sub = str(agent.get("subtask", "")) + str(agent.get("role", ""))
+            if any(m in sub for m in sub_markers):
+                if not any(k in task for k in task_markers):
+                    issues.append(
+                        f"节点 {agent.get('node_id', '?')} subtask 偏离任务，疑似画像复述"
+                    )
         return issues
 
     def _local_single_turn_contract_issues(self, plan_json: Dict[str, Any]) -> List[str]:
@@ -602,7 +664,21 @@ class AutoAgentsMASPlanner(MASPlanner):
 
         # parallel_fork / parallel_join 必填字段检查
         parallel_issues: List[str] = []
+        arxiv_node_ids: set = set()
         if isinstance(agents, list):
+            for a in agents:
+                if not isinstance(a, dict):
+                    continue
+                if (
+                    str(a.get("node_type", "")).lower() == "tool"
+                    and str(a.get("tool_name", "")).lower() == "arxiv_search"
+                ):
+                    arxiv_node_ids.add(str(a.get("node_id", "")))
+            if len(arxiv_node_ids) > 1:
+                parallel_issues.append(
+                    f"方案含 {len(arxiv_node_ids)} 个 arxiv_search 节点，"
+                    "请合并为至多 1 次检索以避免限流"
+                )
             for a in agents:
                 if not isinstance(a, dict):
                     continue
@@ -614,6 +690,15 @@ class AutoAgentsMASPlanner(MASPlanner):
                         parallel_issues.append(
                             f"parallel_fork 节点 '{nid}' 缺少非空 parallel_branches 列表"
                         )
+                    else:
+                        arxiv_branches = [
+                            str(b) for b in branches if str(b) in arxiv_node_ids
+                        ]
+                        if len(arxiv_branches) > 1:
+                            parallel_issues.append(
+                                f"parallel_fork '{nid}' 下不得并行多个 arxiv_search："
+                                f"{arxiv_branches}"
+                            )
                 elif nt == "parallel_join":
                     src = a.get("source_branches", [])
                     if not isinstance(src, list) or not src:

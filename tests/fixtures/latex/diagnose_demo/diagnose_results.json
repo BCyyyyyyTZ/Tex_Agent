@@ -1,0 +1,109 @@
+{
+  "tex_env": {
+    "chktex": false,
+    "latexmk": false,
+    "pdflatex": false
+  },
+  "syntax_ground_truth": [
+    {
+      "file": "main.tex",
+      "line": 32,
+      "severity": "error",
+      "message": "未闭合的左花括号 '{'"
+    },
+    {
+      "file": "main.tex",
+      "line": 34,
+      "severity": "error",
+      "message": "环境不匹配：\\end{document} 与 \\begin{equation}（约 19:1）不对应"
+    },
+    {
+      "file": "main.tex",
+      "line": 7,
+      "severity": "error",
+      "message": "未闭合的环境 \\begin{document}"
+    }
+  ],
+  "v0_report": {
+    "workflow": "latex_diagnose_v0",
+    "root": "E:/agent_ai/main_work_version2/Tex_Agent-main/tests/fixtures/latex/diagnose_demo",
+    "project": {
+      "root": "E:\\agent_ai\\main_work_version2\\Tex_Agent-main\\tests\\fixtures\\latex\\diagnose_demo",
+      "main_tex": "main.tex",
+      "file_count": 2,
+      "label_count": 1,
+      "ref_count": 3
+    },
+    "summary": {
+      "error": 0,
+      "warning": 2,
+      "by_source": {
+        "parser": 2
+      }
+    },
+    "diagnostics": {
+      "issue_count": 2,
+      "issues": [
+        {
+          "id": "parser:chapters/appendix.tex:5:0",
+          "file": "chapters/appendix.tex",
+          "line": 5,
+          "column": 0,
+          "end_line": 5,
+          "end_column": 0,
+          "severity": "warning",
+          "source": "parser",
+          "code": "undefined_ref",
+          "message": "未定义的引用: \\ref{tab:nonexistent-table}"
+        },
+        {
+          "id": "parser:main.tex:23:0",
+          "file": "main.tex",
+          "line": 23,
+          "column": 0,
+          "end_line": 23,
+          "end_column": 0,
+          "severity": "warning",
+          "source": "parser",
+          "code": "undefined_ref",
+          "message": "未定义的引用: \\ref{fig:missing-figure}"
+        }
+      ],
+      "issues_top_k": [
+        {
+          "id": "parser:chapters/appendix.tex:5:0",
+          "file": "chapters/appendix.tex",
+          "line": 5,
+          "column": 0,
+          "end_line": 5,
+          "end_column": 0,
+          "severity": "warning",
+          "source": "parser",
+          "code": "undefined_ref",
+          "message": "未定义的引用: \\ref{tab:nonexistent-table}"
+        },
+        {
+          "id": "parser:main.tex:23:0",
+          "file": "main.tex",
+          "line": 23,
+          "column": 0,
+          "end_line": 23,
+          "end_column": 0,
+          "severity": "warning",
+          "source": "parser",
+          "code": "undefined_ref",
+          "message": "未定义的引用: \\ref{fig:missing-figure}"
+        }
+      ],
+      "sources": {
+        "chktex": 0,
+        "latexmk": 0,
+        "parser": 2
+      }
+    },
+    "slices": [],
+    "slice_count": 0,
+    "suggestions": [],
+    "suggestion_count": 0
+  }
+}

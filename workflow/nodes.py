@@ -24,11 +24,17 @@ from config.planner_config import (
     DEFAULT_SINGLE_TURN_CONTRACT_MODE,
     NODE_OUTPUT_FORMAT_INSTRUCTION,
     SINGLE_TURN_NODE_CONTRACT,
-    FINAL_DELIVERY_SYSTEM_ADDON,
     UPSTREAM_RESULT_MAX_CHARS,
     FINAL_DELIVERY_GUARD_QUESTION_KEYWORDS,
     FINAL_DELIVERY_GUARD_RESTATE_KEYWORDS,
     parse_llm_json,
+    resolve_final_delivery_addon,
+)
+from config.context_settings import (
+    resolve_node_context_behavior,
+    build_agent_prompt,
+    make_dialogue_save_messages,
+    should_save_assistant_to_dialogue_context,
 )
 from tools.user_persona_tools import (
     entry_node_persona_simple_agent_addon,
@@ -232,17 +238,128 @@ def _is_blank_payload(payload: Any) -> bool:
     return False
 
 
-def _repair_tool_payload_if_needed(tool_name: str, payload: Any, state: WorkflowState) -> Any:
+def _normalize_arxiv_tool_payload(payload: Any) -> Any:
+    """将 arxiv_search 入参规范为纯查询字符串（见 tools.arxiv_tool.prepare_arxiv_query）。"""
+    from tools.arxiv_tool import prepare_arxiv_query
+
+    if _is_blank_payload(payload):
+        return payload
+    return prepare_arxiv_query(payload)
+
+
+def _normalize_tool_payload(tool_name: str, payload: Any) -> Any:
+    if tool_name == "arxiv_search":
+        return _normalize_arxiv_tool_payload(payload)
+    return payload
+
+
+def _parse_directions_blob(text: str) -> List[str]:
+    """从上游节点 result 解析多研究方向条目（JSON 对象或编号列表）。"""
+    body = (text or "").strip()
+    if not body:
+        return []
+    try:
+        data = json.loads(body)
+        if isinstance(data, dict):
+            inner = data.get("result")
+            if isinstance(inner, str) and inner.strip().startswith("{"):
+                try:
+                    nested = json.loads(inner)
+                    if isinstance(nested, dict):
+                        data = nested
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(data, dict) and data:
+                from tools.arxiv_tool import _extract_english_segment
+
+                items: List[str] = []
+                for k, v in data.items():
+                    label = str(k).strip()
+                    val = str(v).strip() if v else ""
+                    if not label:
+                        continue
+                    if _extract_english_segment(label) or not re.search(
+                        r"[\u4e00-\u9fff]", label
+                    ):
+                        items.append(label)
+                    elif val:
+                        items.append(val)
+                    else:
+                        items.append(label)
+                if items:
+                    return items
+                return [str(v) for v in data.values() if v]
+    except json.JSONDecodeError:
+        pass
+    parts = re.split(r"\n\s*\d+[\.\)、]\s*", body)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _branch_index_from_node_id(node_id: str) -> Optional[int]:
+    m = re.search(r"_(\d+)$", str(node_id or ""))
+    if m:
+        return max(0, int(m.group(1)) - 1)
+    return None
+
+
+def _fallback_arxiv_query(
+    state: WorkflowState, node_id: str, depends_on: List[str]
+) -> str:
+    """arxiv payload 为空时：从上游分析节点按并行分支序号取关键词，禁止用用户原话。"""
+    from tools.arxiv_tool import prepare_arxiv_query
+
+    meta = state.get("metadata") or {}
+    branch_idx = _branch_index_from_node_id(node_id)
+    dep_ids: List[str] = [str(d).strip() for d in (depends_on or []) if str(d).strip()]
+    for key in meta:
+        if key.startswith("__"):
+            continue
+        if any(tok in key for tok in ("analysis", "trend", "direction", "research", "topic")):
+            if key not in dep_ids:
+                dep_ids.append(key)
+
+    for dep in dep_ids:
+        nd = meta.get(dep)
+        if not isinstance(nd, dict):
+            continue
+        res = str(nd.get("result") or nd.get("summary") or "").strip()
+        if not res:
+            continue
+        directions = _parse_directions_blob(res)
+        if directions and branch_idx is not None and branch_idx < len(directions):
+            logger.warning(
+                "[tool_node] arxiv_search payload 为空，已用上游 %s 第 %d 个方向",
+                dep,
+                branch_idx + 1,
+            )
+            return prepare_arxiv_query(directions[branch_idx])
+        if directions:
+            logger.warning(
+                "[tool_node] arxiv_search payload 为空，已用上游 %s 的首个方向", dep
+            )
+            return prepare_arxiv_query(directions[0])
+        logger.warning("[tool_node] arxiv_search payload 为空，已用上游 %s.result", dep)
+        return prepare_arxiv_query(res)
+
+    logger.warning("[tool_node] arxiv_search payload 为空，已回退默认英文检索词")
+    return prepare_arxiv_query("LLM autonomous agent multi-agent systems")
+
+
+def _repair_tool_payload_if_needed(
+    tool_name: str,
+    payload: Any,
+    state: WorkflowState,
+    *,
+    node_id: str = "",
+    depends_on: Optional[List[str]] = None,
+) -> Any:
     """工具入参兜底：防止空 payload。"""
     if not _is_blank_payload(payload):
-        return payload
-    fallback_query = str(state.get("input", "") or "").strip()
+        return _normalize_tool_payload(tool_name, payload)
     if tool_name == "arxiv_search":
-        if fallback_query:
-            logger.warning("[tool_node] arxiv_search payload 为空，已回退为 state.input")
-            return fallback_query
-        return "machine learning"
-    return payload
+        return _fallback_arxiv_query(state, node_id, depends_on or [])
+    fallback_query = str(state.get("input", "") or "").strip()
+    return fallback_query or payload
 
 
 def _set_nested_path(root: Dict[str, Any], dotted_path: str, value: Any) -> None:
@@ -379,7 +496,52 @@ def _build_tool_structured_output(
     ).to_dict()
 
 
-def _upstream_blocks(meta: dict, depends_on: list) -> str:
+def _format_inner_meta_value(key: str, val: Any, *, max_len: int = 900) -> str:
+    """
+    将节点 metadata 内嵌字段压缩为可读的短串，避免 tool_input / tool_metadata
+    等大对象经 repr() 整段进入上游 prompt 导致上下文爆炸。
+    """
+    if val is None:
+        return ""
+    if key == "tool_input" and isinstance(val, dict):
+        parts: List[str] = []
+        for k, v in val.items():
+            if isinstance(v, str) and len(v) > 400:
+                parts.append(f"{k}=<str {len(v)} chars>")
+            elif isinstance(v, (dict, list, tuple)) and len(str(v)) > 400:
+                parts.append(f"{k}=<{type(v).__name__} n={len(v)}>")
+            else:
+                frag = repr(v)
+                if len(frag) > 360:
+                    frag = frag[:360] + "...(trunc)"
+                parts.append(f"{k}={frag}")
+        body = ", ".join(parts[:20])
+        if len(body) > max_len * 3:
+            body = body[: max_len * 3] + "...(trunc)"
+        return "{" + body + "}"
+    if key == "tool_metadata" and isinstance(val, dict):
+        rp = val.get("review_packages")
+        if isinstance(rp, dict):
+            lens = {str(k): len(str(v)) for k, v in rp.items()}
+            return (
+                "{review_packages: "
+                + json.dumps({"keys": list(rp.keys()), "char_lens": lens}, ensure_ascii=False)
+                + " ... 完整文本见 checklist_prepare 节点 result}"
+            )
+        s = repr(val)
+        return s[: max_len * 2] + ("...(trunc)" if len(s) > max_len * 2 else "")
+    s = repr(val)
+    if len(s) > max_len:
+        return s[:max_len] + f"...(trunc total_len={len(s)})"
+    return s
+
+
+def _upstream_blocks(
+    meta: dict,
+    depends_on: list,
+    *,
+    max_result_chars: Optional[int] = None,
+) -> str:
     """
     从 metadata 提取 depends_on 节点的完整产出注入上游上下文。
 
@@ -408,8 +570,13 @@ def _upstream_blocks(meta: dict, depends_on: list) -> str:
         if summary:
             block_lines.append(f"摘要: {summary}")
         if result:
-            # 完整传递上游 result（UPSTREAM_RESULT_MAX_CHARS 为上限，默认 8192 字符）
-            compact_result = _truncate_text(result, UPSTREAM_RESULT_MAX_CHARS)
+            cap = (
+                max_result_chars
+                if max_result_chars is not None and max_result_chars > 0
+                else UPSTREAM_RESULT_MAX_CHARS
+            )
+            # 完整传递上游 result（默认 UPSTREAM_RESULT_MAX_CHARS；节点可覆盖以控制终节点 prompt 体积）
+            compact_result = _truncate_text(result, cap)
             block_lines.append(f"完整输出:\n{compact_result}")
 
         # 附加工具节点的关键元数据字段（如文件路径、查询词等）
@@ -419,7 +586,10 @@ def _upstream_blocks(meta: dict, depends_on: list) -> str:
                            if k not in {"node_type", "node_id", "error"}
                            and inner_meta[k] is not None]
             if useful_keys:
-                kv = ", ".join(f"{k}={inner_meta[k]!r}" for k in useful_keys[:6])
+                kv = ", ".join(
+                    f"{k}={_format_inner_meta_value(k, inner_meta[k])}"
+                    for k in useful_keys[:8]
+                )
                 block_lines.append(f"节点元数据: {{{kv}}}")
 
         lines.append("\n".join(block_lines))
@@ -481,46 +651,75 @@ def make_agent_node(
             f"(history_mode={mode_norm}, terminal={is_terminal}, entry={is_entry_node})"
         )
         meta = state.get("metadata", {}) or {}
+        user_input = str(state.get("input", "") or "")
+        graph_profile = str(node_config.get("context_profile") or "pipeline")
+        behavior = resolve_node_context_behavior(
+            node_config,
+            graph_profile=graph_profile,
+            user_input=user_input,
+            is_terminal=is_terminal,
+        )
+        profile = behavior.profile
 
-        persona_head = persona_memory.format_for_prompt() if persona_memory else ""
-        if is_entry_node:
+        persona_head = ""
+        if persona_memory and behavior.persona_prompt_read:
+            persona_head = persona_memory.format_for_prompt()
+
+        entry_addon = ""
+        if is_entry_node and behavior.persona_file_write:
             if isinstance(agent, SimpleAgent_new):
                 entry_addon = entry_node_persona_system_addon()
             else:
                 entry_addon = entry_node_persona_simple_agent_addon()
-        else:
-            entry_addon = ""
-        terminal_addon = FINAL_DELIVERY_SYSTEM_ADDON if is_terminal else ""
 
-        # system_prompt 已由 _build_agent_instance 注入 SYSTEM 角色，此处不再重复，
-        # 避免在 USER 侧出现两份相同角色描述占用 token 并干扰格式指令。
+        contract_mode_eff = behavior.single_turn_contract
+        if contract_mode_eff == "always":
+            enable_contracts = True
+        elif contract_mode_eff == "never":
+            enable_contracts = False
+        else:
+            enable_contracts = enable_single_turn_contract
+
+        terminal_addon = (
+            resolve_final_delivery_addon(
+                behavior.terminal_delivery_style, profile=behavior.profile
+            )
+            if is_terminal
+            else ""
+        )
+
         inline_contracts = (
             persona_head
-            + (SINGLE_TURN_NODE_CONTRACT if enable_single_turn_contract else "")
+            + (SINGLE_TURN_NODE_CONTRACT if enable_contracts else "")
             + terminal_addon
-            + NODE_OUTPUT_FORMAT_INSTRUCTION
+            + behavior.json_format_instruction
             + entry_addon
         )
         built_context = ctx.build(
             state,
             memory=runtime_memory,
             config={
-                "conv_limit": int(node_config.get("conv_limit", 12)),
-                "mem_limit": int(node_config.get("mem_limit", 5)),
+                "conv_limit": behavior.conv_limit,
+                "mem_limit": behavior.mem_limit,
                 "max_tokens": int(node_config.get("max_tokens", 8000)),
                 "format": node_config.get("format", "plain"),
                 "history_mode": mode_norm,
+                "context_profile": profile,
+                "is_terminal": is_terminal,
+                "include_metadata_chain": behavior.include_metadata_chain,
             },
         )
-        upstream_ctx = _upstream_blocks(meta, depends_on)
+        urc = node_config.get("upstream_result_max_chars")
+        upstream_max = int(urc) if urc is not None else None
+        upstream_ctx = _upstream_blocks(meta, depends_on, max_result_chars=upstream_max)
 
-        # 提示词顺序：任务 → 上游结果（最相关） → 原始背景 → 历史 → 格式约束（放最后方便 LLM 直接按格式生成）
-        prompt = (
-            f"[你的具体任务]\n{subtask if subtask else state.get('input', '')}\n\n"
-            f"[上游节点输出]\n{upstream_ctx}\n\n"
-            f"[原始任务背景]\n{state.get('input', '')}\n\n"
-            f"[历史上下文]\n{built_context if built_context else '（无历史上下文）'}\n\n"
-            f"{inline_contracts}\n\n"
+        prompt = build_agent_prompt(
+            user_input=user_input,
+            subtask=subtask if subtask else user_input,
+            upstream_ctx=upstream_ctx,
+            built_context=built_context if built_context else "（无历史上下文）",
+            inline_contracts=inline_contracts,
+            behavior=behavior,
         )
 
         user_msg = WorkflowMessage(
@@ -535,8 +734,22 @@ def make_agent_node(
 
         run_dir = meta.get("__run_output_dir__")
 
+        # 支持 agent 附件（如 Gemini 文件引用 / 本地路径）
+        attachment_cfg = node_config.get("attachment", None)
+        attachment_val = _resolve_tool_payload(attachment_cfg, state) if attachment_cfg is not None else None
+
         try:
-            raw_resp = agent.run(prompt)
+            if attachment_val is not None:
+                agent_input = {
+                    "role": "user",
+                    "source_type": "user",
+                    "source_id": "workflow_agent_node",
+                    "content": prompt,
+                    "metadata": {"attachment": attachment_val},
+                }
+                raw_resp = agent.run(agent_input)
+            else:
+                raw_resp = agent.run(prompt)
             resp = _ensure_agent_message(
                 raw_resp,
                 role="assistant",
@@ -565,8 +778,6 @@ def make_agent_node(
 
         if mode_norm == "full":
             ctx.save(resp)
-        elif mode_norm == "minimal" and is_terminal:
-            ctx.save(resp)
 
         fb = {
             "result": resp.content,
@@ -580,11 +791,28 @@ def make_agent_node(
         structured_payload = dict(structured_raw)
         pm_update = structured_payload.pop("persona_memory_update", None)
         structured = normalize_node_output(structured_payload)
-        if persona_memory:
-            if is_entry_node:
-                persona_memory.apply_persona_memory_update(pm_update)
-            elif pm_update is not None:
-                logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
+        if persona_memory and is_entry_node and behavior.persona_file_write:
+            persona_memory.apply_persona_memory_update(pm_update)
+        elif pm_update is not None and is_entry_node:
+            logger.debug(f"[{node_id}] 忽略 persona_memory_update（本轮未触发画像写回）")
+        elif pm_update is not None:
+            logger.debug(f"[{node_id}] 忽略非入口节点产生的 persona_memory_update")
+
+        if mode_norm == "minimal" and is_terminal:
+            if profile == "legacy":
+                ctx.save(resp)
+            else:
+                res_txt = str(structured.get("result", "") or resp.content or "").strip()
+                u_msg, a_msg = make_dialogue_save_messages(user_input, res_txt)
+                ctx.save(u_msg)
+                if should_save_assistant_to_dialogue_context(res_txt, behavior):
+                    ctx.save(a_msg)
+        elif mode_norm == "full" and profile != "legacy" and is_terminal:
+            res_txt = str(structured.get("result", "") or resp.content or "").strip()
+            u_msg, a_msg = make_dialogue_save_messages(user_input, res_txt)
+            ctx.save(u_msg)
+            if should_save_assistant_to_dialogue_context(res_txt, behavior):
+                ctx.save(a_msg)
 
         if is_terminal:
             delivery_risks = _detect_terminal_delivery_risks(structured.get("result", ""))
@@ -655,7 +883,7 @@ def make_tool_node(
         )
     )
 
-    if raw_tool_input is not None:
+    if raw_tool_input is not None and not _is_blank_payload(raw_tool_input):
         default_payload = raw_tool_input
     elif depends_on:
         first_dep = str(depends_on[0]).strip()
@@ -674,7 +902,9 @@ def make_tool_node(
         run_dir = meta.get("__run_output_dir__")
 
         payload = _resolve_tool_payload(default_payload, state)
-        payload = _repair_tool_payload_if_needed(tool.name, payload, state)
+        payload = _repair_tool_payload_if_needed(
+            tool.name, payload, state, node_id=node_id, depends_on=depends_on
+        )
 
         try:
             prompt_for_trace = tool_trace_template.format(
@@ -755,6 +985,29 @@ def make_tool_node(
             raw_response=structured.get("result", ""),
             structured=structured,
         )
+        latex_meta_promote: Dict[str, Any] = {}
+        inner = structured.get("metadata") if isinstance(structured.get("metadata"), dict) else {}
+        tool_md = inner.get("tool_metadata") if isinstance(inner.get("tool_metadata"), dict) else {}
+        if tool_md:
+            try:
+                from latex.constants import (
+                    METADATA_LATEX_DIAGNOSTICS,
+                    METADATA_LATEX_DIRTY,
+                    METADATA_LATEX_PROJECT,
+                    METADATA_LATEX_SUGGESTIONS,
+                )
+
+                for key in (
+                    METADATA_LATEX_PROJECT,
+                    METADATA_LATEX_DIAGNOSTICS,
+                    METADATA_LATEX_DIRTY,
+                    METADATA_LATEX_SUGGESTIONS,
+                ):
+                    if key in tool_md:
+                        latex_meta_promote[key] = tool_md[key]
+            except ImportError:
+                pass
+
         return _finalize_node_state(
             state=state,
             node_id=node_id,
@@ -762,6 +1015,7 @@ def make_tool_node(
             output=structured.get("result", ""),
             error=None,
             new_messages=[user_msg, tool_msg],
+            metadata_updates=latex_meta_promote or None,
             is_terminal=is_terminal,
         )
 
@@ -998,7 +1252,7 @@ def make_parallel_fork_node(
 
 
 def make_parallel_join_node(
-    agent: BaseAgent,
+    agent: Optional[BaseAgent],
     ctx: BaseContext,
     node_id: str,
     node_config: dict,
@@ -1016,8 +1270,8 @@ def make_parallel_join_node(
     执行步骤：
       1. 从 state.metadata 读取所有 source_branches 的结果
       2. 按 join_policy 验证整体成功/失败
-      3. 将合并后的分支内容注入 agent context，执行 agent 整合
-      4. 返回 agent 整合结果（增量 delta）
+      3. 若 config.passthrough_join=true：将各分支 result 纯文本拼接写回，不调用 LLM
+      4. 否则：将合并后的分支内容注入 agent context，执行 agent 整合并返回
 
     Args:
         source_branches:   被汇聚的分支节点 ID 列表
@@ -1047,17 +1301,25 @@ def make_parallel_join_node(
             "在结论中说明影响并尽量基于成功分支给出完整答案。"
         )
 
-    base_agent_node = make_agent_node(
-        agent=agent,
-        ctx=ctx,
-        node_id=node_id,
-        node_config=join_node_config,
-        persona_memory=persona_memory,
-        runtime_memory=runtime_memory,
-        default_history_mode=default_history_mode,
-        is_terminal=is_terminal,
-        is_entry_node=False,
-    )
+    passthrough_join = bool(join_node_config.get("passthrough_join"))
+    if passthrough_join:
+        base_agent_node = None
+    else:
+        if agent is None:
+            raise ValueError(
+                f"[{node_id}] parallel_join 未启用 passthrough_join 时必须提供 agent 实例"
+            )
+        base_agent_node = make_agent_node(
+            agent=agent,
+            ctx=ctx,
+            node_id=node_id,
+            node_config=join_node_config,
+            persona_memory=persona_memory,
+            runtime_memory=runtime_memory,
+            default_history_mode=default_history_mode,
+            is_terminal=is_terminal,
+            is_entry_node=False,
+        )
 
     def parallel_join_node(state: WorkflowState) -> dict:
         logger.info(
@@ -1098,6 +1360,36 @@ def make_parallel_join_node(
         logger.info(
             f"[{node_id}] 汇聚成功: {merged.succeeded_branches}/{merged.total_branches} 分支通过"
         )
+        if passthrough_join:
+            join_output = NodeOutput(
+                result=merged.combined_result,
+                summary=(
+                    f"并行汇聚：{merged.succeeded_branches}/{merged.total_branches} 分支"
+                    "（纯文本拼接，无 LLM）"
+                ),
+                confidence=1.0,
+                status="pass",
+                metadata={
+                    "node_type": "parallel_join",
+                    "node_id": node_id,
+                    "join_policy": join_policy.value,
+                    "total_branches": merged.total_branches,
+                    "succeeded_branches": merged.succeeded_branches,
+                    "passthrough_join": True,
+                    "branch_outputs": merged.branch_outputs,
+                },
+            ).to_dict()
+            return _finalize_node_state(
+                state=state,
+                node_id=node_id,
+                node_output=join_output,
+                output=merged.combined_result,
+                error=None,
+                new_messages=None,
+                is_terminal=is_terminal,
+            )
+
+        assert base_agent_node is not None
         result = base_agent_node(state)
 
         # 追加并行汇聚元信息到 metadata delta

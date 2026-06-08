@@ -1,0 +1,8 @@
+{
+    "version": "v1",
+    "checklist_path": "/home/junta/My_Code/Tex_Agent/files/checklist/thesis-checklists.md",
+    "pdf_paths": [
+        "/home/junta/My_Code/Tex_Agent/files/input/ccq.pdf",
+        "/home/junta/My_Code/Tex_Agent/files/input/zzy.pdf"
+    ]
+}

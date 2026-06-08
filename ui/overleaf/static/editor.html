@@ -1,0 +1,110 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TeX Agent Overleaf - Editor</title>
+  <link rel="stylesheet" href="/static/editor.css">
+  <link rel="stylesheet" href="/static/editor-polish.css?v=20260605b">
+</head>
+<body>
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <strong id="projectName">项目</strong>
+      <span class="sep">|</span>
+      <span id="mainFile" class="muted"></span>
+    </div>
+    <div class="toolbar-center">
+      <button onclick="compileProject()" id="compileBtn" title="编译 (Ctrl+Enter)">▶ 编译</button>
+      <span id="compileStatus" class="muted" style="font-size:12px"></span>
+      <span id="saveIndicator" class="save-indicator"></span>
+    </div>
+    <div class="toolbar-right">
+      <button onclick="showPolishPanel()" title="润色工具">✏ 润色</button>
+      <button onclick="diagnoseProject()" title="诊断">🔍 诊断</button>
+      <a href="/" class="btn-link" title="返回首页">🏠</a>
+    </div>
+  </header>
+
+  <!-- Main layout -->
+  <div class="main-layout">
+    <!-- Left: file tree -->
+    <aside class="file-tree" id="fileTree">
+      <div class="file-tree-header">文件目录</div>
+      <div id="fileList"></div>
+    </aside>
+
+    <!-- Center: code editor -->
+    <main class="editor-panel">
+      <div class="editor-tabs" id="editorTabs">
+        <span class="tab active" id="currentFileTab">main.tex</span>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="codeEditor" spellcheck="false" class="code-textarea"></textarea>
+        <button type="button" class="polish-selection-btn" id="polishSelectionBtn">✏ 润色</button>
+      </div>
+    </main>
+
+    <!-- Divider -->
+    <div class="divider" id="panelDivider"></div>
+
+    <!-- Right: PDF preview -->
+    <aside class="pdf-panel" id="pdfPanel">
+      <div class="pdf-header">
+        <span>PDF 预览</span>
+        <div class="pdf-zoom-controls">
+          <button type="button" id="pdfZoomOut" title="缩小">−</button>
+          <input type="range" id="pdfZoomSlider" min="50" max="200" value="100" title="缩放">
+          <span id="pdfZoomLabel">100%</span>
+          <button type="button" id="pdfZoomIn" title="放大">+</button>
+          <button type="button" id="pdfFitHeight" title="适应高度（一页）">适应高度</button>
+        </div>
+        <button onclick="togglePdfPanel()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+      </div>
+      <div id="pdfViewer" class="pdf-viewer">
+        <div id="pdfPages"></div>
+      </div>
+      <div class="pdf-placeholder" id="pdfPlaceholder">
+        <p>点击「编译」生成 PDF</p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Polish panel (slide-in) -->
+  <div class="polish-overlay" id="polishOverlay" onclick="hidePolishPanel()"></div>
+  <div class="polish-slide" id="polishSlide">
+    <div class="polish-header">
+      <strong>AI 润色</strong>
+      <button onclick="hidePolishPanel()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+    </div>
+    <div class="polish-body">
+      <label>目标文件</label>
+      <select id="polishFile" class="polish-select"></select>
+      <label>润色需求</label>
+      <textarea id="polishQuery" class="polish-input" placeholder="例如：让摘要更学术性、修正语法错误、改善段落衔接"></textarea>
+      <button onclick="runPolish()" id="polishBtn" class="btn-primary" style="margin-top:8px">生成润色建议</button>
+      <div id="polishStatus" class="status-text"></div>
+      <div id="polishResult" class="polish-result" style="display:none">
+        <h4>润色建议</h4>
+        <div id="polishProblem" class="problem-text"></div>
+        <pre id="polishOriginal" class="diff-text"></pre>
+        <pre id="polishPolished" class="diff-text diff-new"></pre>
+        <button onclick="applyPolish()" class="btn-primary" style="margin-top:8px">应用润色</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Diagnostic panel -->
+  <div class="diagnostic-bar" id="diagnosticBar" style="display:none">
+    <div class="diagnostic-header">
+      <strong>诊断结果</strong>
+      <button onclick="hideDiagnostics()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+    </div>
+    <div id="diagnosticList"></div>
+  </div>
+
+  <script src="/static/vendor/pdf.min.js"></script>
+  <script src="/static/editor.js?v=20260605b"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+% TeX_Agent 诊断演示项目（故意包含多种错误，供 latex_diagnose_v0 / v1 测试）
+\documentclass[12pt]{article}
+\usepackage{graphicx}
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\begin{document}
+
+\title{LaTeX Diagnose Demo}
+\author{TeX\_Agent Test Fixture}
+\maketitle
+
+\section{Introduction}
+% ChkTeX 可能提示：连续空格、直引号
+This line has  double spaces and "straight quotes" for style checks.
+
+\section{Broken math environment}
+% 故意缺少 \end{equation} → latexmk 编译失败；内置语法检查也会报未闭合环境
+\begin{equation}
+E = mc^2
+
+\section{Undefined cross-reference}
+As shown in Figure~\ref{fig:missing-figure}, the method fails.
+
+\section{Missing bibliography key}
+Prior work is discussed in \cite{ghost_paper_2099}.
+
+\input{chapters/appendix}
+
+\section{Unclosed command}
+% 故意缺少闭合花括号 → 括号配对错误
+\textbf{This bold text never ends
+
+\end{document}
