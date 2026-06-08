@@ -11,7 +11,7 @@ from pathlib import Path
 #from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from agents.base_agent import BaseAgent
-from core.message import WorkflowMessage, MessageLike
+from core.message import AgentMessage
 from core.exceptions import AgentError
 from tools.base_tool import BaseTool
 from config.settings import settings
