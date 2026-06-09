@@ -12,8 +12,16 @@
     <link rel="stylesheet" href="styles.css?v=settings-15" />
     <link rel="stylesheet" href="conferences_calendar.css?v=8" />
     <link rel="stylesheet" href="drawing_tools.css?v=4" />
-  </head>
+  <style>
+.mode-bar{position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 20px;background:#1a1a2e;color:#e0e0e0;font-size:13px;border-bottom:1px solid #333;}
+.mode-bar .mode-name{font-weight:600;}
+.mode-bar .mode-btn{display:inline-block;padding:4px 14px;background:#4a6fa5;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;}
+.mode-bar .mode-btn:hover{background:#5a7fb5;}
+.mode-bar .mode-btn-ov{background:#2d6a4f;}
+.mode-bar .mode-btn-ov:hover{background:#3d8a5f;}
+</style></head>
   <body>
+<div class="mode-bar"><span class="mode-name">Chat Mode</span><a href="http://127.0.0.1:8772/" class="mode-btn mode-btn-ov" target="_blank">Switch to Writing Mode</a></div>
     <div class="app-shell" id="app-shell">
     <div class="app-layout" id="app-layout">
       <div class="layout-col layout-col--rag" id="col-rag">

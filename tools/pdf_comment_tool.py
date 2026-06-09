@@ -32,8 +32,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from tools.base_tool import BaseTool
 from core.message import ToolResult
+from config.settings import settings
 from utils.logger import get_logger
-from utils.text_normalize import normalize, normalize_for_search
+import os
+import tempfile
+import traceback
 
 logger = get_logger(__name__)
 
@@ -639,7 +642,7 @@ def _parse_annotations(raw: Any) -> tuple[List[Dict], Optional[str]]:
 
 class PdfCommentTool(BaseTool):
     """
-    PDF 批量注释工具。
+    pdf 注释工具。
 
     workflow 用法示例（tool 节点配置）：
       {
@@ -872,10 +875,11 @@ class PdfCommentTool(BaseTool):
     ) -> ToolResult:
         same_file = os.path.abspath(pdf_path) == os.path.abspath(output_path)
         temp_path = None
-
+        
         try:
+            # 如果是同一个文件，创建临时文件
             if same_file:
-                temp_fd, temp_path = tempfile.mkstemp(suffix=".pdf")
+                temp_fd, temp_path = tempfile.mkstemp(suffix='.pdf')
                 os.close(temp_fd)
                 save_path = temp_path
             else:
@@ -1003,7 +1007,9 @@ class PdfCommentTool(BaseTool):
                         )
 
                     success_count += 1
-
+                    commented_pages.add(page_idx + 1)
+                    print(f"✅ 已处理问题 {i+1}")
+                    
                 except Exception as e:
                     errors.append(f"[{i}] 处理异常: {e}")
 
@@ -1015,7 +1021,8 @@ class PdfCommentTool(BaseTool):
 
             doc.save(save_path, garbage=4, deflate=True, clean=True)
             doc.close()
-
+            
+            # 如果是同一个文件，用临时文件替换原文件
             if same_file:
                 os.remove(pdf_path)
                 shutil.move(temp_path, pdf_path)   # shutil.move 支持跨驱动器
@@ -1034,42 +1041,60 @@ class PdfCommentTool(BaseTool):
 
             return ToolResult(
                 success=success_count > 0,
-                output=summary,
+                output=output_message,
                 metadata={
-                    "pdf_path": pdf_path,
-                    "output_path": final_path,
-                    "total": len(items),
                     "success_count": success_count,
                     "unfound_count": unfound_total,
                     "error_count": len(errors),
                     "errors": errors[:10],   # 最多返回前10条
                 },
             )
-
+            
         except Exception as e:
             traceback.print_exc()
+            # 清理临时文件
             if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except Exception:
+                except:
                     pass
             return ToolResult(
                 success=False,
-                output="",
-                error=f"PDF 处理异常: {e}",
-                metadata={"pdf_path": pdf_path},
+                output="处理失败",
+                error=f"批量处理 PDF 时出错: {str(e)}",
             )
 
-    # ------------------------------------------------------------------
-    # 兼容旧接口（向后兼容，不推荐在 workflow 中使用）
-    # ------------------------------------------------------------------
 
-    def run_batch_legacy(
-        self,
-        pdf_path: str,
-        output_path: str,
-        question_list: List[Dict],
-        author: Optional[str] = None,
-    ) -> ToolResult:
-        """旧批量接口（向后兼容），内部直接委托给 run()。"""
-        return self.run(pdf_path=pdf_path, annotations=question_list, output_path=output_path)
+if __name__ == "__main__":
+    tool = PdfCommentTool()
+    
+    # 测试单个标注
+    # tool.run(
+    #     pdf_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+    #     output_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+    #     page_idx=0,
+    #     text="AutoGen",
+    #     comment="这是一个注释",
+    #     author="TestUser",
+    # )
+    
+    # 测试批量标注
+    question_list = [
+        {
+            "page_idx": 0,
+            "text": "TEST",
+            "comment": "这是第一个注释"
+        },
+        {
+            "page_idx": 0,
+            "text": "Framework",
+            "comment": "这是第二个注释"
+        }
+    ]
+    
+    tool.run(
+        pdf_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+        output_path=r"C:/Users/86138/Downloads/AutoGen Enabling Next-Gen LLM Applications via Multi-Agent Conversation Framework_copy.pdf",
+        question_list=question_list,
+        author="TestUser"
+    )

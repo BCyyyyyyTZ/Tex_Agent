@@ -35,8 +35,16 @@
     .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #858585; border-top-color: #4fc1ff; border-radius: 50%; animation: spin 0.6s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
-</head>
+<style>
+.mode-bar{position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 20px;background:#1a1a2e;color:#e0e0e0;font-size:13px;border-bottom:1px solid #333;}
+.mode-bar .mode-name{font-weight:600;}
+.mode-bar .mode-btn{display:inline-block;padding:4px 14px;background:#4a6fa5;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;}
+.mode-bar .mode-btn:hover{background:#5a7fb5;}
+.mode-bar .mode-btn-ov{background:#2d6a4f;}
+.mode-bar .mode-btn-ov:hover{background:#3d8a5f;}
+</style></head>
 <body>
+<div class="mode-bar"><span class="mode-name">Writing Mode</span><a href="http://127.0.0.1:8765/" class="mode-btn" target="_blank">Switch to Chat Mode</a></div>
   <div class="header">
     <h1>TeX Agent Overleaf</h1>
     <p>AI 辅助的 LaTeX 论文编辑器</p>
