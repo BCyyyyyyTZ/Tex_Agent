@@ -93,21 +93,5 @@ TeX_Agent/
 
 ---
 
-## 🧱 技术栈
-
-| 层次 | 选型 |
-|------|------|
-| 工作流编排 | LangGraph |
-| LLM 调用 | LangChain + OpenAI / Gemini / DeepSeek |
-| Web 框架 | FastAPI + Uvicorn |
-| 向量数据库 | ChromaDB（本地嵌入） |
-| 异步并发 | asyncio |
-| 测试 | pytest + pytest-asyncio |
-
----
-
-<div align="center">
-
-Made with ❤️ by [BCyyyyyyTZ](https://github.com/BCyyyyyyTZ)
 
 </div>
