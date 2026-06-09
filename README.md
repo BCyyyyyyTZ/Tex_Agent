@@ -25,14 +25,10 @@ cp .env.example .env
 
 **启动服务：**
 
-```bash
-# 方式 A：模块入口（常用）
-python -m ui.web.server
+双击（或者右键run）start_all.bat
+然后可以切换两个页面。
 
-python -m ui.overleaf.server 然后打开http://127.0.0.1:8772/
-```
 
-默认监听 **`http://127.0.0.1:8765/`**（可用环境变量 `TEX_AGENT_WEB_HOST`、`TEX_AGENT_WEB_PORT` 修改）。
 
 **页面能力概览：**
 
