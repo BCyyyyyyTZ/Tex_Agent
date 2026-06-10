@@ -703,94 +703,126 @@ def create_app() -> FastAPI:
         from core.message import WorkflowMessage
 
 
-        q = (body.query or "").strip()
-        selected = (body.selected_text or "").strip()
-        tr = body.target_file or ""
-
-        if not q and not selected:
-            raise HTTPException(status_code=400, detail="query \u4e0d\u80fd\u4e3a\u7a7a")
 
 
-        if not tr:
 
 
-            raise HTTPException(status_code=400, detail="target_file \u4e0d\u80fd\u4e3a\u7a7a")
 
 
-        p = _project_path(project_id)
-
-
-        tp = _safe_path(p, tr)
-
-
-        if not tp.is_file():
-
-
-            raise HTTPException(status_code=404, detail=f"\u6587\u4ef6\u4e0d\u5b58\u5728: {tr}")
-
-
-        tt = tp.read_text("utf-8", errors="replace")
-        polish_query = q or ("润色下面这段文字" if selected else q)
-        target_text = selected if selected else tt
-        prompt = build_ghost_polish_prompt(
-            query=polish_query,
-            target_file=tr,
-            target_text=target_text,
-            context_file=tr,
-            context_text=tt,
-        )
-
-
-        agent = SimpleAgent(name="overleaf_polish", temperature=0.4)
-
-
-        res = agent.run(WorkflowMessage(role="user", content=prompt))
-
-
-        import json as _json
-
-
-        from latex.suggestion import _extract_json_candidates
-
-
-        raw = str(res.content)
-
-
-        data = None
-
-
-        for c in [raw] + list(_extract_json_candidates(raw)):
-
-
+        try:
             try:
+                try:
+                    try:
+                        q = (body.query or "").strip()
+                        selected = (body.selected_text or "").strip()
+                        tr = body.target_file or ""
+
+                        if not q and not selected:
+                            raise HTTPException(status_code=400, detail="query \u4e0d\u80fd\u4e3a\u7a7a")
 
 
-                p2 = _json.loads(c)
+                        if not tr:
 
 
-                if isinstance(p2, dict):
+                            raise HTTPException(status_code=400, detail="target_file \u4e0d\u80fd\u4e3a\u7a7a")
 
 
-                    data = p2
+                        p = _project_path(project_id)
 
 
-                    break
+                        tp = _safe_path(p, tr)
 
 
-            except _json.JSONDecodeError:
+                        if not tp.is_file():
 
 
-                continue
+                            raise HTTPException(status_code=404, detail=f"\u6587\u4ef6\u4e0d\u5b58\u5728: {tr}")
 
 
-        if not data:
+                        tt = tp.read_text("utf-8", errors="replace")
+                        polish_query = q or ("润色下面这段文字" if selected else q)
+                        target_text = selected if selected else tt
+                        prompt = build_ghost_polish_prompt(
+                            query=polish_query,
+                            target_file=tr,
+                            target_text=target_text,
+                            context_file=tr,
+                            context_text=tt,
+                        )
 
 
-            raise HTTPException(status_code=400, detail="\u6da6\u8272\u7ed3\u679c\u65e0\u6cd5\u89e3\u6790")
+                        agent = SimpleAgent(name="overleaf_polish", temperature=0.4)
 
 
-        return {"original_text": str(data.get("original_text", "")), "polished_text": str(data.get("polished_text", "")), "problem_zh": str(data.get("problem_zh", "")), "advice_zh": str(data.get("advice_zh", ""))}
+                        res = agent.run(WorkflowMessage(role="user", content=prompt))
 
+
+                        import json as _json
+
+
+                        from latex.suggestion import _extract_json_candidates
+
+
+                        raw = str(res.content)
+
+
+                        data = None
+
+
+                        for c in [raw] + list(_extract_json_candidates(raw)):
+
+
+                            try:
+
+
+                                p2 = _json.loads(c)
+
+
+                                if isinstance(p2, dict):
+
+
+                                    data = p2
+
+
+                                    break
+
+
+                            except _json.JSONDecodeError:
+
+
+                                continue
+
+
+                        if not data:
+
+
+                            raise HTTPException(status_code=400, detail="\u6da6\u8272\u7ed3\u679c\u65e0\u6cd5\u89e3\u6790")
+
+
+                        return {"original_text": str(data.get("original_text", "")), "polished_text": str(data.get("polished_text", "")), "problem_zh": str(data.get("problem_zh", "")), "advice_zh": str(data.get("advice_zh", ""))}
+
+
+
+
+                    except HTTPException:
+                        raise
+                    except Exception as e:
+                        raise HTTPException(status_code=500, detail=f"润色服务内部错误: {type(e).__name__}: {e}") from e
+
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"润色服务内部错误: {type(e).__name__}: {e}") from e
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"润色服务内部错误: {type(e).__name__}: {e}") from e
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"润色服务内部错误: {type(e).__name__}: {e}") from e
 
     @app.post("/api/projects/generate")
 

@@ -4,6 +4,7 @@ SimpleAgent：最基础的可运行 Agent 实现。
 """
 from typing import List, Optional, Union
 import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -79,23 +80,23 @@ class SimpleAgent(BaseAgent):
         name: str,
         system_prompt: str = None,
         tools: Optional[List[BaseTool]] = None,
-        model_name: str = MODEL_NAME,
-        api_key: str = API_KEY,
-        base_url: str = BASE_URL,
+        model_name: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         temperature: float = TEMPERATURE,
         max_history: int = 100,
         max_tokens: Optional[int] = None,
     ):
         if tools is None:
             tools = tool_list
-        super().__init__(name, system_prompt or DEFAULT_SYSTEM_PROMPT, tools)
+        super().__init__(name, system_prompt or SYSTEM_PROMPT, tools)
 
         self.model_name = model_name or settings.llm_model
         self.temperature = float(
             settings.llm_temperature if temperature is None else temperature
         )
         if self.temperature <= 0:
-            self.temperature = DEFAULT_TEMPERATURE
+            self.temperature = TEMPERATURE
 
         self.openai_api_key = api_key or settings.openai_api_key
         self.openai_base_url = base_url or settings.openai_base_url
@@ -107,7 +108,7 @@ class SimpleAgent(BaseAgent):
 
         self._llm_max_tokens = max_tokens
         self.backend = self._init_backend()
-        self.history: List[WorkflowMessage] = []
+        self.history: List[AgentMessage] = []
         self.max_history = max_history
 
     def _init_backend(self) -> str:
@@ -323,7 +324,13 @@ class SimpleAgent(BaseAgent):
                             
                     else:
                         # 格式不符合预期，作为直接回答处理
-                        raise RuntimeError(f"工具调用格式不符合预期: {llm_content}")
+                        result = AgentMessage(
+                            role="assistant",
+                            content=llm_content.strip(),
+                            agent_name=self.name,
+                        )
+                        self.history.append(result)
+                        return result
 
            
 

@@ -123,7 +123,7 @@ class LlmClient:
 
 		raise ValueError(f"无法解析 LLM 响应类型: {type(response).__name__}")
 
-	def response(self, prompt: str, attachments: Optional[List[dict]] = None) -> str:
+	def response(self, prompt: str, attachments: Optional[List[dict]] = None, **kwargs) -> str:
 		"""
 		生成LLM响应，支持上传附件
 		
