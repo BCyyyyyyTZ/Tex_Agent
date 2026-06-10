@@ -6,8 +6,16 @@
   <title>TeX Agent Overleaf - Editor</title>
   <link rel="stylesheet" href="/static/editor.css">
   <link rel="stylesheet" href="/static/editor-polish.css?v=20260605b">
-</head>
+<style>
+.mode-bar{position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 20px;background:#1a1a2e;color:#e0e0e0;font-size:13px;border-bottom:1px solid #333;}
+.mode-bar .mode-name{font-weight:600;}
+.mode-bar .mode-btn{display:inline-block;padding:4px 14px;background:#4a6fa5;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;}
+.mode-bar .mode-btn:hover{background:#5a7fb5;}
+.mode-bar .mode-btn-ov{background:#2d6a4f;}
+.mode-bar .mode-btn-ov:hover{background:#3d8a5f;}
+</style></head>
 <body>
+<div class="mode-bar"><span class="mode-name">Writing Mode</span><a href="http://127.0.0.1:8765/" class="mode-btn" target="_blank">Switch to Chat Mode</a></div>
   <!-- Toolbar -->
   <header class="toolbar">
     <div class="toolbar-left">
@@ -16,14 +24,16 @@
       <span id="mainFile" class="muted"></span>
     </div>
     <div class="toolbar-center">
-      <button onclick="compileProject()" id="compileBtn" title="编译 (Ctrl+Enter)">▶ 编译</button>
+      <button onclick="compileProject()" id="compileBtn" title="编译 (Ctrl+Enter)">? 编译</button>
       <span id="compileStatus" class="muted" style="font-size:12px"></span>
       <span id="saveIndicator" class="save-indicator"></span>
     </div>
     <div class="toolbar-right">
-      <button onclick="showPolishPanel()" title="润色工具">✏ 润色</button>
-      <button onclick="diagnoseProject()" title="诊断">🔍 诊断</button>
-      <a href="/" class="btn-link" title="返回首页">🏠</a>
+      <button onclick="showPolishPanel()" title="润色工具">? 润色</button>
+      <button onclick="diagnoseProject()" title="诊断">?? 诊断</button>
+      
+      <a href="/" class="btn-link" title="返回首页">??</a>
+      <a href="http://127.0.0.1:8765/" class="btn-link" title="Switch to Chat Mode" target="_blank">??</a>
     </div>
   </header>
 
@@ -42,7 +52,7 @@
       </div>
       <div class="editor-wrap">
         <textarea id="codeEditor" spellcheck="false" class="code-textarea"></textarea>
-        <button type="button" class="polish-selection-btn" id="polishSelectionBtn">✏ 润色</button>
+        <button type="button" class="polish-selection-btn" id="polishSelectionBtn">? 润色</button>
       </div>
     </main>
 
@@ -54,13 +64,13 @@
       <div class="pdf-header">
         <span>PDF 预览</span>
         <div class="pdf-zoom-controls">
-          <button type="button" id="pdfZoomOut" title="缩小">−</button>
+          <button type="button" id="pdfZoomOut" title="缩小">?</button>
           <input type="range" id="pdfZoomSlider" min="50" max="200" value="100" title="缩放">
           <span id="pdfZoomLabel">100%</span>
           <button type="button" id="pdfZoomIn" title="放大">+</button>
           <button type="button" id="pdfFitHeight" title="适应高度（一页）">适应高度</button>
         </div>
-        <button onclick="togglePdfPanel()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+        <button onclick="togglePdfPanel()" style="background:none;border:none;color:#858585;cursor:pointer">?</button>
       </div>
       <div id="pdfViewer" class="pdf-viewer">
         <div id="pdfPages"></div>
@@ -76,7 +86,7 @@
   <div class="polish-slide" id="polishSlide">
     <div class="polish-header">
       <strong>AI 润色</strong>
-      <button onclick="hidePolishPanel()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+      <button onclick="hidePolishPanel()" style="background:none;border:none;color:#858585;cursor:pointer">?</button>
     </div>
     <div class="polish-body">
       <label>目标文件</label>
@@ -99,7 +109,7 @@
   <div class="diagnostic-bar" id="diagnosticBar" style="display:none">
     <div class="diagnostic-header">
       <strong>诊断结果</strong>
-      <button onclick="hideDiagnostics()" style="background:none;border:none;color:#858585;cursor:pointer">✕</button>
+      <button onclick="hideDiagnostics()" style="background:none;border:none;color:#858585;cursor:pointer">?</button>
     </div>
     <div id="diagnosticList"></div>
   </div>
@@ -108,3 +118,4 @@
   <script src="/static/editor.js?v=20260605b"></script>
 </body>
 </html>
+

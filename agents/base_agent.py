@@ -191,6 +191,7 @@ class GeminiClient:
         mt = int(max_output_tokens) if max_output_tokens is not None else int(settings.llm_max_tokens)
         self.max_output_tokens = max(512, min(mt, 65536))
         self.files = {}
+        self.files_by_id = {}
         
     def _upload_files_parallel(self, file_paths: List[str]):
         """
@@ -206,6 +207,7 @@ class GeminiClient:
             file_obj = self.client.files.upload(file=path)
             uploaded_files.append(file_obj)
             self.files[path] = file_obj
+            self.files_by_id[getattr(file_obj, "name", str(file_obj))] = file_obj
 
         # 轮询检查所有文件的状态
         print("等待所有文件处理完成...")

@@ -11,16 +11,25 @@
     />
     <link rel="stylesheet" href="styles.css?v=settings-15" />
     <link rel="stylesheet" href="conferences_calendar.css?v=8" />
-    <link rel="stylesheet" href="drawing_tools.css?v=5" />
-  </head>
+    <link rel="stylesheet" href="drawing_tools.css?v=4" />
+  <style>
+.mode-bar{position:sticky;top:0;z-index:9999;display:flex;align-items:center;justify-content:space-between;padding:6px 20px;background:#1a1a2e;color:#e0e0e0;font-size:13px;border-bottom:1px solid #333;}
+.mode-bar .mode-name{font-weight:600;}
+.mode-bar .mode-btn{display:inline-block;padding:4px 14px;background:#4a6fa5;color:#fff;border-radius:4px;text-decoration:none;font-size:12px;}
+.mode-bar .mode-btn:hover{background:#5a7fb5;}
+.mode-bar .mode-btn-ov{background:#2d6a4f;}
+.mode-bar .mode-btn-ov:hover{background:#3d8a5f;}
+</style></head>
   <body>
+<div class="mode-bar"><span class="mode-name">Chat Mode</span><a href="http://127.0.0.1:8772/" class="mode-btn mode-btn-ov" target="_blank">Switch to Writing Mode</a></div>
     <div class="app-shell" id="app-shell">
     <div class="app-layout" id="app-layout">
       <div class="layout-col layout-col--rag" id="col-rag">
       <aside class="sidebar-rag" aria-label="RAG 管理">
         <h2 class="sidebar-rag-title">RAG 管理</h2>
         <p class="sidebar-rag-desc">
-          RAG库相关录入、查询、删除。        </p>
+          RAG库相关录入、查询、删除
+        </p>
 
         <section class="rag-block" id="rag-upload-block">
           <h3 class="rag-block-title">录入</h3>
@@ -103,10 +112,12 @@
                 <input type="number" id="rag-top-k" class="branch-input" min="1" max="20" value="5" />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-meta-key-wrap">
-                字段名                <input type="text" id="rag-meta-key" class="branch-input" placeholder="如 source / tag" />
+                字段名
+                <input type="text" id="rag-meta-key" class="branch-input" placeholder="如 source / tag" />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-meta-value-wrap">
-                字段值（可空）                <input type="text" id="rag-meta-value" class="branch-input" placeholder="可留空仅按字段筛选" />
+                字段值（可空）
+                <input type="text" id="rag-meta-value" class="branch-input" placeholder="可留空仅按字段筛选" />
               </label>
               <label class="rag-inline-label rag-inline-label--small" id="rag-record-limit-wrap">
                 条数
@@ -126,7 +137,8 @@
       <aside class="sidebar-wf" aria-label="工作流编排">
         <h2 class="sidebar-wf-title">工作流</h2>
         <p class="sidebar-wf-desc">
-          节点<strong>上绿点</strong>输入、<strong>下蓝点</strong>输出：从下点拖线到另一节点上点松开成边。<strong>拖动矩形</strong>调整位置（会随保存写入草稿）。单击矩形编辑；悬停显示删除。        </p>
+          节点<strong>上绿点</strong>输入、<strong>下蓝点</strong>输出：从下点拖线到另一节点上点松开成边。<strong>拖动矩形</strong>调整位置（会随保存写入草稿）。单击矩形编辑；悬停显示删除。
+        </p>
         <div class="wf-body">
           <div id="wf-preview" class="wf-preview" role="img" aria-label="工作流缩略图"></div>
 
@@ -220,7 +232,7 @@
               title="顶会投稿倒计时（未来一年，静态数据）"
               aria-haspopup="dialog"
             >
-              ● 顶会日历
+              ◈ 顶会日历
             </button>
           </div>
           <div class="header-actions" role="toolbar" aria-label="工作流与布局">
@@ -271,7 +283,7 @@
                 aria-label="工作流"
                 title="工作流"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">◆</span>
+                <span class="panel-toggle__icon" aria-hidden="true">◫</span>
                 <span class="panel-toggle__tip">工作流</span>
               </button>
               <button
@@ -282,7 +294,7 @@
                 aria-label="分支"
                 title="分支"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">②</span>
+                <span class="panel-toggle__icon" aria-hidden="true">⑂</span>
                 <span class="panel-toggle__tip">分支</span>
               </button>
               <button
@@ -293,7 +305,7 @@
                 aria-label="资料"
                 title="资料"
               >
-                <span class="panel-toggle__icon" aria-hidden="true">▣</span>
+                <span class="panel-toggle__icon" aria-hidden="true">⊞</span>
                 <span class="panel-toggle__tip">资料</span>
               </button>
               <button
@@ -324,7 +336,7 @@
         </header>
 
         <main class="chat" id="chat" role="presentation">
-          <!-- 滚动只发生在内层，避免滚动条让本列与页底栏产生宽度差 -->
+          <!-- 滚动只发生在内层，避免滚动条让本列与顶/底栏产生宽度差 -->
           <div class="chat-scroll" id="chat-scroll" aria-live="polite">
             <div id="chat-empty" class="chat-empty" role="status">
               <p class="chat-empty-title">开始与 TeX Agent 对话</p>
@@ -387,7 +399,8 @@
       <aside class="sidebar-right" aria-label="选用资料与已上传列表">
         <h2 class="sidebar-right-title">选用资料</h2>
         <p class="sidebar-right-desc">
-          勾选仅表示<strong>当前对话</strong>要把对应路径注在消息前。Skill / Checklist 可在此区上传多份，按需勾选。        </p>
+          勾选仅表示<strong>当前对话</strong>要把对应路径注在消息前。Skill / Checklist 可在此区上传多份，按需勾选。
+        </p>
         <div class="right-asset-block" id="skill-block">
           <h3 class="right-asset-title">Skills</h3>
           <form id="skill-upload-form" class="pdf-upload-form" enctype="multipart/form-data">
@@ -458,7 +471,8 @@
         <div class="uploaded-files-block" id="uploaded-files-block" aria-label="服务器已存储的全部上传文件">
           <h3 class="uploaded-files-title">已上传文件（汇总）</h3>
           <p class="uploaded-files-desc">
-            包含底部上传的 PDF/文档与右侧 Skill、Checklist；勾选后发送时会附带路径。          </p>
+            含底部上传的 PDF/文档与右侧 Skill、Checklist；勾选后发送时会附带路径。
+          </p>
           <p id="uploaded-files-status" class="asset-panel-status" role="status"></p>
           <ul class="asset-list asset-list--uploaded" id="uploaded-files-list" aria-live="polite"></ul>
         </div>
@@ -480,7 +494,7 @@
         <header class="conf-cal-head">
           <div>
             <h2 id="conf-cal-title" class="conf-cal-title">CONFERENCE DEADLINE RADAR</h2>
-            <p class="conf-cal-sub">2026-2027 · 静态参考 · 请以官网为准</p>
+            <p class="conf-cal-sub">2026–2027 · 静态参考 · 请以官网为准</p>
           </div>
           <button type="button" id="conf-cal-close" class="conf-cal-close" aria-label="关闭日历">×</button>
         </header>
@@ -613,7 +627,7 @@
             </form>
             <p id="chart-plot-status" class="drawing-status" role="status"></p>
             <div id="chart-plot-result" class="drawing-result" hidden>
-              <img id="chart-plot-img" alt="生成的统计图表" style="opacity:0" />
+              <img id="chart-plot-img" alt="生成的统计图表" />
               <a id="chart-plot-download" class="btn-secondary drawing-download" download>下载 PNG</a>
             </div>
           </section>
@@ -645,7 +659,7 @@
             <p id="concept-diagram-status" class="drawing-status" role="status"></p>
             <pre id="concept-diagram-code" class="drawing-code-preview" hidden></pre>
             <div id="concept-diagram-result" class="drawing-result" hidden>
-              <img id="concept-diagram-img" alt="生成的概念示意图" style="opacity:0" />
+              <img id="concept-diagram-img" alt="生成的概念示意图" />
               <a id="concept-diagram-download" class="btn-secondary drawing-download" download>下载 PNG</a>
             </div>
           </section>
@@ -716,7 +730,7 @@
             <p id="palette-status" class="drawing-status" role="status"></p>
             <div id="palette-swatches" class="palette-swatches" hidden></div>
             <div id="palette-result" class="drawing-result" hidden>
-              <img id="palette-img" alt="配色预览条" style="opacity:0" />
+              <img id="palette-img" alt="配色预览条" />
             </div>
           </section>
 
@@ -754,6 +768,7 @@
                   <span>启用 OpenAI 生成 2 条</span>
                 </label>
               </div>
+              <p class="drawing-hint">3 条本地模板（即时，无需 API）+ 2 条 OpenAI 风格各异（正经学术 / 脑洞趣味）。API 读取 <code>OPENAI_API_KEY</code> / <code>OPENAI_BASE_URL</code>，未配置时自动退化为纯本地。</p>
               <div class="drawing-actions">
                 <button type="submit" class="btn-primary">生成标题</button>
                 <button type="button" class="btn-secondary" id="paper-title-reset">清空重置</button>
@@ -778,7 +793,7 @@
             </form>
             <p id="qrcode-status" class="drawing-status" role="status"></p>
             <div id="qrcode-result" class="drawing-result drawing-result--qrcode" hidden>
-              <img id="qrcode-img" alt="生成的 QR 码" style="opacity:0" />
+              <img id="qrcode-img" alt="生成的 QR 码" />
               <a id="qrcode-download" class="btn-secondary drawing-download" download>下载 PNG</a>
             </div>
           </section>
@@ -797,8 +812,7 @@
     <script src="rag_assets.js?v=rag-delete-5"></script>
     <script src="conferences_calendar.js?v=4"></script>
     <script src="user_settings.js?v=settings-6"></script>
-    <script src="drawing_tools.js?v=5"></script>
+    <script src="drawing_tools.js?v=4"></script>
     <script src="app.js?v=workflow-mode-2"></script>
   </body>
 </html>
-

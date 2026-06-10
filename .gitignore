@@ -54,22 +54,14 @@ files/output/*
 *.log
 logs/
 
-# Web UI 用户上传文件（各子目录用 .gitkeep 占位）
-storage/pdfs/*
-!storage/pdfs/.gitkeep
-storage/skills/*
-!storage/skills/.gitkeep
-storage/checklists/*
-!storage/checklists/.gitkeep
-storage/documents/*
-!storage/documents/.gitkeep
+# ---- storage/
 storage/
-
 # ---- 运行产物（节点 I/O 样例、JSONL 记忆）----
 output/
 memory_store/
 # RAG 工具集成测试落盘输出（本地查看用）
 tests/test_rag/_rag_tool_output/
+doc/code_note/
 
 # 关于latex解析的测试内容
 tests/test_latex/VaLoRA_TMC
