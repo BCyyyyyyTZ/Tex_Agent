@@ -4,9 +4,6 @@
 
 **基于多智能体架构的 LaTeX 论文写作增强系统**
 
- [![Stars](https://img.shields.io/github/stars/BCyyyyyyTZ/Tex_Agent?style=flat&label=Stars&color=brightgreen)](https://github.com/BCyyyyyyTZ/Tex_Agent)
- [![License](https://img.shields.io/github/license/BCyyyyyyTZ/Tex_Agent?style=flat&color=blue)](https://github.com/BCyyyyyyTZ/Tex_Agent)
- [![Last Commit](https://img.shields.io/github/last-commit/BCyyyyyyTZ/Tex_Agent?style=flat&color=orange)](https://github.com/BCyyyyyyTZ/Tex_Agent)
  [![Visitors](https://api.visitorbadge.io/api/visitors?path=https%3A%2F%2Fgithub.com%2FBCyyyyyyTZ%2FTex_Agent&label=Views&countColor=%2344CC11)](https://github.com/BCyyyyyyTZ/Tex_Agent)
 
 </div>
