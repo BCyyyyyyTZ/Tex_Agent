@@ -186,6 +186,38 @@ body.drawing-tools-open {
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
+  /* 当 src 为空或尚未加载时不显示浏览器默认残缺占位符 */
+  display: block;
+}
+
+/* 图片加载中的骨架动画 */
+.img-loading-skeleton {
+  width: 100%;
+  height: 180px;
+  border-radius: 12px;
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.10) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.4s infinite ease-in-out;
+}
+
+.img-loading-skeleton.img-loading-error {
+  height: auto;
+  padding: 14px 18px;
+  font-size: 13px;
+  color: #fb7185;
+  background: rgba(251,113,133,0.08);
+  border: 1px solid rgba(251,113,133,0.25);
+  animation: none;
+}
+
+@keyframes skeleton-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .drawing-download {

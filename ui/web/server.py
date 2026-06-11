@@ -176,6 +176,9 @@ class TeXAgentWebUI(TeXAgentCLI):
                 raise ValueError("自定义工作流未初始化")
             if not self.web_workflow.get("nodes"):
                 raise ValueError("自定义工作流没有节点，请在左侧添加并「保存到服务器」")
+            from workflow.workflow_parser import apply_depends_on_from_edges
+
+            apply_depends_on_from_edges(self.web_workflow)
             return build_app_from_workflow(
                 workflow_name="web_custom",
                 config_dict=self.web_workflow,
@@ -298,8 +301,9 @@ def _validate_workflow_dag_and_flow(
 
 
 def _validate_workflow_dict(d: Dict[str, Any]) -> None:
-    from workflow.workflow_parser import YAMLWorkflowParser
+    from workflow.workflow_parser import YAMLWorkflowParser, apply_depends_on_from_edges
 
+    apply_depends_on_from_edges(d)
     p = YAMLWorkflowParser()
     try:
         nodes = p.parse_nodes(d)

@@ -22,7 +22,7 @@ from latex.fix_batch import build_fix_batch
 from latex.polish_prompt import build_polish_prompt
 from latex.project_index import build_project_index
 from latex.refs_index import iter_main_closure_files
-from agents.simple_agent import SimpleAgent
+from agents.simple_agent_new import SimpleAgent
 from core.message import WorkflowMessage
 from latex.suggestion import (
     parse_llm_suggestions_from_agent_result,

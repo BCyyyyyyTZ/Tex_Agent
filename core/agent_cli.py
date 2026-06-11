@@ -257,6 +257,12 @@ class TeXAgentCLI:
 
         # 执行后回写消息到 Context（仅追加本轮新增消息，避免重复写入历史）
         if result and "messages" in result:
+            from config.context_settings import get_message_filter_config
+
+            _mf = get_message_filter_config()
+            _skip_sfx = tuple(
+                str(s) for s in (_mf.get("skip_source_suffixes") or [])
+            )
             existed_count = len(history_messages)
             new_messages = result["messages"][existed_count:]
             for msg_dict in new_messages:
@@ -266,6 +272,9 @@ class TeXAgentCLI:
                     default_source_type="system",
                     default_source_id="workflow",
                 )
+                _sid = str(msg.source_id or "")
+                if _skip_sfx and _sid.endswith(_skip_sfx):
+                    continue
                 self.context.save(msg)
 
         return result
@@ -522,27 +531,24 @@ class TeXAgentCLI:
         if ctx is None:
             return {"branch": name, "messages": []}
 
+        from config.context_settings import PROFILE_DIALOGUE, filter_messages_for_memory
+        from utils.reply_format import format_reply_for_ui
+
         messages_out: List[Dict[str, Any]] = []
-        for msg in ctx.load():
-            if hasattr(msg, "to_dict"):
-                d = msg.to_dict()
-            else:
-                d = ensure_message(
-                    msg,
-                    default_role="assistant",
-                    default_source_type="system",
-                    default_source_id="context",
-                ).to_dict()
-            role = str(d.get("role") or "assistant")
+        prev_key: Optional[tuple] = None
+        for msg in filter_messages_for_memory(ctx.load(), PROFILE_DIALOGUE):
+            role = str(getattr(msg, "role", None) or "assistant")
             if role not in ("user", "assistant"):
                 continue
-            body = str(d.get("content") or "").strip()
+            body = str(getattr(msg, "content", None) or "").strip()
             if not body:
                 continue
             if role == "assistant":
-                from utils.reply_format import format_reply_for_ui
-
                 body = format_reply_for_ui(body)
+            dedupe_key = (role, body)
+            if dedupe_key == prev_key:
+                continue
+            prev_key = dedupe_key
             messages_out.append({"role": role, "content": body})
         return {"branch": name, "messages": messages_out}
 

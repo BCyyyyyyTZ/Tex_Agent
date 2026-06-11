@@ -114,7 +114,12 @@ PERSONA_REPLY_SKIP: Dict[str, Any] = {
 
 MESSAGE_FILTER: Dict[str, Any] = {
     "skip_source_suffixes": ["_prompt_builder"],
-    "prompt_builder_body_markers": ["[你的具体任务]", "[原始任务背景]"],
+    "prompt_builder_body_markers": [
+        "[你的具体任务]",
+        "[原始任务背景]",
+        "【用户本轮消息】",
+        "【要求】",
+    ],
     "dialogue_source_ids": ["chat", "user", "web", "cli"],
     "max_user_line_chars": 2000,
     "max_assistant_line_chars": 2500,

@@ -9,7 +9,7 @@ from typing import Optional
 from typing import List, Optional, Union
 
 from agents.base_agent import BaseAgent
-from agents.simple_agent import SimpleAgent
+from agents.simple_agent_new import SimpleAgent
 from core.message import WorkflowMessage, MessageLike
 from tools.base_tool import BaseTool
 from tools.tool_list import tool_list

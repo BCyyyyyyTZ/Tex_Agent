@@ -668,9 +668,9 @@ def make_agent_node(
         entry_addon = ""
         if is_entry_node and behavior.persona_file_write:
             if isinstance(agent, SimpleAgent_new):
-                entry_addon = entry_node_persona_system_addon()
-            else:
                 entry_addon = entry_node_persona_simple_agent_addon()
+            else:
+                entry_addon = entry_node_persona_system_addon()
 
         contract_mode_eff = behavior.single_turn_contract
         if contract_mode_eff == "always":
