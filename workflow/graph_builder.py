@@ -178,6 +178,68 @@ def _register_conditional_edges(
     )
 
 
+def _collect_fanin_join_targets(
+    nodes: List[NodeConfig],
+    edges: List[EdgeConfig],
+) -> Dict[str, List[str]]:
+    """
+    找出需要 LangGraph join 边（add_edge([...], target)）的多入边目标。
+
+    多条独立 add_edge 会在各上游于不同 superstep 完成时各触发一次下游；
+    join 边则等待全部上游到齐后只执行一次。parallel_join 节点由业务层汇聚，此处跳过。
+    """
+    node_types = {
+        n.node_id: (getattr(n, "node_type", "agent") or "agent").strip().lower()
+        for n in nodes
+    }
+    incoming: Dict[str, List[str]] = defaultdict(list)
+    for edge in edges:
+        incoming[edge.to_node].append(edge.from_node)
+
+    targets: Dict[str, List[str]] = {}
+    for to_node, sources in incoming.items():
+        if (node_types.get(to_node) or "") == "parallel_join":
+            continue
+        unique_sources = list(dict.fromkeys(sources))
+        if len(unique_sources) > 1:
+            targets[to_node] = unique_sources
+    return targets
+
+
+def _edges_excluding_fanin_joins(
+    edges: List[EdgeConfig],
+    targets: Dict[str, List[str]],
+) -> List[EdgeConfig]:
+    """剔除将被合并为 join 边的多入边，避免重复注册。"""
+    if not targets:
+        return list(edges)
+
+    join_source_sets = {to: set(srcs) for to, srcs in targets.items()}
+    remaining: List[EdgeConfig] = []
+    for edge in edges:
+        src_set = join_source_sets.get(edge.to_node)
+        if src_set and edge.from_node in src_set:
+            if edge.condition is not None:
+                logger.warning(
+                    f"[DynamicGraph] 多入边目标 {edge.to_node!r} 含条件边 "
+                    f"{edge.from_node} → {edge.to_node}，无法合并为 join，保留原边"
+                )
+                remaining.append(edge)
+            continue
+        remaining.append(edge)
+    return remaining
+
+
+def _register_fanin_join_edges(
+    graph: StateGraph,
+    targets: Dict[str, List[str]],
+) -> None:
+    """对多入边目标注册 LangGraph join 边（列表形式 from_node）。"""
+    for to_node, sources in targets.items():
+        graph.add_edge(sources, to_node)
+        logger.info(f"[DynamicGraph] 多入边汇聚 (join): {sources} → {to_node}")
+
+
 # ---------------------------------------------------------------------------
 # 主构图函数
 # ---------------------------------------------------------------------------
@@ -355,8 +417,6 @@ def build_dynamic_graph(
         graph.add_node(nid, node_fn)
         logger.debug(f"[DynamicGraph] 注册 agent 节点: {nid} ({node_cfg.agent_name})")
 
-    graph.add_edge(START, entry_node)
-
     # ---- 注册边（Breaking Change v2：真正分类处理） ----
     # 过滤非法边
     valid_edges: List[EdgeConfig] = []
@@ -368,6 +428,12 @@ def build_dynamic_graph(
             )
             continue
         valid_edges.append(edge_cfg)
+
+    fanin_targets = _collect_fanin_join_targets(nodes, valid_edges)
+    if fanin_targets:
+        valid_edges = _edges_excluding_fanin_joins(valid_edges, fanin_targets)
+
+    graph.add_edge(START, entry_node)
 
     # 按 from_node 分组
     edges_by_from: Dict[str, List[EdgeConfig]] = defaultdict(list)
@@ -395,14 +461,22 @@ def build_dynamic_graph(
                 f"{[e.to_node for e in group]}（fan-out）"
             )
 
+    if fanin_targets:
+        _register_fanin_join_edges(graph, fanin_targets)
+
     # ---- 末端节点连接 END ----
     for terminal in terminal_nodes:
         graph.add_edge(terminal, END)
         logger.debug(f"[DynamicGraph] 终止边: {terminal} → END")
 
     app = graph.compile()
+    join_note = (
+        f"，多入边 join 汇聚 {len(fanin_targets)} 处"
+        if fanin_targets
+        else ""
+    )
     logger.info(
-        f"[DynamicGraph] 图编译完成: {len(nodes)} 节点 / {len(valid_edges)} 条边"
+        f"[DynamicGraph] 图编译完成: {len(nodes)} 节点 / {len(valid_edges)} 条边{join_note}"
     )
     return app
 

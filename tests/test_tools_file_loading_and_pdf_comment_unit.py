@@ -112,3 +112,36 @@ def test_pdf_comment_tool_run_single_creates_output(tmp_path: Path) -> None:
     assert r.success is True
     assert out_path.exists()
     assert out_path.stat().st_size > 0
+
+
+def test_pdf_comment_tool_batch_annotate_regression(tmp_path: Path) -> None:
+    """_batch_annotate 曾因未导入 normalize、page_idx 未定义、output_message 笔误而整批失败。"""
+    fitz = pytest.importorskip("fitz")
+    from tools.pdf_comment_tool import PdfCommentTool
+
+    pdf_path = tmp_path / "batch.pdf"
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "我们选取在3.2节介绍的测试数据集对SMT求解器进行评估。")
+    doc.save(pdf_path)
+    doc.close()
+
+    out_path = tmp_path / "batch-checked.pdf"
+    tool = PdfCommentTool()
+    r = tool.run(
+        pdf_path=str(pdf_path),
+        output_path=str(out_path),
+        question_list=[
+            {
+                "page_start": 1,
+                "page_end": 1,
+                "text": "我们选取在3.2节介绍的测试数据集对SMT求解器进行评估。",
+                "comment": "建议改为「本文选取……」",
+            }
+        ],
+    )
+    assert r.success is True
+    assert "output_message" not in (r.error or "")
+    assert out_path.exists()
+    meta = r.metadata or {}
+    assert meta.get("success_count", 0) >= 1
