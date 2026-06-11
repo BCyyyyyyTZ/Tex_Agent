@@ -34,9 +34,7 @@ from tools.base_tool import BaseTool
 from core.message import ToolResult
 from config.settings import settings
 from utils.logger import get_logger
-import os
-import tempfile
-import traceback
+from utils.text_normalize import normalize, normalize_for_search
 
 logger = get_logger(__name__)
 
@@ -1007,8 +1005,7 @@ class PdfCommentTool(BaseTool):
                         )
 
                     success_count += 1
-                    commented_pages.add(page_idx + 1)
-                    print(f"✅ 已处理问题 {i+1}")
+                    logger.debug("已处理注释 %s/%s（页 %s）", i, len(items), draw_page_0 + 1)
                     
                 except Exception as e:
                     errors.append(f"[{i}] 处理异常: {e}")
@@ -1041,12 +1038,13 @@ class PdfCommentTool(BaseTool):
 
             return ToolResult(
                 success=success_count > 0,
-                output=output_message,
+                output=summary,
                 metadata={
                     "success_count": success_count,
                     "unfound_count": unfound_total,
                     "error_count": len(errors),
-                    "errors": errors[:10],   # 最多返回前10条
+                    "errors": errors[:10],
+                    "output_path": final_path,
                 },
             )
             
