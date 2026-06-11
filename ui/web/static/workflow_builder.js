@@ -42,7 +42,7 @@
     ref_checker: { md_path: "doc/paper.md" },
     figure_ref_checker: { md_path: "doc/paper.md" },
     rag_retrieve: { query: "检索查询" },
-    arxiv_search: "machine learning",
+    arxiv_search: "${input}",
     command_running: { command: "echo ok", cwd: "." },
     user_persona_none: {},
     user_persona_get: {},
@@ -158,6 +158,31 @@
     });
   }
 
+  /** 按 edges 同步各节点 config.depends_on（与 workflow_parser.apply_depends_on_from_edges 一致） */
+  function syncDependsOnFromEdges() {
+    var upstream = {};
+    state.edges.forEach(function (ed) {
+      var to = ed.to_node;
+      var from = ed.from_node;
+      if (!to || !from) return;
+      if (!upstream[to]) upstream[to] = [];
+      upstream[to].push(from);
+    });
+    state.nodes.forEach(function (n) {
+      if (!n.config || typeof n.config !== "object") n.config = {};
+      var deps = upstream[n.node_id] || [];
+      var seen = {};
+      var ordered = [];
+      deps.forEach(function (d) {
+        if (!seen[d]) {
+          seen[d] = true;
+          ordered.push(d);
+        }
+      });
+      n.config.depends_on = ordered;
+    });
+  }
+
   function ensureDesignExecute() {
     var hasDesign = state.nodes.some(function (n) {
       return n.node_id === "design";
@@ -217,6 +242,7 @@
       });
     if (ok) {
       state.edges.push({ from_node: fromId, to_node: toId, condition: null });
+      syncDependsOnFromEdges();
     }
     wfIgnoreRectClickUntil = Date.now() + 450;
     render();
@@ -254,6 +280,42 @@
 
   function isProtectedNode(nodeId) {
     return nodeId === "design" || nodeId === "execute";
+  }
+
+  function hasSvgClass(el, className) {
+    if (!el || !el.getAttribute) return false;
+    var cls = el.getAttribute("class") || "";
+    return cls.split(/\s+/).indexOf(className) >= 0;
+  }
+
+  function isWfNodeRemoveTarget(el) {
+    var t = el;
+    while (t) {
+      if (hasSvgClass(t, "wf-node-remove") || hasSvgClass(t, "wf-node-remove-bg")) {
+        return true;
+      }
+      t = t.parentNode;
+    }
+    return false;
+  }
+
+  function removeWorkflowNode(nid) {
+    if (!nid) return;
+    if (isProtectedNode(nid)) {
+      if (!confirm("节点 " + nid + " 为默认链路节点，确定删除？删除后请自行补全工作流。")) {
+        return;
+      }
+    } else if (!confirm("删除节点 " + nid + "？将同时清除所有相关连线。")) {
+      return;
+    }
+    state.nodes = state.nodes.filter(function (n) {
+      return n.node_id !== nid;
+    });
+    state.edges = state.edges.filter(function (ed) {
+      return ed.from_node !== nid && ed.to_node !== nid;
+    });
+    syncDependsOnFromEdges();
+    render();
   }
 
   function getWorkflowSelectValue() {
@@ -463,6 +525,7 @@
 
   function startNodePointerDrag(svg, w, ev) {
     if (edgeDrag || nodePointerDrag) return;
+    if (isWfNodeRemoveTarget(ev.target)) return;
     if (ev.pointerType === "mouse" && ev.button !== 0) return;
     if (Date.now() < wfIgnoreRectClickUntil) return;
     var p0 = clientToSvgPoint(svg, ev.clientX, ev.clientY);
@@ -628,35 +691,29 @@
         g.appendChild(circOut);
 
         var nid = nidStr;
-        if (!readOnly && !isProtectedNode(nid)) {
+        if (!readOnly) {
           var btnRm = document.createElementNS(NS, "g");
           btnRm.setAttribute("class", "wf-node-remove");
-          btnRm.setAttribute("transform", "translate(" + (w.w - 15) + ",1)");
+          btnRm.setAttribute("transform", "translate(" + (w.w - 18) + ",-2)");
           var rmbg = document.createElementNS(NS, "circle");
-          rmbg.setAttribute("cx", "6");
-          rmbg.setAttribute("cy", "6");
-          rmbg.setAttribute("r", "8");
+          rmbg.setAttribute("cx", "8");
+          rmbg.setAttribute("cy", "8");
+          rmbg.setAttribute("r", "10");
           rmbg.setAttribute("class", "wf-node-remove-bg");
           var rmtxt = document.createElementNS(NS, "text");
-          rmtxt.setAttribute("x", "6");
-          rmtxt.setAttribute("y", "10");
+          rmtxt.setAttribute("x", "8");
+          rmtxt.setAttribute("y", "12");
           rmtxt.setAttribute("text-anchor", "middle");
           rmtxt.setAttribute("class", "wf-node-remove-x");
           rmtxt.textContent = "×";
           btnRm.appendChild(rmbg);
           btnRm.appendChild(rmtxt);
-          btnRm.setAttribute("title", "删除节点");
-          btnRm.addEventListener("click", function (ev) {
+          btnRm.setAttribute("title", "删除节点 " + nid);
+          btnRm.addEventListener("pointerdown", function (ev) {
             ev.stopPropagation();
             ev.preventDefault();
-            if (!confirm("删除节点 " + nid + "？将清除所有相关边。")) return;
-            state.nodes = state.nodes.filter(function (n) {
-              return n.node_id !== nid;
-            });
-            state.edges = state.edges.filter(function (ed) {
-              return ed.from_node !== nid && ed.to_node !== nid;
-            });
-            render();
+            wfIgnoreRectClickUntil = Date.now() + 500;
+            removeWorkflowNode(nid);
           });
           g.appendChild(btnRm);
         }
@@ -706,6 +763,7 @@
           state.edges = state.edges.filter(function (ed) {
             return !(ed.from_node === fromN && ed.to_node === toN);
           });
+          syncDependsOnFromEdges();
           render();
         });
         gEdgeUi.appendChild(wrap);
@@ -719,9 +777,10 @@
       );
     }
 
+    /* 边删除热区置于节点下层，避免挡住节点右上角删除钮 */
     svg.appendChild(gE);
-    svg.appendChild(gN);
     svg.appendChild(gEdgeUi);
+    svg.appendChild(gN);
     svg.appendChild(gDrag);
     mount.innerHTML = "";
     mount.appendChild(svg);
@@ -861,6 +920,7 @@
         });
         migrateDeliverToExecute();
         ensureDesignExecute();
+        syncDependsOnFromEdges();
         refreshWorkflowCanvas();
         setStatus("已从服务器加载草稿（design / execute 已保证）", false);
       })
@@ -871,6 +931,7 @@
         state.nodes[1].config.system_prompt =
           "你是执行/交付节点，基于上游设计生成完整、可执行的最终回答。";
         state.edges = [{ from_node: "design", to_node: "execute", condition: null }];
+        syncDependsOnFromEdges();
         refreshWorkflowCanvas();
         setStatus("已加载默认 design → execute", false);
       });
@@ -879,6 +940,7 @@
       formSave.addEventListener("submit", function (ev) {
         ev.preventDefault();
         setStatus("保存中…", false);
+        syncDependsOnFromEdges();
         fetch(API + "workflow/draft", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -956,6 +1018,7 @@
     renderWfPreview(prev, nodes, edges, { readOnly: true });
   }
   window.applyTexAgentPlanGraph = applyPlanGraphPreview;
+  window.texAgentRefreshWorkflowCanvas = refreshWorkflowCanvas;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init, false);

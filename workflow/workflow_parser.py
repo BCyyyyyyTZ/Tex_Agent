@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -517,3 +517,46 @@ class YAMLWorkflowParser(WorkflowParser):
     ) -> Tuple[List[NodeConfig], List[EdgeConfig]]:
         """内存路径：直接从 TaskPlan 生成 (nodes, edges)。"""
         return _translate_plan_to_graph_config(plan)
+
+
+def apply_depends_on_from_edges(config: Dict[str, Any]) -> None:
+    """
+    根据 edges 为各节点 config.depends_on 写入直接上游节点 ID 列表。
+
+    Web 工作流编辑器只维护 edges；agent/tool 节点通过 depends_on 从 metadata
+    读取上游输出。构图或保存草稿前调用，兼容 depends_on 为空但已有连线的旧草稿。
+    """
+    edges = config.get("edges") or []
+    upstream: Dict[str, List[str]] = defaultdict(list)
+    for e in edges:
+        if not isinstance(e, dict):
+            continue
+        frm = e.get("from_node") if e.get("from_node") is not None else e.get("from")
+        to = e.get("to_node") if e.get("to_node") is not None else e.get("to")
+        if frm is None or to is None:
+            continue
+        upstream[str(to)].append(str(frm))
+
+    nodes = config.get("nodes") or []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        nid = node.get("node_id")
+        if not nid:
+            continue
+        raw_cfg = node.get("config")
+        if raw_cfg is None:
+            cfg: Dict[str, Any] = {}
+            node["config"] = cfg
+        elif isinstance(raw_cfg, dict):
+            cfg = raw_cfg
+        else:
+            continue
+        deps_in = upstream.get(str(nid), [])
+        seen: set = set()
+        ordered: List[str] = []
+        for d in deps_in:
+            if d not in seen:
+                seen.add(d)
+                ordered.append(d)
+        cfg["depends_on"] = ordered

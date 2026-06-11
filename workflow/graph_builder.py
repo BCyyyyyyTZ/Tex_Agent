@@ -83,7 +83,7 @@ def load_workflow_graph_config(workflow_name: str = "default") -> Tuple[list, li
 
 def _build_agent_instance(agent_type: str, node_id: str, node_config: dict):
     """根据 agent_type 实例化对应 Agent。"""
-    from agents.simple_agent import SimpleAgent as _SimpleAgent
+    from agents.simple_agent_new import SimpleAgent_new as _SimpleAgent
     from agents.multi_simple_agent import MultiSimpleAgent as _MultiSimpleAgent
     from config.planner_config import AGENT_TYPE_NAMES, NODE_DEFAULT_TEMPERATURE
 
@@ -430,8 +430,9 @@ def build_app_from_workflow(
     - 名称以 ``checklist_multi`` / ``checklist_annotate`` 开头时，不使用 ``persona_memory`` / ``runtime_memory`` 注入。
     """
     if config_dict is not None:
-        from workflow.workflow_parser import YAMLWorkflowParser
+        from workflow.workflow_parser import YAMLWorkflowParser, apply_depends_on_from_edges
 
+        apply_depends_on_from_edges(config_dict)
         parser = YAMLWorkflowParser()
         nodes = parser.parse_nodes(config_dict)
         edges = parser.parse_edges(config_dict)

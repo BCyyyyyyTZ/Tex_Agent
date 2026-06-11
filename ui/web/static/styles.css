@@ -605,14 +605,15 @@ html[data-user-theme="black"] .app-shell::after {
   pointer-events: none;
   font-family: var(--mono);
 }
-/* SVG 里给 <g> 绑 mouseenter 常无效，用 :hover 显示删除钮；隐藏时不接收事件以免挡连接点 */
+/* 节点删除钮常显（SVG :hover 不稳定）；放大点击区域 */
 .wf-node-interactive .wf-node-remove {
-  visibility: hidden;
-  pointer-events: none;
+  visibility: visible;
+  opacity: 0.82;
+  pointer-events: auto;
+  cursor: pointer;
 }
 .wf-node-interactive:hover .wf-node-remove {
-  visibility: visible;
-  pointer-events: auto;
+  opacity: 1;
 }
 .wf-edge-wrap .wf-edge-remove {
   visibility: hidden;
@@ -1729,10 +1730,17 @@ select {
 
 .msg {
   max-width: 100%;
+  min-width: 0;
   border-radius: var(--radius);
   padding: 12px 14px;
   border: 1px solid transparent;
   animation: fade-in 0.2s ease;
+  overflow: hidden;
+}
+
+.msg .md {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @keyframes fade-in {

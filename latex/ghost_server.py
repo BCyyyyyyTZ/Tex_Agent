@@ -26,7 +26,7 @@ from latex.models import Position, Suggestion, TextRange
 from latex.paths import normalize_rel_path
 from latex.suggestion import _extract_json_candidates
 from latex.watch_service import WatchService
-from agents.simple_agent import SimpleAgent
+from agents.simple_agent_new import SimpleAgent
 from core.message import WorkflowMessage
 
 _GHOST_DIR = Path(__file__).resolve().parents[1] / "ui" / "ghost"

@@ -697,7 +697,7 @@ def create_app() -> FastAPI:
         from latex.ghost_polish_prompt import build_ghost_polish_prompt
 
 
-        from agents.simple_agent import SimpleAgent
+        from agents.simple_agent_new import SimpleAgent
 
 
         from core.message import WorkflowMessage

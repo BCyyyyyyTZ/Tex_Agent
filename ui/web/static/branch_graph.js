@@ -227,12 +227,29 @@
     if (!mount) return;
 
     var lastTree = { current: "main", nodes: [] };
+    var historyLoadSeq = 0;
+    window.texAgentBranchHistorySeq = 0;
 
     function syncLabel() {
       if (currentLbl) currentLbl.textContent = "当前分支: " + (lastTree.current || "main");
     }
 
+    function prepareUiForBranchChange(fromBranch, toBranch) {
+      if (typeof window.texAgentPrepareBranchSwitch === "function") {
+        window.texAgentPrepareBranchSwitch(fromBranch, toBranch);
+      }
+    }
+
+    function setActiveBranchUi(bid) {
+      if (typeof window.texAgentSetActiveBranch === "function") {
+        window.texAgentSetActiveBranch(bid || "main");
+      }
+    }
+
     function reloadChatForBranch(bid) {
+      setActiveBranchUi(bid);
+      var seq = ++historyLoadSeq;
+      window.texAgentBranchHistorySeq = seq;
       var q = encodeURIComponent(bid || "main");
       fetch(API_BASE + "branches/history?branch=" + q, { method: "GET" })
         .then(function (r) {
@@ -240,14 +257,15 @@
           return r.json();
         })
         .then(function (j) {
+          if (seq !== historyLoadSeq) return;
           if (typeof window.texAgentReplaceChatFromHistory === "function") {
-            window.texAgentReplaceChatFromHistory(j.messages || []);
+            window.texAgentReplaceChatFromHistory(j.messages || [], seq);
           }
         })
         .catch(function (_e) {
-          /* 分支历史加载失败时不打断切换；界面保留清空或由用户重试 */
+          if (seq !== historyLoadSeq) return;
           if (typeof window.texAgentReplaceChatFromHistory === "function") {
-            window.texAgentReplaceChatFromHistory([]);
+            window.texAgentReplaceChatFromHistory([], seq);
           }
         });
     }
@@ -258,6 +276,8 @@
         return;
       }
       setStatus(status, "切换中…", false);
+      var fromBranch = lastTree.current || "main";
+      prepareUiForBranchChange(fromBranch, bid);
       fetch(API_BASE + "branches/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from agents.simple_agent import SimpleAgent
+from agents.simple_agent_new import SimpleAgent
 from core.message import WorkflowMessage
 
 

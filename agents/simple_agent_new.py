@@ -1,6 +1,7 @@
 """
-SimpleAgent：纯 LLM 节点实现（不执行工具）。
+SimpleAgent_new：纯 LLM 节点实现（不执行工具）。
 职责：接收输入消息 -> 调用 LLM -> 返回 assistant 文本结果。
+工具调用应由 workflow 的 tool 节点处理。
 """
 from typing import Any, List, Optional, Union
 import asyncio
@@ -23,7 +24,7 @@ DEFAULT_TEMPERATURE = 0.2
 DEFAULT_SYSTEM_PROMPT = "你是一个专业、可靠、直接给出可执行结果的助手。"
 
 
-class SimpleAgent(BaseAgent):
+class SimpleAgent_new(BaseAgent):
     """
     纯推理 Agent，不负责工具调用。
     注意：工具调用应由 workflow 的 tool 节点处理。
@@ -39,6 +40,7 @@ class SimpleAgent(BaseAgent):
         base_url: Optional[str] = None,
         temperature: Optional[float] = None,
         max_history: int = 100,
+        max_tokens: Optional[int] = None,
     ):
         if tools is None:
             tools = tool_list
@@ -58,6 +60,7 @@ class SimpleAgent(BaseAgent):
             or os.getenv("GOOGLE_API_KEY")
             or ""
         )
+        self._llm_max_tokens = max_tokens
 
         self.backend = self._init_backend()
         self.history: List[AgentMessage] = []
@@ -68,7 +71,13 @@ class SimpleAgent(BaseAgent):
         wants_gemini = "gemini" in model_lower
 
         if wants_gemini and self.gemini_api_key:
-            self.set_gemini("llm", self.model_name, self.gemini_api_key, self.temperature)
+            self.set_gemini(
+                "llm",
+                self.model_name,
+                self.gemini_api_key,
+                self.temperature,
+                self._llm_max_tokens,
+            )
             return "gemini"
 
         if self.openai_api_key:
@@ -78,6 +87,7 @@ class SimpleAgent(BaseAgent):
                 self.openai_api_key,
                 self.openai_base_url,
                 self.temperature,
+                self._llm_max_tokens,
             )
             if wants_gemini:
                 logger.warning(
@@ -133,7 +143,6 @@ class SimpleAgent(BaseAgent):
             logger.error(f"[{self.name}] 写入 LLM 交互日志失败: {e}")
 
     def _normalize_attachment(self, attachment: Any) -> Any:
-        # Gemini 通道支持文件路径；OpenAI 兼容通道忽略本地附件
         if self.backend == "gemini":
             return attachment
         if attachment:
@@ -145,7 +154,6 @@ class SimpleAgent(BaseAgent):
         normalized_msg = self._normalize_message(message)
         self.history.append(normalized_msg)
 
-        # 保留 set_tool_args 兼容能力，但 SimpleAgent 本身不执行工具
         tool_args = normalized_msg.metadata.get("tool_args")
         if tool_args is not None:
             self.set_tool_args(tool_args)
@@ -180,3 +188,7 @@ class SimpleAgent(BaseAgent):
 
     def get_history(self) -> List[AgentMessage]:
         return list(self.history)
+
+
+# 兼容旧导入名与配置中的 SimpleAgent 别名
+SimpleAgent = SimpleAgent_new

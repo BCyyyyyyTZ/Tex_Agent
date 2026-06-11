@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from config.settings import settings
-from agents.simple_agent import SimpleAgent
+from agents.simple_agent_new import SimpleAgent
 from core.message import WorkflowMessage
 from latex.constants import Severity
 from latex.fix_batch import build_fix_batch

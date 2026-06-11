@@ -22,6 +22,12 @@
   var thinkingTimerId = null;
   var thinkingStartMs = 0;
   var thinkingContentEl = null;
+  /** 递增后可使进行中的 /api/chat 响应不再写回 DOM（分支切换等） */
+  var chatRequestGen = 0;
+  var chatAbortController = null;
+  /** 各分支在 UI 上保留的用户↔Agent 对话（仅展示层；服务端上下文仍按分支隔离） */
+  var branchDialogueCache = {};
+  var activeBranchId = "main";
 
   /** 侧栏 iframe / 若干嵌入场景下须用绝对地址，避免相对 /api 解析到错误源 */
   function apiChatUrl() {
@@ -100,10 +106,47 @@
     }
   }
 
-  function appendMessage(role, bodyHtml) {
+  function isInternalAgentPrompt(text) {
+    var t = String(text || "");
+    if (!t) return false;
+    if (t.indexOf("【用户本轮消息】") >= 0 && t.indexOf("【输出格式】") >= 0) {
+      return true;
+    }
+    if (t.indexOf("[你的具体任务]") >= 0 && t.indexOf("[原始任务背景]") >= 0) {
+      return true;
+    }
+    if (
+      t.indexOf("【要求】") >= 0 &&
+      t.indexOf("【禁止】") >= 0 &&
+      t.indexOf("【输出格式】") >= 0
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function normalizeDialogueList(messages) {
+    const arr = Array.isArray(messages) ? messages : [];
+    const out = [];
+    for (let i = 0; i < arr.length; i++) {
+      const m = arr[i];
+      if (!m || typeof m !== "object") continue;
+      const role = m.role === "user" ? "user" : "assistant";
+      const raw = m.content != null ? String(m.content) : "";
+      if (!raw.trim()) continue;
+      if (role === "user" && isInternalAgentPrompt(raw)) continue;
+      out.push({ role: role, content: raw });
+    }
+    return out;
+  }
+
+  function appendMessage(role, bodyHtml, plainText, skipCacheSync) {
     hideEmptyPlaceholder();
     const wrap = document.createElement("div");
     wrap.className = "msg " + role;
+    if (plainText != null && String(plainText).trim()) {
+      wrap.dataset.plainText = String(plainText);
+    }
     const label = document.createElement("div");
     label.className = "msg-role";
     label.textContent = role === "user" ? "你" : "TeX Agent";
@@ -114,38 +157,127 @@
     wrap.appendChild(content);
     chat.appendChild(wrap);
     chat.scrollTop = chat.scrollHeight;
+    if (!skipCacheSync && activeBranchId) {
+      syncBranchDialogueCache(activeBranchId);
+    }
     return wrap;
   }
 
-  /**
-   * 切换分支后由 branch_graph 调用：用服务端该分支的对话记录重建聊天区。
-   */
-  function replaceChatFromHistory(messages) {
+  function collectDialogueFromDom() {
+    const scroll = document.getElementById("chat-scroll") || chat;
+    if (!scroll) return [];
+    const out = [];
+    scroll.querySelectorAll(".msg").forEach(function (wrap) {
+      if (wrap.classList.contains("loading")) return;
+      const role = wrap.classList.contains("user") ? "user" : "assistant";
+      const plain = wrap.dataset.plainText || "";
+      if (!plain.trim()) return;
+      if (role === "user" && isInternalAgentPrompt(plain)) return;
+      out.push({ role: role, content: plain });
+    });
+    return out;
+  }
+
+  function syncBranchDialogueCache(branchId) {
+    if (!branchId) return;
+    branchDialogueCache[branchId] = collectDialogueFromDom();
+  }
+
+  function renderDialogueToChat(messages) {
     const scroll = document.getElementById("chat-scroll") || chat;
     if (!scroll) return;
-    scroll.querySelectorAll(".msg").forEach(function (n) {
-      n.remove();
-    });
+    const arr = normalizeDialogueList(messages);
+    clearChatMessages();
     const emptyEl = document.getElementById("chat-empty");
-    const arr = Array.isArray(messages) ? messages : [];
-    if (arr.length === 0) {
+    if (!arr.length) {
       if (emptyEl) emptyEl.hidden = false;
+      scroll.scrollTop = 0;
       return;
     }
     if (emptyEl) emptyEl.hidden = true;
     for (let i = 0; i < arr.length; i++) {
       const m = arr[i];
-      if (!m || typeof m !== "object") continue;
-      const role = m.role === "user" ? "user" : "assistant";
-      const raw = m.content != null ? String(m.content) : "";
-      if (!raw.trim()) continue;
-      appendMessage(role, renderMd(raw));
+      appendMessage(m.role, renderMd(m.content), m.content, true);
+    }
+    if (activeBranchId) {
+      branchDialogueCache[activeBranchId] = arr.slice();
     }
     scroll.scrollTop = scroll.scrollHeight;
   }
 
+  function clearChatMessages() {
+    const scroll = document.getElementById("chat-scroll") || chat;
+    if (!scroll) return;
+    scroll.querySelectorAll(".msg").forEach(function (n) {
+      n.remove();
+    });
+  }
+
+  /**
+   * 切换分支后由 branch_graph 调用：用服务端该分支的对话记录重建聊天区。
+   * @param {number} [expectedSeq] 与 branch_graph 的 historyLoadSeq 对齐，防止快速连点串台
+   */
+  function replaceChatFromHistory(messages, expectedSeq) {
+    if (
+      expectedSeq != null &&
+      typeof window.texAgentBranchHistorySeq === "number" &&
+      expectedSeq !== window.texAgentBranchHistorySeq
+    ) {
+      return;
+    }
+    renderDialogueToChat(messages);
+  }
+
+  function setActiveBranch(branchId) {
+    activeBranchId = String(branchId || "main");
+    window.texAgentActiveBranchId = activeBranchId;
+  }
+
+  /**
+   * 切换分支：保存离开分支的 UI 对话，立即展示目标分支缓存，后端仅切换上下文。
+   * @param {string} fromBranch 当前分支
+   * @param {string} toBranch 目标分支
+   */
+  function prepareBranchSwitch(fromBranch, toBranch) {
+    if (fromBranch) {
+      syncBranchDialogueCache(fromBranch);
+    }
+    chatRequestGen += 1;
+    if (chatAbortController) {
+      try {
+        chatAbortController.abort();
+      } catch (_abort) {
+        /* empty */
+      }
+      chatAbortController = null;
+    }
+    stopThinkingTimer();
+    submitLock = false;
+    setBusy(false);
+    if (toBranch) {
+      setActiveBranch(toBranch);
+    }
+    const cached = branchDialogueCache[activeBranchId];
+    if (cached && cached.length) {
+      renderDialogueToChat(cached);
+    } else {
+      clearChatMessages();
+      const emptyEl = document.getElementById("chat-empty");
+      if (emptyEl) emptyEl.hidden = false;
+    }
+    if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
+      window.setTexAgentWorkflowActiveNodes([]);
+    }
+    if (typeof window.texAgentRefreshWorkflowCanvas === "function") {
+      window.texAgentRefreshWorkflowCanvas();
+    }
+  }
+
   window.texAgentRenderMd = renderMd;
   window.texAgentReplaceChatFromHistory = replaceChatFromHistory;
+  window.texAgentPrepareBranchSwitch = prepareBranchSwitch;
+  window.texAgentSetActiveBranch = setActiveBranch;
+  window.texAgentActiveBranchId = activeBranchId;
 
   function setBusy(b) {
     if (send) send.disabled = b;
@@ -225,6 +357,8 @@
     const text = (input.value || "").trim();
     if (!text) return;
     submitLock = true;
+    chatRequestGen += 1;
+    var requestGen = chatRequestGen;
 
     const modeVal = (mode && mode.value) || "task";
     /* eslint-disable no-console */
@@ -233,7 +367,7 @@
     let wrap;
     let contentEl;
     try {
-      appendMessage("user", renderMd(text));
+      appendMessage("user", renderMd(text), text);
       input.value = "";
       setBusy(true);
       wrap = appendMessage("assistant", thinkingPlaceholderHtml(modeVal));
@@ -248,12 +382,19 @@
     }
 
     const ac = new AbortController();
+    chatAbortController = ac;
     const t = window.setTimeout(function () {
       ac.abort();
     }, FETCH_MS);
     const done = function () {
       window.clearTimeout(t);
+      if (chatAbortController === ac) {
+        chatAbortController = null;
+      }
     };
+    function isStaleRequest() {
+      return requestGen !== chatRequestGen;
+    }
 
     (async function () {
       try {
@@ -329,6 +470,7 @@
                 break;
               }
               if (!obj || typeof obj !== "object") continue;
+              if (isStaleRequest()) break;
               if (obj.type === "plan_graph" && obj.plan_graph) {
                 if (typeof window.applyTexAgentPlanGraph === "function") {
                   window.applyTexAgentPlanGraph(obj.plan_graph);
@@ -371,6 +513,7 @@
               ? Date.now() - thinkingStartMs
               : 0;
           stopThinkingTimer();
+          if (isStaleRequest()) return;
           if (wrap) wrap.classList.remove("loading");
           if (streamFail) {
             throw streamFail;
@@ -390,6 +533,12 @@
           }
           html += renderMd(finalReply);
           if (contentEl) contentEl.innerHTML = html;
+          if (wrap) {
+            wrap.dataset.plainText = finalErr
+              ? String(finalErr) + "\n" + String(finalReply || "")
+              : String(finalReply || "");
+          }
+          syncBranchDialogueCache(activeBranchId);
         } else {
           const data = await res.json().catch(function () {
             return {};
@@ -406,6 +555,7 @@
               ? Date.now() - thinkingStartMs
               : 0;
           stopThinkingTimer();
+          if (isStaleRequest()) return;
           if (wrap) wrap.classList.remove("loading");
           let html = "";
           if (err) {
@@ -423,6 +573,12 @@
           /* 接口已只返回单段终局文本，这里直接当 Markdown 渲染 */
           html += renderMd(reply);
           if (contentEl) contentEl.innerHTML = html;
+          if (wrap) {
+            wrap.dataset.plainText = err
+              ? String(err) + "\n" + String(reply || "")
+              : String(reply || "");
+          }
+          syncBranchDialogueCache(activeBranchId);
           if (
             modeVal === "plan" &&
             data.plan_graph &&
@@ -433,6 +589,7 @@
         }
       } catch (err) {
         stopThinkingTimer();
+        if (isStaleRequest()) return;
         if (typeof window.setTexAgentWorkflowActiveNodes === "function") {
           window.setTexAgentWorkflowActiveNodes([]);
         }
@@ -452,6 +609,7 @@
       } finally {
         stopThinkingTimer();
         done();
+        if (isStaleRequest()) return;
         setBusy(false);
         submitLock = false;
         if (input) {
