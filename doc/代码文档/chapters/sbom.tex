@@ -77,18 +77,18 @@ Task/Plan Prompt 注入机制说明 &
 \endhead
 \texttt{core/}（消息/状态/异常） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 扩展 reducer、TeXAgentCLI 完整编排 \\
 \texttt{agents/}（基类骨架） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 实现 SimpleAgent、MultiSimpleAgent、ReflectionAgent \\
-\texttt{workflow/}（基础图） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 条件边、并行节点、registry、run\_dump \\
-\texttt{memory/}（接口） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & BranchMemory、UserPersonaMemory 完整实现 \\
-\texttt{router/} & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & AutoAgentsMASPlanner 完整实现 \\
-\texttt{context/} & 大模型辅助 + 自研 & — & GSSC 流水线、context\_profiles 集成 \\
-\texttt{config/} & 大模型辅助 + 自研 & — & 上下文 Profile、25+ 工作流 JSON、Planner Schema \\
-\texttt{tools/}（arxiv 骨架） & 大模型生成 + 自研 + 复用开源 & \texttt{doc/代码框架要求.md} & 30+ 业务工具（PDF、checklist、LaTeX 等） \\
-\texttt{latex/} & 大模型辅助 + 自研 & 设计文档（见上表） & 完整诊断修复、Ghost、Watch 服务 \\
-\texttt{rag/} & 大模型辅助 + 自研 + 复用开源 & — & ChromaDB 管道、CLI 工具 \\
-\texttt{ui/} & 大模型辅助 + 自研 & — & Web UI、Overleaf、Ghost 前端 \\
-\texttt{cli/}、\texttt{utils/} & 大模型辅助 + 自研 & — & 命令框架、日志、取消控制等 \\
-\texttt{check.py}\newline\texttt{check\_text.py} & 自研 & — & 批量审查脚本 \\
-\texttt{tests/} & 大模型辅助 + 自研 & — & 补充用例、集成测试、夹具维护 \\
+\texttt{workflow/}（工作流和图编排） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 条件边、并行节点、registry、run\_dump \\
+\texttt{memory/}（记忆和用户画像） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & BranchMemory、UserPersonaMemory 完整实现 \\
+\texttt{router/}（路由管理） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & AutoAgentsMASPlanner 完整实现 \\
+\texttt{context/}（上下文管理） & 大模型辅助 + 自研 & — & GSSC 流水线、context\_profiles 集成 \\
+\texttt{config/}（配置管理） & 大模型辅助 + 自研 & — & 上下文 Profile、25+ 工作流 JSON、Planner Schema \\
+\texttt{tools/}（工具集） & 大模型生成 + 自研 + 复用开源 & \texttt{doc/代码框架要求.md} & 30+ 业务工具（PDF、checklist、LaTeX 等） \\
+\texttt{latex/}（LaTeX 诊断修复） & 大模型辅助 + 自研 & 设计文档（见上表） & 完整诊断修复、Ghost、Watch 服务 \\
+\texttt{rag/}（RAG 集成） & 大模型辅助 + 自研 + 复用开源 & — & ChromaDB 管道、CLI 工具 \\
+\texttt{ui/}（Web 界面） & 大模型辅助 + 自研 & — & Web UI、Overleaf、Ghost 前端 \\
+\texttt{cli/}、\texttt{utils/}（命令行工具） & 大模型辅助 + 自研 & — & 命令框架、日志、取消控制等 \\
+\texttt{check.py}\newline\texttt{check\_text.py}（审查脚本） & 自研 & — & 批量审查脚本 \\
+\texttt{tests/}（测试） & 大模型辅助 + 自研 & — & 补充用例、集成测试、夹具维护 \\
 \bottomrule
 \end{longtable}
 
