@@ -1,0 +1,18 @@
+\section{scripts/ — 启动脚本}
+
+\subsection{目录总体作用}
+
+Web UI 启动脚本：子进程运行 \texttt{python -m ui.web.server}（Chat Mode，默认 \texttt{8765}），可选自动打开浏览器。
+Writing Mode（\texttt{ui.overleaf.server}，默认 \texttt{8772}）需单独启动，或由根目录 \texttt{start\_all.bat} 一并拉起。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{start\_texagent\_web.py}]
+    Python 启动器。
+    解析 \texttt{--host}/\texttt{--port}/\texttt{--no-browser}，SIGINT 时终止子进程。
+    关键函数：\texttt{main()}。
+
+    \item[\texttt{start-texagent-web.sh}]
+    Shell 包装：cd 到仓库根目录后 exec Python 脚本。适用于 Linux/macOS/WSL。
+\end{description}

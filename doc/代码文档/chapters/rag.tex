@@ -1,0 +1,46 @@
+\section{rag/ — 检索增强生成}
+
+\subsection{目录总体作用}
+
+RAG 模块：文档加载、分块 $\rightarrow$ ChromaDB 向量化 $\rightarrow$ 语义检索，
+供 \texttt{RAGRetrieveTool} 与工作流 retrieve 节点使用。抽象接口便于 Mock 与替换实现。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{base\_retriever.py}]
+    抽象接口：\texttt{RetrievedDocument}、\texttt{BaseRetriever}、\texttt{BaseRAGPipeline}。
+
+    \item[\texttt{vector\_store.py}]
+    ChromaDB 实现 \texttt{ChromaRetriever}。
+    \texttt{add\_documents()}、\texttt{retrieve()}、\texttt{delete\_by\_ids()}、
+    \texttt{delete\_by\_source()}、\texttt{list\_stored\_page()}。
+
+    \item[\texttt{document\_loader.py}]
+    文本分块与文件加载。
+    \texttt{chunk\_text()}、\texttt{load\_text\_file()}、\texttt{load\_and\_chunk()}。
+
+    \item[\texttt{rag\_pipeline.py}]
+    端到端管道 \texttt{RAGPipeline}。
+    \texttt{index\_text()}、\texttt{index\_file()}、\texttt{retrieve()}、\texttt{clear()}。
+
+    \item[\texttt{document\_parse.py}]
+    Docling 文档解析（PDF 大文件分块等）。
+    \texttt{parse\_document\_to\_dir()}、\texttt{resolve\_source\_path()}。
+
+    \item[\texttt{store\_listing.py}]
+    向量库分页列举数据结构。
+    \texttt{StoredChunkRecord}、\texttt{format\_stored\_chunks\_page()}。
+
+    \item[\texttt{rag\_index\_cli.py}]
+    索引 CLI：\texttt{resolve\_user\_file\_path()}、\texttt{main()}。
+
+    \item[\texttt{rag\_list\_cli.py}]
+    列举向量库 CLI（交互翻页）。
+
+    \item[\texttt{rag\_delete\_cli.py}]
+    按 id/source 删除或清空向量库 CLI。
+
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{RAGPipeline}、\texttt{ChromaRetriever} 等公共接口。
+\end{description}

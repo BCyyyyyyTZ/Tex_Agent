@@ -1,0 +1,154 @@
+\section{latex/ — LaTeX 子系统}
+
+\subsection{目录总体作用}
+
+LaTeX 结构理解与智能诊断修复子系统（阶段 0--10）：
+数据契约、项目扫描、L1/L2/L3 诊断与修复流水线、源码切片、建议应用、
+文件监视与「幽灵窗口」HTTP 服务。与 \texttt{tools/latex\_*} 工具配合形成完整闭环。
+
+\subsection{核心数据与契约}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{models.py}]
+    Pydantic 数据契约：\texttt{DiagnosticIssue}、\texttt{Suggestion}、\texttt{ProjectIndex}、
+    \texttt{LabelDef}、\texttt{RefEntry}、\texttt{BibEntry} 等；\texttt{make\_issue\_id()}。
+
+    \item[\texttt{constants.py}]
+    枚举与 metadata 键：\texttt{Severity}、\texttt{IssueSource}、\texttt{METADATA\_LATEX\_*}。
+
+    \item[\texttt{serialize.py}]
+    JSON 序列化：\texttt{to\_json()}、\texttt{from\_json()}、\texttt{to\_dict()}、\texttt{from\_dict()}。
+
+    \item[\texttt{paths.py}]
+    路径规范化：\texttt{normalize\_rel\_path()}、\texttt{path\_from\_user\_string()}、\texttt{resolve\_tex\_file()}。
+
+    \item[\texttt{coerce\_payload.py}]
+    工具输入 JSON 解析：\texttt{coerce\_json\_payload()}、\texttt{parse\_root\_from\_user\_input()}。
+\end{description}
+
+\subsection{项目扫描与索引}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{project\_index.py}]
+    扫描 .tex 文件图、checksum、main.tex。
+    \texttt{build\_project\_index()}、\texttt{extract\_inputs()}、\texttt{iter\_tex\_files()}。
+
+    \item[\texttt{project\_tree.py}]
+    可视化项目树（含 bib 边）：\texttt{build\_project\_tree()}。
+
+    \item[\texttt{bib\_index.py}]
+    .bib 解析与索引：\texttt{parse\_bib\_file()}、\texttt{build\_bib\_index()}、\texttt{enrich\_bibliography()}。
+
+    \item[\texttt{refs\_index.py}]
+    \texttt{\textbackslash ref}/\texttt{\textbackslash cite} 索引与未定义引用检测。
+    \texttt{extract\_refs\_from\_source()}、\texttt{collect\_undefined\_ref\_issues()}。
+
+    \item[\texttt{conventions\_index.py}]
+    导言区宏/包/版式约定：\texttt{parse\_preamble()}、\texttt{build\_conventions()}。
+\end{description}
+
+\subsection{解析与语法检查}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{single\_file\_parser.py}]
+    单文件解析入口：\texttt{parse\_tex\_source()}、\texttt{parse\_tex\_file()}。
+
+    \item[\texttt{syntax\_check.py}]
+    括号/环境平衡检查：\texttt{check\_syntax()}、\texttt{check\_brace\_balance()}。
+
+    \item[\texttt{structure\_extract.py}]
+    文档结构提取：\texttt{extract\_structure()}。
+
+    \item[\texttt{ast\_parse.py}]
+    LaTeX AST 简化：\texttt{parse\_to\_ast()}。
+
+    \item[\texttt{tex\_source.py}]
+    注释剥离与读文件：\texttt{strip\_comments()}、\texttt{read\_tex\_file()}。
+\end{description}
+
+\subsection{诊断（L1/L2）与合并}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{chktex\_runner.py} / \texttt{chktex\_parser.py}]
+    调用 ChkTeX 并解析输出：\texttt{run\_chktex()}、\texttt{parse\_chktex\_output()}。
+
+    \item[\texttt{latexmk\_runner.py}]
+    调用 latexmk 试编译：\texttt{run\_latexmk()}、\texttt{build\_latexmk\_argv()}。
+
+    \item[\texttt{log\_parser.py}]
+    解析 LaTeX 编译日志：\texttt{parse\_latex\_log()}、\texttt{tail\_log\_text()}。
+
+    \item[\texttt{issues.py}]
+    多源诊断合并去重：\texttt{merge\_issues()}、\texttt{merge\_issue\_lists()}。
+
+    \item[\texttt{diagnose\_io.py}]
+    工具输出 $\leftrightarrow$ 模型转换：\texttt{issues\_from\_tool\_output()}、\texttt{project\_from\_tool\_output()}。
+
+    \item[\texttt{dirty.py}]
+    文件脏状态检测（checksum 变化）：\texttt{compute\_file\_dirty()}。
+\end{description}
+
+\subsection{切片、修复与建议}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{slice.py}]
+    按 issue 切片源码上下文：\texttt{slice\_around\_issue()}、\texttt{slice\_issues()}。
+
+    \item[\texttt{fix\_batch.py}]
+    L3 修复批次组装：\texttt{select\_error\_issues()}、\texttt{build\_fix\_batch()}。
+
+    \item[\texttt{prompt\_builder.py}]
+    修复 prompt 构建：\texttt{build\_fix\_prompt()}、\texttt{collect\_ref\_context\_snippets()}。
+
+    \item[\texttt{fix\_agent\_prompt.py}]
+    L3 fix\_agent 系统提示常量 \texttt{LATEX\_FIX\_AGENT\_SYSTEM\_PROMPT}。
+
+    \item[\texttt{polish\_prompt.py} / \texttt{ghost\_polish\_prompt.py}]
+    润色 prompt 构建（含幽灵窗口专用）。
+
+    \item[\texttt{suggestion.py}]
+    LLM 输出 $\rightarrow$ \texttt{Suggestion}。
+    \texttt{parse\_llm\_suggestion\_json()}、\texttt{parse\_llm\_suggestions\_from\_agent\_result()}。
+
+    \item[\texttt{apply\_edit.py}]
+    将建议应用到 .tex：\texttt{apply\_suggestion\_to\_file()}、\texttt{offset\_from\_position()}。
+
+    \item[\texttt{apply\_compare.py}]
+    对比模式应用建议（保留旧文为注释）：\texttt{apply\_suggestion\_compare\_to\_file()}。
+\end{description}
+
+\subsection{监视与幽灵窗口}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{watch\_events.py}]
+    监视事件模型：\texttt{WatchSnapshot}、\texttt{WatchEvent}。
+
+    \item[\texttt{watch\_service.py}]
+    目录监视 + 自动诊断/修复：\texttt{LatexWatchHandler}、\texttt{WatchService}。
+
+    \item[\texttt{ghost\_watch\_policy.py}]
+    幽灵窗口监视策略（静默窗口、跳过 LLM）：\texttt{GhostWatchPolicy}。
+
+    \item[\texttt{ghost\_server.py}]
+    FastAPI 幽灵窗口 HTTP 服务：\texttt{create\_ghost\_app()}、\texttt{run\_ghost\_server()}。
+
+    \item[\texttt{ghost\_cli.py} / \texttt{watch\_cli.py}]
+    幽灵服务与监视 CLI 入口：\texttt{main()}。
+\end{description}
+
+\subsection{环境与导出}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{tex\_env.py}]
+    TeX 环境探测：\texttt{probe\_tex\_env()}、\texttt{TexEnvStatus}。
+
+    \item[\texttt{\_\_init\_\_.py}]
+    公共 API 聚合导出（models、index、slice 等）。
+\end{description}
+
+\subsection{LaTeX 诊断修复流水线}
+
+\begin{center}
+项目扫描 $\rightarrow$ L1(ChkTeX) + L2(latexmk) + 语法检查 $\rightarrow$ 合并去重
+$\rightarrow$ 切片 $\rightarrow$ L3 LLM 修复 $\rightarrow$ 应用建议
+\end{center}

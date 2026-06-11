@@ -1,0 +1,72 @@
+\section{workflow/ — 工作流引擎}
+
+\subsection{目录总体作用}
+
+工作流引擎核心：解析 JSON/YAML/TaskPlan 配置，构建 LangGraph 图，
+创建节点函数，处理条件边与并行汇聚，驱动整个 MAS 执行流程。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    对外 API：\texttt{build\_app\_from\_workflow}、\texttt{build\_dynamic\_graph}、
+    \texttt{ConditionExpr}、\texttt{YAMLWorkflowParser} 等。
+
+    \item[\texttt{workflow\_parser.py}]
+    JSON/YAML/TaskPlan $\rightarrow$ 节点/边配置。
+    \begin{itemize}
+        \item \texttt{NodeConfig}、\texttt{EdgeConfig}：节点与边数据类
+        \item \texttt{YAMLWorkflowParser}：解析静态工作流 JSON
+        \item \texttt{\_translate\_plan\_to\_graph\_config()}：TaskPlan 转图配置
+    \end{itemize}
+
+    \item[\texttt{graph\_builder.py}]
+    LangGraph 构图主入口。
+    \begin{itemize}
+        \item \texttt{build\_dynamic\_graph()}：从节点/边列表构建 StateGraph
+        \item \texttt{build\_app\_from\_workflow()}：从工作流名或配置构建可 invoke 的 app
+        \item \texttt{load\_workflow\_graph\_config()}：从 registry 加载图配置
+        \item \texttt{\_register\_conditional\_edges()}、\texttt{\_build\_agent\_instance()}
+    \end{itemize}
+
+    \item[\texttt{nodes.py}]
+    节点工厂（v2 增量 delta 写回）。
+    \begin{itemize}
+        \item \texttt{make\_agent\_node()}：Agent 节点
+        \item \texttt{make\_tool\_node()}：工具节点
+        \item \texttt{make\_user\_node()}：HITL 人机反馈节点
+        \item \texttt{make\_parallel\_fork\_node()} / \texttt{make\_parallel\_join\_node()}：并行分叉/汇聚
+        \item \texttt{\_finalize\_node\_state()}：节点执行后状态写回核心逻辑
+    \end{itemize}
+
+    \item[\texttt{condition\_evaluator.py}]
+    条件边统一求值。
+    \begin{itemize}
+        \item \texttt{ConditionExpr}：条件表达式数据类
+        \item \texttt{evaluate\_condition()}、\texttt{route\_by\_conditions()}
+    \end{itemize}
+
+    \item[\texttt{parallel\_merger.py}]
+    并行分支汇聚策略。
+    \begin{itemize}
+        \item \texttt{JoinPolicy}（enum）、\texttt{BranchResult}、\texttt{MergedResult}
+        \item \texttt{merge\_parallel\_results()}
+    \end{itemize}
+
+    \item[\texttt{workflow\_registry.py}]
+    从 \texttt{workflow\_registry.json} 加载工作流。
+    \texttt{WorkflowRegistry}：\texttt{list\_workflows()}、\texttt{get\_workflow\_spec()}、\texttt{load\_graph\_config()}。
+
+    \item[\texttt{run\_dump.py}]
+    单次运行节点 I/O 落盘（调试用）。
+    \texttt{create\_run\_output\_dir()}、\texttt{write\_node\_trace()}。
+\end{description}
+
+\subsection{节点类型}
+
+\begin{itemize}[leftmargin=2em]
+    \item \texttt{agent} — LLM Agent 推理
+    \item \texttt{tool} — 工具调用（如 arxiv\_search、latex\_project）
+    \item \texttt{user} — 人机交互（HITL）
+    \item \texttt{parallel\_fork} / \texttt{parallel\_join} — 并行分叉与汇聚
+\end{itemize}

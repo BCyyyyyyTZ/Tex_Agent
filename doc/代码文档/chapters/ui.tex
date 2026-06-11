@@ -1,0 +1,90 @@
+\section{ui/ — 用户界面层}
+
+\subsection{目录总体作用}
+
+所有用户界面：主 Web 聊天 UI（FastAPI + 静态页）、Overleaf 风格 LaTeX 编辑器、
+LaTeX「幽灵窗口」浮层。负责启动后自动开浏览器、文件上传存储、工作流可视化编排等。
+
+\subsection{ui/web/ — 主 Web 服务}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{server.py}]
+    \textbf{主 Web 服务}（FastAPI，默认端口 8765）。
+    \begin{itemize}
+        \item \texttt{TeXAgentWebUI}：继承 \texttt{TeXAgentCLI}，Web 模式编排
+        \item \texttt{create\_app()}：FastAPI 应用工厂
+        \item 核心 API：\texttt{POST /api/chat}（Task/Plan/流式）、
+              \texttt{GET/POST /api/branches}、\texttt{GET/PUT /api/workflow/draft}、
+              \texttt{GET/POST /api/storage/pdfs}、\texttt{/api/rag/*}、\texttt{/api/latex/watch*}、
+              \texttt{/api/drawing/*}
+    \end{itemize}
+
+    \item[\texttt{ide\_launch.py}]
+    服务启动后自动打开聊天页。
+    \texttt{schedule\_open\_ide()}、\texttt{open\_ide\_window()}、\texttt{default\_open\_chat\_after\_start()}。
+
+    \item[\texttt{browser\_open.py}]
+    跨平台打开 HTTP 链接（WSL 优先走 Windows 侧）：\texttt{open\_http\_url()}。
+
+    \item[\texttt{file\_storage.py}]
+    上传文件按类别存入 \texttt{storage/\{pdfs,skills,checklists,documents\}/}。
+    \texttt{category\_dir()}、\texttt{unique\_stored\_path()}、\texttt{resolve\_safe\_path()}。
+
+    \item[\texttt{pdf\_storage.py}]
+    旧 PDF 导入兼容层，委托 \texttt{file\_storage}。
+
+    \item[\texttt{conferences\_data.py}]
+    顶会投稿日历：\texttt{load\_conferences\_config()}、\texttt{list\_deadlines()}。
+\end{description}
+
+\subsection{ui/web/static/ — 主 Web 前端}
+
+\begin{longtable}{@{}p{0.35\textwidth}p{0.57\textwidth}@{}}
+\toprule
+\textbf{文件} & \textbf{说明} \\
+\midrule
+\endhead
+\texttt{index.html} & 主页面骨架（RAG/工作流/分支/聊天/资料五栏布局） \\
+\texttt{app.js} & 核心聊天逻辑：\texttt{/api/chat} 流式、Markdown 渲染、模式切换 \\
+\texttt{workflow\_builder.js} & 左侧工作流 DAG 编辑器，读写 \texttt{/api/workflow/draft} \\
+\texttt{branch\_graph.js} & 对话分支 SVG 树，调用 \texttt{/api/branches} \\
+\texttt{rag\_assets.js} & RAG 索引/查询/记录管理 UI \\
+\texttt{web\_assets.js} & 文件上传面板，维护 \texttt{active\_*} 供聊天引用 \\
+\texttt{drawing\_tools.js} & 独立工具箱弹窗（图表、LaTeX 表格、配色、QR 等） \\
+\texttt{conferences\_calendar.js} & 顶会日历浮层 \\
+\texttt{user\_settings.js} & 主题/用户偏好（localStorage） \\
+\texttt{panel\_toggles.js} & 侧栏显隐控制 \\
+\texttt{layout\_resizer.js} & 五列布局拖拽调宽 \\
+\texttt{styles.css} 等 & 全局与组件样式 \\
+\texttt{vendor/*.min.js} & 第三方库（marked、DOMPurify、highlight） \\
+\bottomrule
+\end{longtable}
+
+\subsection{ui/overleaf/ — LaTeX 编辑器}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{server.py}]
+    Overleaf 风格 LaTeX 编辑器服务（FastAPI，默认端口 8772）：项目/模板 CRUD、编译 PDF、Agent 润色、论文生成。
+    \texttt{create\_app()}、\texttt{\_scan\_files()}、\texttt{PolishBody}、\texttt{GenerateBody}。
+
+    \item[\texttt{thesis\_generator.py}]
+    用 \texttt{SimpleAgent} 根据大纲生成英文 thesis \texttt{main.tex}。
+    \texttt{generate\_thesis\_project()}、\texttt{\_build\_generation\_prompt()}。
+
+    \item[\texttt{static/}]
+    编辑器前端：\texttt{index.html}（项目列表）、\texttt{editor.html/js/css}（源码+PDF 预览）、
+    \texttt{vendor/pdf.min.js}（PDF.js）。
+\end{description}
+
+\subsection{ui/ghost/ — 幽灵窗口}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{index.html}]
+    LaTeX Watch 实时建议/修复卡片浮层页面。
+
+    \item[\texttt{ghost.js}]
+    轮询 Watch API、展示行级建议、应用修复。
+
+    \item[\texttt{ghost.css}]
+    幽灵窗口样式。
+\end{description}

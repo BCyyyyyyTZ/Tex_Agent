@@ -1,0 +1,198 @@
+\section{软件 SBOM 清单}
+
+本节按软件物料清单（SBOM）要求，说明各模块的\textbf{来源分类}、\textbf{大模型 Prompt 溯源}、
+\textbf{人工加工说明}及\textbf{第三方开源依赖}。
+
+\subsection{来源分类说明}
+
+本项目代码来源分为四类：
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[自研]
+    项目组成员在仓库中独立设计并实现的功能代码。
+
+    \item[大模型生成]
+    依据 \texttt{doc/} 目录下 Prompt 文档及其他辅助说明性文字，由大语言模型生成的\textbf{初始项目骨架}与接口占位代码。
+
+    \item[大模型辅助生成]
+    在大模型建议或草稿基础上，由成员审核、测试、修改后纳入仓库的代码。
+
+    \item[复用开源]
+    通过 \texttt{requirements.txt} 引入的第三方 Python 库，或前端 vendor 目录中的开源 JS 库。
+\end{description}
+
+\subsection{大模型生成内容与 Prompt 溯源}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.20\textwidth}>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.36\textwidth}@{}}
+\toprule
+\textbf{生成内容} & \textbf{Prompt / 设计文档} & \textbf{说明} \\
+\midrule
+\endhead
+系统总体目录结构与初始框架骨架 &
+\texttt{doc/代码框架要求.md} &
+要求大模型输出目录树、README、可运行 MVP 及标注 \texttt{[扩展]} 的接口占位。
+关联背景：\texttt{doc/论文写作协作智能体开发项目计划.md}。 \\
+
+多智能体工作流基础图结构 &
+\texttt{doc/代码框架要求.md}（第一节 LangGraph Workflow） &
+含 Design$\rightarrow$Think$\rightarrow$Execute 链式节点、\texttt{WorkflowState}、节点包装器。 \\
+
+Agent / Tool / Memory / Router 抽象基类 &
+\texttt{doc/代码框架要求.md}（第二至六节） &
+\texttt{ReActAgent}、\texttt{PlanAndSolveAgent}、\texttt{BaseRouter} 等
+\texttt{[扩展]} 占位接口。 \\
+
+\texttt{tests/} 单元测试文件 &
+无独立 Prompt 存档（大模型辅助生成） &
+测试骨架由大模型辅助产出，成员后续补充用例、修正断言并用于回归验证。 \\
+
+LaTeX 子系统设计方案（非直接代码生成） &
+\texttt{doc/TeX\_Agent 核心系统设计方案：}\newline
+\texttt{LaTeX 结构理解与智能诊断体系.md} &
+作为 \texttt{latex/} 子系统的设计依据；具体实现为成员自研。 \\
+
+Task/Plan Prompt 注入机制说明 &
+\texttt{doc/prompt\_injection\_map\_}\newline\texttt{task\_plan.md} &
+记录 \texttt{task} 与 \texttt{plan} 链路中 Prompt 拼接与注入位置（审计文档，非代码生成 Prompt）。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{人工加工与演进说明}
+
+大模型仅提供\textbf{可运行的最小骨架}与\textbf{扩展接口占位}；项目的实际业务能力均由小组成员在此基础上人工开发完成（部分有大模型辅助，但后续提交的代码都经过开发人员人工审核和测试）：
+
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{框架填充与扩展}：大模型最初生成的代码框架仅作示意，方便成员预先了解可能的接口，便于并行开发，后续开发过程中开发者会根据实际情况修改和扩展最初的框架（并同步给其他开发者）。在 \texttt{SimpleAgent}、\texttt{workflow/nodes.py}、\texttt{graph\_builder.py} 等大模型骨架上，实现了条件边、并行分叉/汇聚、Web 自定义工作流、Plan 模式动态构图等完整框架能力。
+    \item \textbf{业务功能自研}：LaTeX 诊断修复流水线、论文 checklist 审查、Ghost 幽灵窗口、Overleaf 编辑器、latex 论文写作、RAG 集成、Web 辅助工具等均为按需求独立开发。
+    \item \textbf{测试与纠错}：\texttt{tests/} 中大模型辅助生成的测试文件，经成员人工审阅后用于\textbf{功能验证与辅助纠错}，并非直接可交付的运行时代码。
+    \item \textbf{大模型辅助}：团队开发中仍会使用大模型进行辅助开发或辅助编写代码，但大模型生成的代码均会被人工第一时间审核和测试，确保代码质量和功能正确性。
+\end{enumerate}
+
+\subsection{按目录来源标注总表}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.21\textwidth}>{\raggedright\arraybackslash}p{0.12\textwidth}>{\raggedright\arraybackslash}p{0.25\textwidth}>{\raggedright\arraybackslash}p{0.31\textwidth}@{}}
+\toprule
+\textbf{目录/模块} & \textbf{来源} & \textbf{Prompt 溯源} & \textbf{人工加工要点} \\
+\midrule
+\endhead
+\texttt{core/}（消息/状态/异常） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 扩展 reducer、TeXAgentCLI 完整编排 \\
+\texttt{agents/}（基类骨架） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 实现 SimpleAgent、MultiSimpleAgent、ReflectionAgent \\
+\texttt{workflow/}（基础图） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & 条件边、并行节点、registry、run\_dump \\
+\texttt{memory/}（接口） & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & BranchMemory、UserPersonaMemory 完整实现 \\
+\texttt{router/} & 大模型生成 + 自研 & \texttt{doc/代码框架要求.md} & AutoAgentsMASPlanner 完整实现 \\
+\texttt{context/} & 大模型辅助 + 自研 & — & GSSC 流水线、context\_profiles 集成 \\
+\texttt{config/} & 大模型辅助 + 自研 & — & 上下文 Profile、25+ 工作流 JSON、Planner Schema \\
+\texttt{tools/}（arxiv 骨架） & 大模型生成 + 自研 + 复用开源 & \texttt{doc/代码框架要求.md} & 30+ 业务工具（PDF、checklist、LaTeX 等） \\
+\texttt{latex/} & 大模型辅助 + 自研 & 设计文档（见上表） & 完整诊断修复、Ghost、Watch 服务 \\
+\texttt{rag/} & 大模型辅助 + 自研 + 复用开源 & — & ChromaDB 管道、CLI 工具 \\
+\texttt{ui/} & 大模型辅助 + 自研 & — & Web UI、Overleaf、Ghost 前端 \\
+\texttt{cli/}、\texttt{utils/} & 大模型辅助 + 自研 & — & 命令框架、日志、取消控制等 \\
+\texttt{check.py}\newline\texttt{check\_text.py} & 自研 & — & 批量审查脚本 \\
+\texttt{tests/} & 大模型辅助 + 自研 & — & 补充用例、集成测试、夹具维护 \\
+\bottomrule
+\end{longtable}
+
+\subsection{第三方开源依赖清单}
+
+以下依赖来自 \texttt{requirements.txt}，按功能分组列出（版本约束以文件为准）。
+
+\subsubsection{工作流与 LLM 框架}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{langgraph} & 0.2.0 & 多智能体工作流图编排引擎 \\
+\texttt{langchain} & 0.3.0 & LLM 应用框架（辅助） \\
+\texttt{langchain-openai} & 0.2.0 & OpenAI 兼容 API 接入 \\
+\texttt{langchain-core} & 0.3.0 & LangChain 核心抽象 \\
+\texttt{pydantic} & 2.0.0 & 数据模型校验（WorkflowMessage、LaTeX 模型等） \\
+\texttt{python-dotenv} & 1.0.0 & \texttt{.env} 环境变量加载 \\
+\texttt{google-genai} & 1.0.0 & Gemini 多模态 API \\
+\texttt{httpx} & 0.27.0 & 异步 HTTP 客户端 \\
+\texttt{arxiv} & 2.1.0 & arXiv 文献检索 API \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{Web 服务}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{fastapi} & 0.110.0 & Web UI / Overleaf / Ghost HTTP 服务 \\
+\texttt{uvicorn[standard]} & 0.27.0 & ASGI 服务器 \\
+\texttt{anyio} & 4.0.0 & 异步 I/O 兼容层 \\
+\texttt{python-multipart} & 0.0.9 & 文件上传解析 \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{RAG 与向量检索}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{chromadb} & 0.5.0 & 本地向量数据库（RAG 持久化） \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{LaTeX 诊断}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{pylatexenc} & 2.10 & LaTeX 源码解析辅助 \\
+\texttt{watchdog} & 4.0.0 & 目录文件监视（Ghost / Watch 服务） \\
+\multicolumn{3}{l}{\textit{系统级依赖（非 pip）：TeX Live / MiKTeX、latexmk、chktex}} \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{PDF 与文档解析}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{pymupdf} & 1.24.0 & PDF 文本快速提取 \\
+\texttt{pypdf} & 4.2.0 & PDF 读取 \\
+\texttt{pdfplumber} & 0.11.0 & PDF 版面分析 \\
+\texttt{PyPDF2} & 3.0.0 & PDF 读取（兼容） \\
+\texttt{python-docx} & 1.1.0 & Word 文档读取 \\
+\texttt{docling} & 2.0 & 文档结构化解析（PDF$\rightarrow$MD+JSON） \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{可视化、工具与测试}
+
+\begin{longtable}{@{}p{0.32\textwidth}p{0.14\textwidth}p{0.44\textwidth}@{}}
+\toprule
+\textbf{包名} & \textbf{最低版本} & \textbf{本项目用途} \\
+\midrule
+\endhead
+\texttt{matplotlib} & 3.8.0 & Web 工具箱图表绘制 \\
+\texttt{qrcode[pil]} & 7.4.0 & 二维码生成 \\
+\texttt{pytest} & 7.0.0 & 单元/集成测试框架 \\
+\texttt{pytest-asyncio} & 0.21.0 & 异步测试支持 \\
+\bottomrule
+\end{longtable}
+
+\subsubsection{前端 vendor 开源库（非 pip）}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.50\textwidth}@{\hspace{3mm}}>{\raggedright\arraybackslash}p{0.44\textwidth}@{}}
+\toprule
+\textbf{文件} & \textbf{用途} \\
+\midrule
+\endhead
+\toolfile{ui/web/static/vendor/marked.min.js} & Markdown 渲染 \\
+\toolfile{ui/web/static/vendor/purify.min.js} & HTML 消毒（XSS 防护） \\
+\toolfile{ui/web/static/vendor/highlight.min.js} & 代码语法高亮 \\
+\toolfile{ui/overleaf/static/vendor/pdf.min.js} & PDF.js 预览 \\
+\bottomrule
+\end{longtable}

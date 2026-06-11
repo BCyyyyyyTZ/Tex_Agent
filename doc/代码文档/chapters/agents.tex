@@ -1,0 +1,45 @@
+\section{agents/ — 智能体实现层}
+
+\subsection{目录总体作用}
+
+所有 Agent 继承 \texttt{BaseAgent}，对外统一 \texttt{run()} / \texttt{ainvoke()} / \texttt{reset()} 接口。
+工作流节点（\texttt{workflow/nodes.py}）按节点配置中的 \texttt{agent\_type} 实例化对应 Agent 并调用。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    包入口，导出 \texttt{BaseAgent}、\texttt{SimpleAgent}、\texttt{SimpleAgent\_new}。
+
+    \item[\texttt{base\_agent.py}]
+    抽象基类与 LLM 客户端封装。
+    \begin{itemize}
+        \item \texttt{AgentMemory} / \texttt{AgentMemoryItem}：运行时内存
+        \item \texttt{LlmClient}：OpenAI 兼容 API 客户端，\texttt{response(prompt, attachments)}
+        \item \texttt{GeminiClient}：Google Gemini 客户端，支持并行上传文件
+        \item \texttt{BaseAgent}：\texttt{set\_llm()}、\texttt{call\_tool()}、\texttt{run()}（抽象）、\texttt{ainvoke()}
+    \end{itemize}
+
+    \item[\texttt{simple\_agent.py}]
+    \textbf{当前主力 Agent}：纯 LLM 推理，工具由 workflow 的 tool 节点处理。
+    \begin{itemize}
+        \item \texttt{SimpleAgent.run()}：拼接历史消息、调用 LLM、返回 \texttt{WorkflowMessage}
+        \item \texttt{\_build\_history\_messages()}、\texttt{\_trim\_history()}：有界历史管理
+        \item \texttt{\_append\_llm\_trace()}：写入 \texttt{logs/llm\_interactions\_trace.txt}
+    \end{itemize}
+
+    \item[\texttt{multi\_simple\_agent.py}]
+    Gemini 多模态 Agent，支持 PDF 附件上传与 \texttt{generate\_content()}。
+    关键：\texttt{\_upload\_local\_pdf()}、\texttt{\_normalize\_attachments()}。
+
+    \item[\texttt{reflection\_agent.py}]
+    反思迭代 Agent：Generate $\rightarrow$ Reflect $\rightarrow$ Refine，最多 3 轮。
+    内嵌 \texttt{SimpleAgent} 作为执行器。
+
+    \item[\texttt{specified\_agents/paper\_check\_agent.py}]
+    论文 PDF 合规检查专用 Agent。
+    \begin{itemize}
+        \item \texttt{PaperCheckAgent}：从 \texttt{rules\_path} 加载检查规则注入 system prompt
+        \item \texttt{paper\_check()}：解析 \texttt{BEGIN [...] END} JSON 问题列表，调用 \texttt{pdf\_comment} 工具标注
+    \end{itemize}
+\end{description}

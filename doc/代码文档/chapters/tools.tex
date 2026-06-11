@@ -1,0 +1,80 @@
+\section{tools/ — 可插拔工具层}
+
+\subsection{目录总体作用}
+
+所有工具继承 \texttt{BaseTool}，通过 \texttt{tool\_list.py} 统一注册，
+供工作流 tool 节点按名称实例化调用。工具与 Agent 解耦，可选依赖缺失时单工具跳过。
+
+\subsection{基础设施}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{base\_tool.py}]
+    工具抽象基类 \texttt{BaseTool}：\texttt{run()} / \texttt{arun()}。
+
+    \item[\texttt{tool\_list.py}]
+    工具注册表与构图过滤。
+    \texttt{tool\_list} 字典、\texttt{build\_tools\_for\_graph\_node()}、\texttt{\_safe\_instantiate()}。
+
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{BaseTool}、\texttt{ToolResult}。
+
+    \item[\texttt{web\_tool\_utils.py}]
+    Web 工具箱输出路径辅助（输出目录、唯一文件名）。
+\end{description}
+
+\subsection{已注册工具（workflow 可用）}
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.27\textwidth}@{\hspace{2mm}}>{\raggedright\arraybackslash}p{0.69\textwidth}@{}}
+\toprule
+\textbf{文件} & \textbf{说明与关键类} \\
+\midrule
+\endhead
+\toolfile{arxiv\_tool.py} & arXiv HTTP API 论文检索。\texttt{ArxivSearchTool}、\texttt{ArxivPaper}。 \\
+\toolfile{pdf\_comment\_tool.py} & PDF 批量高亮/批注。\texttt{PdfCommentTool}。 \\
+\toolfile{file\_loading\_tool.py} & 读取本地文件（含 PDF 文本）。\texttt{FileLoadingTool}。 \\
+\toolfile{command\_running\_tool.py} & 执行 shell 命令。\texttt{CommandRunningTool}。 \\
+\toolfile{docling\_tool.py} & Docling 文档解析为 MD+JSON。\texttt{DoclingParseTool}。 \\
+\toolfile{docling\_search\_tool.py} & 在 Docling JSON 中本地搜索页码。\texttt{DoclingSearchTool}。 \\
+\toolfile{markdown\_section\_tool.py} & 按章节标题提取 Markdown 段落。\texttt{MarkdownSectionTool}。 \\
+\toolfile{pymupdf\_parse\_tool.py} & PyMuPDF 快速 PDF 文本提取。\texttt{PyMuPDFParseTool}。 \\
+\toolfile{thesis\_outline\_extract\_tool.py} & 按 PDF 目录提取大纲/章节正文。\texttt{ThesisOutlineExtractTool}。 \\
+\toolfile{thesis\_chapter\_route\_tool.py} & 根据 outline 生成六路章节路由。\texttt{ThesisChapterRouteTool}。 \\
+\toolfile{checklist\_prepare\_tool.py} & 将 checklist 切分为 6 份审查包。\texttt{ChecklistPrepareTool}。 \\
+\toolfile{chapter\_index\_tool.py} & Markdown 章节结构索引。\texttt{ChapterIndexTool}。 \\
+\toolfile{ref\_checker\_tool.py} & 参考文献规范性检查。\texttt{RefCheckerTool}。 \\
+\toolfile{references\_slice\_and\_docling\_tool.py} & 切参考文献页 + Docling 解析。 \\
+\toolfile{figure\_ref\_checker\_tool.py} & 图/表/算法/公式交叉引用检查。\texttt{FigureRefCheckerTool}。 \\
+\toolfile{rag\_retrieve\_tool.py} & 向量知识库语义检索。\texttt{RAGRetrieveTool}。 \\
+\toolfile{register\_inputs\_tool.py} & 解析工作流输入（PDF/checklist 路径）。\texttt{RegisterInputsTool}。 \\
+\toolfile{preflight\_inputs\_tool.py} & 预检工作流输入依赖是否就绪。\texttt{PreflightInputsTool}。 \\
+\toolfile{gemini\_upload\_pdf\_tool.py} & 上传 PDF 到 Gemini Files API。\texttt{GeminiUploadPdfTool}。 \\
+\toolfile{offer\_artifact\_download\_tool.py} & Web UI 本地下载 token 登记。 \\
+\toolfile{latex\_project\_tool.py} & 扫描 LaTeX 项目构建 \texttt{ProjectIndex}。\texttt{LatexProjectTool}。 \\
+\toolfile{latex\_parser.py} & 单文件语法检查/结构/AST。\texttt{LaTeXParserTool}。 \\
+\toolfile{chktex\_tool.py} & ChkTeX 静态诊断（L1）。\texttt{ChkTeXTool}。 \\
+\toolfile{latexmk\_tool.py} & latexmk 试编译 + log 诊断（L2）。\texttt{LatexmkTool}。 \\
+\toolfile{latex\_slice\_tool.py} & 按诊断 issue 切片源码上下文。\texttt{LatexSliceTool}。 \\
+\toolfile{latex\_merge\_tool.py} & 合并多源诊断 + 未定义引用。\texttt{LatexMergeTool}。 \\
+\toolfile{latex\_report\_tool.py} & 汇总诊断工作流终态 JSON。\texttt{LatexReportTool}。 \\
+\toolfile{latex\_fix\_prepare\_tool.py} & 为 L3 修复 Agent 组装 prompt 批次。\texttt{LatexFixPrepareTool}。 \\
+\toolfile{latex\_collect\_suggestions\_tool.py} & 解析 fix\_agent 输出为 \texttt{Suggestion}。 \\
+\toolfile{user\_persona\_tools.py} & 入口节点用户画像写库工具族。
+\texttt{UserPersonaGetTool}、\texttt{UserPersonaSetTool}、\texttt{build\_user\_persona\_tools()}。 \\
+\bottomrule
+\end{longtable}
+
+\subsection{未注册 / Web 独立工具}
+
+以下工具存在但未进入 \texttt{tool\_list}，主要由 Web 工具箱 API（\texttt{/api/drawing/*}）直接调用：
+
+\begin{itemize}[leftmargin=2em]
+    \item \texttt{concept\_diagram\_tool.py} — 概念图生成
+    \item \texttt{chart\_plot\_tool.py} — 图表绘制
+    \item \texttt{image\_gen\_tool.py} — 图像生成（预留）
+    \item \texttt{visualization\_tool.py} — 学术图表（预留）
+    \item \texttt{palette\_tool.py} — 配色方案
+    \item \texttt{latex\_table\_tool.py} — LaTeX 表格模板
+    \item \texttt{paper\_title\_tool.py} — 论文标题灵感
+    \item \texttt{text\_stats\_tool.py} — 文本统计
+    \item \texttt{qrcode\_tool.py} — 二维码生成
+\end{itemize}

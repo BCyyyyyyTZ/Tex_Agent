@@ -1,0 +1,29 @@
+\section{cli/ — 终端命令框架}
+
+\subsection{目录总体作用}
+
+终端 REPL 的命令模式框架：命令注册、解析、分支管理与任务执行。
+由 \texttt{core/agent\_cli.py} 的 \texttt{TeXAgentCLI} 引用。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{commands.py}]
+    命令抽象与注册表。
+    \begin{itemize}
+        \item \texttt{Command(ABC)}：命令抽象基类，\texttt{execute()}、\texttt{get\_help()}
+        \item \texttt{CommandRegistry}：\texttt{register()}、\texttt{find\_command()}、\texttt{execute()}、\texttt{show\_help()}
+    \end{itemize}
+
+    \item[\texttt{branch\_commands.py}]
+    对话分支 CLI 命令。
+    \texttt{ListBranchesCommand}、\texttt{CreateBranchCommand}、\texttt{SwitchBranchCommand}、
+    \texttt{MergeBranchCommand}、\texttt{ShowBranchCommand}。
+    \texttt{BRANCH\_COMMANDS}、\texttt{BRANCH\_ALIASES}。
+
+    \item[\texttt{task\_commands.py}]
+    任务/系统 CLI 命令。
+    \texttt{TaskCommand}（解析 \texttt{-wf}/\texttt{-b} 参数）、
+    \texttt{StatusCommand}、\texttt{ClearCommand}、\texttt{ExitCommand}、\texttt{HelpCommand}。
+    \texttt{get\_task\_commands()}。
+\end{description}

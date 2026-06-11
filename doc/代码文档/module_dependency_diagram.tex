@@ -1,0 +1,44 @@
+% 模块依赖关系图（独立导出）
+% 编译：xelatex module_dependency_diagram.tex
+\documentclass[tikz,border=12pt]{standalone}
+
+\usepackage{ctex}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta}
+
+\begin{document}
+\begin{tikzpicture}[
+    node distance=1.1cm and 1.6cm,
+    box/.style={draw, rounded corners, minimum width=2.6cm, minimum height=0.7cm,
+                align=center, font=\small},
+    arr/.style={-{Stealth[length=2mm]}, thick, gray!70}
+]
+\node[box, fill=blue!8]  (entry)  {入口层\\\texttt{main}/\texttt{ui}/\texttt{check*}};
+\node[box, fill=green!8, below=of entry] (core) {编排核心\\\texttt{core/}};
+\node[box, fill=green!8, left=2.2cm of core] (config) {配置层\\\texttt{config/}};
+\node[box, fill=orange!10, below=of core] (wf) {工作流引擎\\\texttt{workflow/}};
+\node[box, fill=yellow!12, below left=1.0cm and 0.3cm of wf] (agents) {智能体\\\texttt{agents/}};
+\node[box, fill=yellow!12, below=1.0cm of wf] (tools) {工具层\\\texttt{tools/}};
+\node[box, fill=yellow!12, below right=1.0cm and 0.3cm of wf] (ctx) {上下文/记忆/RAG\\\texttt{context/}\texttt{memory/}\texttt{rag/}};
+\node[box, fill=purple!8, right=2.4cm of wf] (router) {规划路由\\\texttt{router/}};
+\node[box, fill=red!8, below=2.0cm of tools] (latex) {LaTeX 子系统\\\texttt{latex/}};
+\node[box, fill=gray!10, left=2.0cm of latex] (tests) {测试\\\texttt{tests/}};
+
+\draw[arr] (entry) -- (core);
+\draw[arr] (config) -- (core);
+\draw[arr] (config) -- (wf);
+\draw[arr] (core) -- (wf);
+\draw[arr] (wf) -- (agents);
+\draw[arr] (wf) -- (tools);
+\draw[arr] (wf) -- (ctx);
+\draw[arr] (router) -- (wf);
+\draw[arr] (tools) -- (latex);
+\draw[arr] (tools) -- (ctx);
+\draw[arr] (agents) -- (tools);
+\draw[arr] (entry) -- (latex);
+\draw[arr, dashed] (tests.east) -- (latex.west);
+\draw[arr, dashed] (tests.35) -- (tools.235);
+\draw[arr, dashed] (tests.60) -- (wf.255);
+\draw[arr, dashed] (tests.120) -- (ctx.210);
+\end{tikzpicture}
+\end{document}

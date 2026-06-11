@@ -1,0 +1,34 @@
+\section{context/ — 上下文管理}
+
+\subsection{目录总体作用}
+
+为 Agent 节点提供统一上下文接口，实现 GSSC 流水线
+（Gather / Select / Structure / Compress），
+将对话历史、RAG 检索结果、metadata 链、长期记忆拼装为 LLM Prompt。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{BaseContext}、\texttt{ContextManager}。
+
+    \item[\texttt{base.py}]
+    上下文抽象基类 \texttt{BaseContext}：\texttt{save()}、\texttt{load()}、\texttt{clear()}、\texttt{build()}。
+
+    \item[\texttt{context\_manager.py}]
+    默认内存上下文实现 \texttt{ContextManager}。
+    \begin{itemize}
+        \item \texttt{build()} 四阶段流程：
+        \begin{enumerate}
+            \item Gather：从 \texttt{state.messages}、\texttt{retrieved\_context}、memory 检索
+            \item Select：按 \texttt{history\_mode}（full/minimal）、\texttt{context\_profile} 过滤
+            \item Structure：XML 风格块（\texttt{<context type='...'>}）
+            \item Compress：按 \texttt{max\_tokens} 截断
+        \end{enumerate}
+        \item \texttt{format\_metadata\_chain\_for\_prompt()}：格式化 metadata 链
+    \end{itemize}
+
+    \item[\texttt{context\_policy.py}]
+    兼容层，重导出 \texttt{config.context\_settings} 中的策略函数：
+    \texttt{should\_persona\_file\_write()}、\texttt{is\_echo\_task()} 等。
+\end{description}

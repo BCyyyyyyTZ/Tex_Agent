@@ -1,0 +1,43 @@
+\section{core/ — 核心基础设施}
+
+\subsection{目录总体作用}
+
+定义工作流统一消息协议、LangGraph 全局状态（含 reducer）、自定义异常体系，
+以及 CLI/Web 共用的应用编排入口 \texttt{TeXAgentCLI}。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{message.py}]
+    统一通信协议。
+    \begin{itemize}
+        \item \texttt{WorkflowMessage}：标准消息（\texttt{role}、\texttt{source\_type}、\texttt{content}、\texttt{metadata}、\texttt{payload}）
+        \item \texttt{ensure\_message()}、\texttt{normalize\_message\_list()}：输入归一化
+        \item \texttt{NodeOutput}：节点结构化输出（\texttt{result}、\texttt{summary}、\texttt{confidence}、\texttt{status}）
+        \item \texttt{ToolResult}：工具执行结果（\texttt{success}、\texttt{output}、\texttt{error}）
+    \end{itemize}
+
+    \item[\texttt{state.py}]
+    LangGraph 工作流状态定义。
+    \begin{itemize}
+        \item \texttt{WorkflowState(TypedDict)}：\texttt{messages}、\texttt{current\_node}、\texttt{input}、\texttt{output}、\texttt{error}、\texttt{metadata}、\texttt{retrieved\_context}
+        \item Reducer：\texttt{\_last\_wins}、\texttt{\_last\_nonempty}、\texttt{\_first\_error}、\texttt{\_merge\_metadata}
+        \item \texttt{normalize\_node\_output()}：任意输出收敛为 \texttt{NodeOutput} dict
+    \end{itemize}
+
+    \item[\texttt{exceptions.py}]
+    分层异常体系：\texttt{TexAgentError} $\rightarrow$ \texttt{AgentError}、\texttt{ToolError}、
+    \texttt{WorkflowError}、\texttt{MemoryError}、\texttt{RouterError}、\texttt{SecurityError}、\texttt{ConfigError}。
+
+    \item[\texttt{agent\_cli.py}]
+    \textbf{应用编排核心类} \texttt{TeXAgentCLI}。
+    \begin{itemize}
+        \item \texttt{run\_task()}：执行默认/指定 YAML 工作流
+        \item \texttt{run\_plan\_task()}：Plan 模式（MAS 规划 $\rightarrow$ 动态构图 $\rightarrow$ 执行）
+        \item \texttt{run\_auto\_task()}：Auto 单轮直连模式
+        \item \texttt{\_build\_app\_for\_workflow()}：通过 \texttt{build\_app\_from\_workflow} 构建 LangGraph app
+        \item \texttt{\_execute\_with\_app()}：统一执行器（装配状态、invoke/stream、回写上下文）
+        \item \texttt{switch\_branch()} / \texttt{create\_branch()} / \texttt{merge\_branch()}：分支管理
+        \item \texttt{get\_branch\_chat\_history\_for\_api()} / \texttt{get\_branch\_tree\_for\_api()}：Web API 数据
+    \end{itemize}
+\end{description}

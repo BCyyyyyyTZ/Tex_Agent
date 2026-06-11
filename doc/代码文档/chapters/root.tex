@@ -1,0 +1,86 @@
+\section{根目录文件}
+
+根目录存放项目入口脚本、依赖清单、环境模板及少量开发辅助脚本。
+
+\subsection{核心入口与配置}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{main.py}]
+    CLI 主入口。解析 \texttt{task}/\texttt{plan}/裸输入，创建 \texttt{TeXAgentCLI} 并进入 REPL 循环。
+    关键函数：\texttt{parse\_task\_args()}（解析 \texttt{-wf} 工作流参数）、\texttt{main()}。
+
+    \item[\texttt{start\_all.bat}]
+    Windows 一键启动脚本：清理 \texttt{8765}/\texttt{8772} 端口旧进程后，分别在独立控制台窗口启动
+    Chat Mode（\texttt{python -m ui.web.server}，\texttt{http://127.0.0.1:8765/}）与
+    Writing Mode（\texttt{python -m ui.overleaf.server}，\texttt{http://127.0.0.1:8772/}）。
+    关闭对应控制台窗口即可停止服务。详见 \texttt{README.md}。
+
+    \item[\texttt{overleaf.py}]
+    Overleaf 风格 LaTeX 编辑器快捷启动脚本，委托 \texttt{ui.overleaf.server.main()}。
+    支持 \texttt{--host}/\texttt{--port} 环境变量注入。
+
+    \item[\texttt{overleaf.bat}]
+    Windows 批处理包装，用于一键启动 Overleaf 服务。
+
+    \item[\texttt{check.py}]
+    无 UI 批量执行多模态 checklist 审查（\texttt{checklist\_multi\_v1/v2/v3}）。
+    读取 \texttt{config/run\_config.json}，约定目录 \texttt{files/input}、\texttt{files/checklist}、
+    \texttt{files/output}、\texttt{files/checked}。
+
+    \item[\texttt{check\_text.py}]
+    无 UI 批量执行文本类 checklist 审查（默认 \texttt{checklist\_text\_v3}）。
+    接受结构化 JSON 路径输入，\texttt{preflight} 节点不调用 LLM。
+
+    \item[\texttt{requirements.txt}]
+    Python 依赖清单。
+
+    \item[\texttt{.env.example}]
+    环境变量模板（API Key、模型名、RAG 路径、Web 端口等）。实际配置复制为 \texttt{.env}（已 gitignore）。
+
+    \item[\texttt{pytest.ini}]
+    pytest 配置（标记、路径等）。
+
+    \item[\texttt{thesis-checklists.md}]
+    学位论文审查清单样例，供 checklist 工作流引用。
+
+    \item[\texttt{README.md}]
+    项目说明、快速开始、工作流使用指南。
+
+    \item[\texttt{Framework.md}]
+    系统框架设计说明文档。
+\end{description}
+
+\subsection{开发辅助脚本（以下划线开头）}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_fix\_encoding.py}]
+    编码修复一次性脚本。
+
+    \item[\texttt{\_fix\_workflow\_paths.py}]
+    批量修正工作流 JSON 中路径引用。
+
+    \item[\texttt{\_run\_all\_tests.py}]
+    聚合运行测试套件。
+
+    \item[\texttt{\_run\_checklist\_test.py}]
+    checklist 工作流手动测试脚本。
+
+    \item[\texttt{\_run\_docling\_user\_test.py}]
+    Docling 解析用户测试脚本。
+
+    \item[\texttt{\_run\_eeg\_test.py}]
+    EEG 相关 PDF 测试脚本。
+
+    \item[\texttt{\_verify\_v2.py}]
+    v2 工作流验证脚本。
+\end{description}
+
+\subsection{其他根目录文件}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{.gitignore}]
+    Git 忽略规则（含 \texttt{.env}、\texttt{storage/}、\texttt{doc/code\_note/} 等）。
+
+    \item[\texttt{paper.aux}, \texttt{paper.fls}, \texttt{paper.fdb\_latexmk}]
+    LaTeX 编译辅助产物（本地测试用）。
+\end{description}

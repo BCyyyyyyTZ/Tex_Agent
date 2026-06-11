@@ -1,0 +1,111 @@
+% TeX_Agent 代码文档
+% 编译建议：xelatex main.tex（需 ctex 宏包）
+\documentclass[12pt,a4paper]{ctexart}
+
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{seqsplit}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!8}
+}
+
+\newcommand{\toolfile}[1]{{\ttfamily\seqsplit{#1}}}
+
+\title{Tex\_Agent 软件 SBOM 与代码说明文档}
+\author{团队成员：毛伟翔、于天泽、乔雨霖、唐俊涛}
+\date{\today}
+
+\begin{document}
+\maketitle
+\begingroup
+\hypersetup{linkcolor=black}
+\tableofcontents
+\endgroup
+\newpage
+
+\input{chapters/structure_diagram}
+\input{chapters/sbom}
+
+\section{项目概述}
+
+TeX\_Agent 是基于 \textbf{LangGraph + 多智能体（MAS）} 架构的学术论文写作智能辅助系统。
+系统覆盖文献检索、LaTeX 结构诊断与修复、论文写作和润色、论文合规审查（checklist）、RAG 知识检索、多分支对话上下文管理、工作流可视化编排等功能。
+
+\subsection{架构总览}
+
+\begin{itemize}[leftmargin=2em]
+    \item \textbf{入口层}：\texttt{start\_all.bat}（Windows 一键启动双 Web 服务）、\texttt{main.py}（CLI REPL）；\newline
+          \texttt{ui/web/server.py}（Chat Mode）、\texttt{ui/overleaf/server.py}（Writing Mode）；\newline
+          \texttt{check.py}、\texttt{check\_text.py}（批量审查脚本）
+    \item \textbf{编排层}：\texttt{core/agent\_cli.py} 的 \texttt{TeXAgentCLI} 串联记忆、分支、工作流
+    \item \textbf{工作流引擎}：\texttt{workflow/} 将 JSON/TaskPlan 编译为 LangGraph 图并执行节点
+    \item \textbf{智能体层}：\texttt{agents/} 提供 \texttt{SimpleAgent}、\texttt{MultiSimpleAgent} 等
+    \item \textbf{工具层}：\texttt{tools/} 可插拔工具（arXiv、PDF 解析、LaTeX 诊断、RAG 检索等）
+    \item \textbf{LaTeX 子系统}：\texttt{latex/} 项目索引、诊断修复、润色建议、LaTeX 写作、文件监视与幽灵窗口
+    \item \textbf{支撑模块}：\texttt{config/}、\texttt{context/}、\texttt{memory/}、\texttt{rag/}、\texttt{router/}
+\end{itemize}
+
+\subsection{快速启动}
+
+环境配置完成后，Windows 下可\textbf{双击根目录 \texttt{start\_all.bat}} 一键启动两个 Web 服务
+（与 \texttt{README.md} 快速启动说明一致）：
+
+\begin{longtable}{@{}p{0.16\textwidth}p{0.30\textwidth}p{0.46\textwidth}@{}}
+\toprule
+\textbf{服务} & \textbf{地址} & \textbf{说明} \\
+\midrule
+\endhead
+Chat Mode & \texttt{http://127.0.0.1:8765/} & Web UI：工作流编排、论文审查、RAG 等 \\
+Writing Mode & \texttt{http://127.0.0.1:8772/} & Overleaf 风格在线 LaTeX 编辑器 \\
+\bottomrule
+\end{longtable}
+
+\noindent 脚本会先清理 8765/8772 端口上的旧进程，再分别在独立控制台窗口启动
+\texttt{python -m ui.web.server} 与 \texttt{python -m ui.overleaf.server}。
+亦可手动分别执行上述命令；Linux/macOS 可参考 \texttt{scripts/start-texagent-web.sh} 启动 Chat Mode。
+
+\subsection{文档范围说明}
+
+本文档基于仓库源码写作（\url{https://github.com/BCyyyyyyTZ/Tex_Agent.git}），\textbf{排除}以下内容：
+\begin{itemize}[leftmargin=2em]
+    \item \texttt{.gitignore} 中忽略的路径（如 \texttt{.env}、\texttt{storage/}、\texttt{knowledge\_base/}、\texttt{output/}、\texttt{memory\_store/}、\texttt{logs/} 等）。
+    \item \texttt{doc/} 目录及其下所有文件（部分在 prompt 溯源中提及）。
+    \item \texttt{test}、\texttt{tests} 及其下测试文件，测试部分另有测试文档进行详细说明。
+\end{itemize}
+
+\input{chapters/root}
+\input{chapters/agents}
+\input{chapters/core}
+\input{chapters/config}
+\input{chapters/context}
+\input{chapters/workflow}
+\input{chapters/router}
+\input{chapters/tools}
+\input{chapters/latex}
+\input{chapters/rag}
+\input{chapters/memory}
+\input{chapters/ui}
+\input{chapters/cli}
+\input{chapters/utils}
+\input{chapters/scripts}
+
+\end{document}

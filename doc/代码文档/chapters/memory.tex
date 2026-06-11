@@ -1,0 +1,37 @@
+\section{memory/ — 记忆系统}
+
+\subsection{目录总体作用}
+
+Agent 记忆系统与用户画像持久化：支持共享/私有、可选分支、JSONL 落盘。
+\texttt{UserPersonaMemory} 供入口节点工具与工作流 prompt 注入用户偏好。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{base\_memory.py}]
+    记忆抽象基类 \texttt{BaseMemory}。
+    \texttt{MemoryType} 枚举；\texttt{save()}、\texttt{load()}、\texttt{search()}、\texttt{clear()}、\texttt{get\_size()}。
+
+    \item[\texttt{simple\_memory.py}]
+    基础内存实现 \texttt{SimpleMemory}，含混合检索评分。
+    \texttt{\_score\_query\_doc()}（关键词/Jaccard/新近性）、\texttt{\_tokenize()}。
+
+    \item[\texttt{branch\_memory.py}]
+    分支记忆 + JSONL 持久化。
+    \texttt{BranchMixin}：\texttt{create\_branch()}、\texttt{switch\_branch()}、\texttt{merge\_to\_main()}。
+    \texttt{BranchMemory}：结合分支与简单记忆的完整实现。
+
+    \item[\texttt{factory.py}]
+    记忆工厂 \texttt{MemoryFactory}。
+    \texttt{create\_memory()}、\texttt{create\_shared\_memory()}、\texttt{create\_private\_memory()}、
+    \texttt{create\_hybrid\_memory()}。
+
+    \item[\texttt{persona\_memory.py}]
+    线程安全用户画像 JSON 存储 \texttt{UserPersonaMemory}。
+    \texttt{apply\_persona\_memory\_update()}、\texttt{format\_for\_prompt()}、
+    \texttt{get\_shared\_user\_persona\_memory()}。
+
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{BaseMemory}、\texttt{SimpleMemory}、\texttt{BranchMemory}、
+    \texttt{MemoryFactory}、\texttt{UserPersonaMemory}。
+\end{description}

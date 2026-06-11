@@ -1,0 +1,51 @@
+\section{utils/ — 通用工具}
+
+\subsection{目录总体作用}
+
+跨模块通用工具：日志、异步、终端输出、回复格式化、协作取消、
+Web 下载令牌、PDF 章节提取、Unicode 规范化等。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{get\_logger}、\texttt{run\_async}、\texttt{gather\_with\_timeout}、\texttt{run\_with\_semaphore}。
+
+    \item[\texttt{logger.py}]
+    统一日志（首次调用初始化 \texttt{config/logging\_config}）：\texttt{get\_logger(name)}。
+
+    \item[\texttt{concurrency.py}]
+    同步上下文跑协程、并发控制。
+    \texttt{run\_async()}、\texttt{gather\_with\_timeout()}、\texttt{run\_with\_semaphore()}。
+
+    \item[\texttt{display.py}]
+    CLI 输出格式化（含 Windows emoji 降级）。
+    \texttt{safe\_print()}、\texttt{DisplayFormatter}（\texttt{banner}、\texttt{separator}、\texttt{print\_result}）。
+
+    \item[\texttt{loading\_spinner.py}]
+    终端加载动画：\texttt{LoadingSpinner}、\texttt{with\_loading()}、\texttt{run\_with\_loading()}。
+
+    \item[\texttt{run\_cancel.py}]
+    Ctrl+C 协作式取消（Web 流式 + arXiv 等长阻塞）。
+    \texttt{request\_run\_cancel()}、\texttt{is\_run\_cancelled()}、\texttt{interruptible\_sleep()}、
+    \texttt{install\_sigint\_handler()}。
+
+    \item[\texttt{reply\_format.py}]
+    Web 回复 Markdown 整理（去 cite 垃圾、合并碎段）。
+    \texttt{strip\_citation\_artifacts()}、\texttt{normalize\_reply\_display()}、\texttt{format\_reply\_for\_ui()}。
+
+    \item[\texttt{web\_artifact\_registry.py}]
+    一次性下载 token（\texttt{/api/download/artifact?token=}）。
+    \texttt{register\_file()}、\texttt{get\_file\_path()}。
+
+    \item[\texttt{thesis\_pdf\_extract.py}]
+    基于 PDF 书签的学位论文按章提取 $\rightarrow$ Markdown + Docling JSON。
+    \texttt{run\_thesis\_pdf\_extract()}、\texttt{select\_nodes\_by\_chapters()}、\texttt{build\_outline\_tree()}。
+
+    \item[\texttt{text\_normalize.py}]
+    Unicode NFKC + 康熙部首补丁（Docling/OCR 乱码修复）。
+    \texttt{normalize()}、\texttt{normalize\_for\_search()}。
+
+    \item[\texttt{utils.py}]
+    嵌套 dict 赋值：\texttt{set\_nested\_value(d, keys, value)}。
+\end{description}

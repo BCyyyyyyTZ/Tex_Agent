@@ -1,0 +1,41 @@
+\section{router/ — 任务规划与路由}
+
+\subsection{目录总体作用}
+
+Plan 模式下将用户任务分解为多 Agent 执行计划，并转为可编译的工作流图；
+同时预留自适应路由接口供未来扩展。
+
+\subsection{文件说明}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    导出 \texttt{BaseRouter}、\texttt{RouteDecision}、\texttt{MASPlanner}、\texttt{TaskPlan}。
+
+    \item[\texttt{base\_router.py}]
+    自适应路由接口（\textbf{预留/未完整实现}）。
+    \begin{itemize}
+        \item \texttt{RouteDecision}：路由决策 dataclass
+        \item \texttt{BaseRouter(ABC)}：\texttt{route()}、\texttt{evaluate\_complexity()}、\texttt{register\_agent()}
+    \end{itemize}
+
+    \item[\texttt{planner.py}]
+    多智能体规划器核心。
+    \begin{itemize}
+        \item \texttt{TaskPlan}：执行计划 dataclass（含 \texttt{\_\_edges\_\_}、\texttt{\_\_entry\_\_} 特殊键）
+        \item \texttt{MASPlanner(ABC)}：规划器抽象基类
+        \item \texttt{AutoAgentsMASPlanner}：具体实现
+        \begin{itemize}
+            \item \texttt{decompose(task)}：PlanAgent + Supervisor 多轮迭代生成计划
+            \item \texttt{assign(plan, available\_agents)}：为节点分配 Agent 类型
+            \item \texttt{validate(plan, results)}：验证执行结果
+            \item \texttt{to\_graph\_config(plan)}：TaskPlan $\rightarrow$ (NodeConfig, EdgeConfig)
+            \item 内部：\texttt{\_plan\_agent\_call()}、\texttt{\_supervisor\_call()}、\texttt{\_apply\_supervisor\_revisions()}
+        \end{itemize}
+    \end{itemize}
+\end{description}
+
+\subsection{规划流程}
+
+Round 1：PlanAgent 生成 agents/edges $\rightarrow$
+Round 2$\sim$N：Supervisor 审查修订 $\rightarrow$
+输出 \texttt{TaskPlan}，由 \texttt{workflow/graph\_builder} 编译执行。

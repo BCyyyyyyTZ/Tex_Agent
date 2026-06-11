@@ -1,0 +1,76 @@
+\section{config/ — 配置层}
+
+\subsection{目录总体作用}
+
+集中管理所有可调参数：环境变量、LLM 模型、RAG 路径、上下文 Profile、Planner Schema、
+静态工作流 JSON 注册表、会议日历数据等。
+
+\subsection{Python 模块}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{\_\_init\_\_.py}]
+    导出全局单例 \texttt{settings}。
+
+    \item[\texttt{settings.py}]
+    全局配置 dataclass。\texttt{Settings} 从 \texttt{.env} $>$ 环境变量 $>$ 默认值加载。
+    含 LLM 模型名、API Key、RAG 持久化目录、Web 端口等。
+
+    \item[\texttt{context\_profiles.py}]
+    \textbf{上下文配置唯一数据源}。定义 4 种 Profile（\texttt{LEGACY/PIPELINE/DIALOGUE/AUTO\_SINGLE}）、
+    路由规则、意图识别、交付契约。
+    关键函数：\texttt{build\_context\_config()}、\texttt{resolve\_delivery\_addon()}、\texttt{user\_requests\_long\_form()}。
+
+    \item[\texttt{context\_settings.py}]
+    从 Profile 加载并合并节点覆盖；拼 Prompt、过滤对话。
+    关键：\texttt{NodeContextBehavior}、\texttt{load\_context\_config()}、\texttt{build\_agent\_prompt()}、
+    \texttt{filter\_messages\_for\_memory()}。
+
+    \item[\texttt{planner\_config.py}]
+    Plan 模式 LLM Schema 与 JSON 解析契约。
+    常量：\texttt{PLAN\_OUTPUT\_SCHEMA}、\texttt{SUPERVISOR\_OUTPUT\_SCHEMA}、\texttt{COMPLEXITY\_AGENT\_MAP}。
+    函数：\texttt{parse\_llm\_json()}、\texttt{resolve\_final\_delivery\_addon()}。
+
+    \item[\texttt{agent\_config.py}]
+    三类 Agent 的 system\_prompt 与 temperature：
+    \texttt{DESIGN\_AGENT\_CONFIG}、\texttt{THINK\_AGENT\_CONFIG}、\texttt{EXECUTE\_AGENT\_CONFIG}。
+
+    \item[\texttt{auto\_config.py}]
+    Auto 单轮模式标识：\texttt{AUTO\_WORKFLOW\_LABEL}、\texttt{AUTO\_NODE\_ID}。
+
+    \item[\texttt{logging\_config.py}]
+    日志 dictConfig：\texttt{get\_logging\_config()}、\texttt{setup\_logging()}。
+\end{description}
+
+\subsection{JSON 与数据文件}
+
+\begin{description}[leftmargin=4em,style=nextline]
+    \item[\texttt{workflow\_registry.json}]
+    工作流名称 $\rightarrow$ JSON 文件路径映射（\texttt{default}、\texttt{checklist\_*}、\texttt{latex\_*} 等 24 条）。
+
+    \item[\texttt{workflow/*.json}]
+    静态工作流图定义（nodes/edges），共 25 个文件，分类如下：
+    \begin{itemize}
+        \item \textbf{默认与演示}：\texttt{workflow\_default\_dynamic}、\texttt{workflow\_five\_nodes\_example}、
+              \texttt{workflow\_tool\_linear\_demo}、\texttt{workflow\_user\_feedback\_demo}、
+              \texttt{workflow\_parallel\_conditional\_demo}、\texttt{workflow\_plan\_parallel\_example}
+        \item \textbf{挑战/测试}：\texttt{workflow\_challenge\_*}、\texttt{workflow\_docling\_user\_test}、
+              \texttt{workflow\_file\_analysis}、\texttt{workflow\_arxiv\_research\_user}
+        \item \textbf{论文审查（multi）}：\texttt{workflow\_checklist\_multi\_v1$\sim$v4}
+        \item \textbf{论文审查（text）}：\texttt{workflow\_checklist\_text\_v1$\sim$v3}、
+              \texttt{workflow\_checklist\_annotate\_v2/v3}
+        \item \textbf{学位论文}：\texttt{workflow\_thesis\_checklist\_task}、\texttt{workflow\_thesis\_chapter\_extract}
+        \item \textbf{LaTeX 诊断}：\texttt{workflow\_latex\_diagnose\_v0/v1}
+    \end{itemize}
+
+    \item[\texttt{run\_config.json} / \texttt{run\_config.example.json}]
+    批处理运行配置（checklist、PDF 路径），供 \texttt{check.py} 使用。
+
+    \item[\texttt{run\_config\_text.example.json}]
+    文本类审查批处理配置示例，供 \texttt{check\_text.py} 使用。
+
+    \item[\texttt{conferences/deadlines\_2026.json}]
+    学术会议投稿截止日期静态数据，供 Web 顶会日历使用。
+
+    \item[\texttt{context/README.md}]
+    上下文配置说明，指向 \texttt{context\_profiles.py}。
+\end{description}
