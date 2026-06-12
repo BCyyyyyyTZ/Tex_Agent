@@ -1,0 +1,19 @@
+# Fdb version 4
+["pdflatex"] 1781254417.01614 "main.tex" "main.pdf" "main" 1781254417.3026 1
+  "C:/Users/Drago/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map" 1780910007 80909 eab91d9745dd2edfd62a31d53cd5fe15 ""
+  "C:/Users/Drago/AppData/Local/MiKTeX/miktex/data/le/pdftex/pdflatex.fmt" 1780455782 13333486 7a96d654ce48b3b34e2f0f1677916d59 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/fonts/tfm/public/cm/cmbx12.tfm" 1136765053 1324 c910af8c371558dc20f2d7822f66fe64 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/fonts/tfm/public/cm/cmr12.tfm" 1136765053 1288 655e228510b4c2a1abe905c368440826 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/base/article.cls" 1761900684 20144 b966087dda3b194755eb460d32e2ef75 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/base/size10.clo" 1761900684 8448 686612a86f0e04f41ea577f5ec7e83d8 ""
+  "C:/Users/Drago/AppData/Local/Programs/MiKTeX/tex/latex/l3backend/l3backend-pdftex.def" 1761202581 30662 bfd6e864f4ffc5018b0e2b6260c3181c ""
+  "chapters/intro.aux" 1781254417 529 7e5dc448922bed3c426df385d3b1d542 "pdflatex"
+  "chapters/intro.tex" 1781250605 61 f7a1c874d82c0e272f65d4c54337952a ""
+  "main.aux" 1781254417 60 bb80b3c45f0c9cf8c8c366108b35b63d "pdflatex"
+  "main.tex" 1781250605 103 88fde5ebaf4255cfdfd78444b3c3b56f ""
+  (generated)
+  "chapters/intro.aux"
+  "main.aux"
+  "main.log"
+  "main.pdf"
+  (rewritten before read)
